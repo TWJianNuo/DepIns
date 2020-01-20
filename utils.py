@@ -179,6 +179,18 @@ def tensor2disp(tensor, ind, vmax = None, percentile = None):
     slice = (cm(slice) * 255).astype(np.uint8)
     return pil.fromarray(slice[:,:,0:3])
 
+def tensor2disp_flat(tensor, vmax = None, percentile = None):
+    batchSize, channels, height, width = tensor.shape
+    slice = tensor.permute(0,2,3,1).contiguous().view(-1, width, channels).squeeze(2).detach().cpu().numpy()
+    if percentile is None:
+        percentile = 90
+    if vmax is None:
+        vmax = np.percentile(slice, percentile)
+    slice = slice / vmax
+    cm = plt.get_cmap('magma')
+    slice = (cm(slice) * 255).astype(np.uint8)
+    return pil.fromarray(slice[:,:,0:3])
+
 def tensor2semantic(tensor, ind, isGt = False):
     slice = tensor[ind, :, :, :]
     slice = slice[0,:,:].detach().cpu().numpy()

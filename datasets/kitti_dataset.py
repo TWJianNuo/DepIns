@@ -73,12 +73,15 @@ class KITTIRAWDataset(KITTIDataset):
             folder,
             "velodyne_points/data/{:010d}.bin".format(int(frame_index)))
 
-        depth_gt = generate_depth_map(calib_path, velo_filename, self.side_map[side])
-        depth_gt = skimage.transform.resize(
-            depth_gt, self.full_res_shape[::-1], order=0, preserve_range=True, mode='constant')
+        if os.path.isfile(velo_filename):
+            depth_gt = generate_depth_map(calib_path, velo_filename, self.side_map[side])
+            depth_gt = skimage.transform.resize(
+                depth_gt, self.full_res_shape[::-1], order=0, preserve_range=True, mode='constant')
 
-        if do_flip:
-            depth_gt = np.fliplr(depth_gt)
+            if do_flip:
+                depth_gt = np.fliplr(depth_gt)
+        else:
+            depth_gt = np.zeros(self.full_res_shape[::-1])
 
         return depth_gt
 

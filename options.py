@@ -103,6 +103,8 @@ class MonodepthOptions:
                                  action="store_true")
         self.parser.add_argument("--predDepthPath",
                                  type=str)
+        self.parser.add_argument("--doVisualization",
+                                 action="store_true")
 
         # OPTIMIZATION options
         self.parser.add_argument("--batch_size",

@@ -308,6 +308,14 @@ class InsTrainer:
 
                 totLoss = totLoss + maskLoss
                 losses[('maskLoss', f_i)] = maskLoss
+
+                if self.opt.doVisualization:
+                    fig_pred = tensor2flatrgb(sampledColor)
+                    fig_target = tensor2flatrgb(insRgb)
+                    fig_mask = tensor2disp_flat(outputs['insProb'], vmax=1)
+                    fig_combined = np.concatenate([np.array(fig_pred), np.array(fig_target), np.array(fig_mask)], axis=1)
+                    pil.fromarray(fig_combined).save(os.path.join())
+
         totLoss = totLoss / 2
         losses['loss'] = totLoss
         # # Debug
