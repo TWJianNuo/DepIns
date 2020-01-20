@@ -138,7 +138,7 @@ class KITTIRAWDataset(KITTIDataset):
         velo = load_velodyne_points(velo_filename)
         velo = velo[velo[:, 0] >= 0, :]
         np.random.shuffle(velo)
-        velo = velo[0 : 50000, :]
+        velo = velo[0 : 10000, :]
         return velo
 
     def get_camK(self, folder, frame_index, side, do_flip):
