@@ -81,7 +81,7 @@ class KITTIRAWDataset(KITTIDataset):
             if do_flip:
                 depth_gt = np.fliplr(depth_gt)
         else:
-            depth_gt = np.zeros(self.full_res_shape[::-1])
+            depth_gt = np.zeros(self.full_res_shape[::-1]).astype(np.float32)
 
         return depth_gt
 
@@ -144,7 +144,7 @@ class KITTIRAWDataset(KITTIDataset):
             np.random.shuffle(velo)
             velo = velo[0 : 10000, :]
         else:
-            velo = np.zeros([10000, 4])
+            velo = np.zeros([10000, 4]).astype(np.float32)
         return velo
 
     def get_camK(self, folder, frame_index, side, do_flip):

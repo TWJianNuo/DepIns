@@ -314,7 +314,7 @@ class InsTrainer:
                     fig_target = tensor2flatrgb(insRgb)
                     fig_mask = tensor2disp_flat(outputs['insProb'], vmax=1)
                     fig_combined = np.concatenate([np.array(fig_pred), np.array(fig_target), np.array(fig_mask)], axis=1)
-                    pil.fromarray(fig_combined).save(os.path.join())
+                    pil.fromarray(fig_combined).save(os.path.join('/media/shengjie/other/Depins/Depins/visualization/trivial_mask_change', str(self.step) + '.png'))
 
         totLoss = totLoss / 2
         losses['loss'] = totLoss
