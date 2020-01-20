@@ -135,10 +135,13 @@ class KITTIRAWDataset(KITTIDataset):
         return rescaleMat
 
     def get_velo(self, velo_filename):
-        velo = load_velodyne_points(velo_filename)
-        velo = velo[velo[:, 0] >= 0, :]
-        np.random.shuffle(velo)
-        velo = velo[0 : 10000, :]
+        if os.path.isfile(velo_filename):
+            velo = load_velodyne_points(velo_filename)
+            velo = velo[velo[:, 0] >= 0, :]
+            np.random.shuffle(velo)
+            velo = velo[0 : 10000, :]
+        else:
+            velo = np.zeros([10000, 4])
         return velo
 
     def get_camK(self, folder, frame_index, side, do_flip):
