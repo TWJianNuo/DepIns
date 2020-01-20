@@ -8,8 +8,15 @@ from __future__ import absolute_import, division, print_function
 import os
 import hashlib
 import zipfile
+import numpy as np
+import PIL.Image as pil
+import matplotlib.pyplot as plt
 from six.moves import urllib
-
+import matplotlib.patches as patches
+import torch
+import torch.nn.functional as F
+from kitti_utils import name2label, trainId2label
+from collections import Counter
 
 def readlines(filename):
     """Read all the lines in a text file and return as a list
@@ -112,3 +119,173 @@ def download_model_if_doesnt_exist(model_name):
             f.extractall(model_path)
 
         print("   Model unzipped to {}".format(model_path))
+
+
+# ------ Added -------- #
+
+# Visualization Related:
+def set_axes_equal(ax):
+    x_limits = ax.get_xlim3d()
+    y_limits = ax.get_ylim3d()
+    z_limits = ax.get_zlim3d()
+
+    x_range = abs(x_limits[1] - x_limits[0])
+    x_middle = np.mean(x_limits)
+    y_range = abs(y_limits[1] - y_limits[0])
+    y_middle = np.mean(y_limits)
+    z_range = abs(z_limits[1] - z_limits[0])
+    z_middle = np.mean(z_limits)
+
+    # The plot bounding box is a sphere in the sense of the infinity
+    # norm, hence I call half the max range the plot radius.
+    plot_radius = 0.5*max([x_range, y_range, z_range])
+
+    ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
+    ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
+    ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
+
+def visualize_semantic(img_inds):
+    # please input numpy array
+    size = [img_inds.shape[1], img_inds.shape[0]]
+    background = name2label['unlabeled'].color
+    labelImg = np.array(pil.new("RGB", size, background))
+    for id in trainId2label.keys():
+        if id >= 0:
+            label = trainId2label[id].name
+        else:
+            label = 'unlabeled'
+        color = name2label[label].color
+        mask = img_inds == id
+        labelImg[mask, :] = color
+    return pil.fromarray(labelImg)
+
+def tensor2rgb(tensor, ind):
+    slice = (tensor[ind, :, :, :].permute(1,2,0).detach().contiguous().cpu().numpy() * 255).astype(np.uint8)
+    return pil.fromarray(slice)
+
+def tensor2flatrgb(tensor):
+    batchSize, channels, height, width = tensor.shape
+    slice = (tensor.permute(0,2,3,1).contiguous().view(-1, width, channels).detach().contiguous().cpu().numpy() * 255).astype(np.uint8)
+    return pil.fromarray(slice)
+
+def tensor2disp(tensor, ind, vmax = None, percentile = None):
+    slice = tensor[ind, 0, :, :].detach().cpu().numpy()
+    if percentile is None:
+        percentile = 90
+    if vmax is None:
+        vmax = np.percentile(slice, percentile)
+    slice = slice / vmax
+    cm = plt.get_cmap('magma')
+    slice = (cm(slice) * 255).astype(np.uint8)
+    return pil.fromarray(slice[:,:,0:3])
+
+def tensor2semantic(tensor, ind, isGt = False):
+    slice = tensor[ind, :, :, :]
+    slice = slice[0,:,:].detach().cpu().numpy()
+    # visualize_semantic(slice).show()
+    return visualize_semantic(slice)
+
+def draw_detection(data, detection_res, ind):
+    data_entry = data[ind, :, :, :].unsqueeze(0)
+    detection_res_entry = detection_res[ind, :, :]
+    detection_res_entry = detection_res_entry[detection_res_entry[:, 0] > 0, :]
+
+    fig, ax = plt.subplots(1)
+    # Display the image
+    im = tensor2rgb(data_entry, ind=0)
+    ax.imshow(im)
+
+    for k in range(len(detection_res_entry)):
+        # Read Label
+        sx = detection_res_entry[k][0]
+        sy = detection_res_entry[k][1]
+        rw = detection_res_entry[k][2] - sx
+        rh = detection_res_entry[k][3] - sy
+
+        # Create a Rectangle patch
+        rect = patches.Rectangle((sx, sy), rw, rh, linewidth=1, edgecolor='r', facecolor='none')
+
+        # Add the patch to the Axes
+        ax.add_patch(rect)
+
+def sampleImgs(imgs, pts2d, mode = 'bilinear'):
+    batchSize, channels, height, width = imgs.shape
+    if len(pts2d.shape) == 3:
+        _, _, nums = pts2d.shape
+        pts2dNormed = (pts2d / torch.Tensor([width - 1, height - 1]).cuda().unsqueeze(0).unsqueeze(2).expand(batchSize, -1, nums) - 0.5) * 2
+        pts2dNormed = pts2dNormed.permute(0,2,1).unsqueeze(2)
+        sampledColor = F.grid_sample(imgs, pts2dNormed, mode = mode, padding_mode='border')
+        sampledColor = sampledColor.squeeze(3)
+        return sampledColor
+    else:
+        _, _, heights, widths = pts2d.shape
+        pts2dNormed = (pts2d / torch.Tensor([width - 1, height - 1]).cuda().unsqueeze(0).unsqueeze(2).unsqueeze(3).expand(batchSize, -1, heights, widths) - 0.5) * 2
+        pts2dNormed = pts2dNormed.permute(0,2,3,1)
+        sampledColor = F.grid_sample(imgs, pts2dNormed, mode = mode, padding_mode='border')
+        return sampledColor
+
+
+# Projection Function Related:
+def project_3dptsTo2dpts(pts3d, camKs, imgHeight = 320, imgWidth = 1024):
+    format_indicator = 0
+    if len(pts3d.shape) == 4:
+        batchSize, channels, height, width = pts3d.shape
+        pts3dT = pts3d.view(batchSize, channels, -1)
+        format_indicator = 1
+    else:
+        pts3dT = pts3d.permute(0, 2, 1)
+    projected3d = torch.matmul(camKs, pts3dT)
+    projecDepth = projected3d[:, 2, :].unsqueeze(1)
+    projected2d = torch.stack(
+        [projected3d[:, 0, :] / projected3d[:, 2, :], projected3d[:, 1, :] / projected3d[:, 2, :]], dim=1)
+    selector = (projected2d[:, 0, :] > 0) * (projected2d[:, 0, :] < imgWidth - 1) * (projected2d[:, 1, :] > 0) * (
+                projected2d[:, 1, :] < imgHeight - 1) * (projecDepth[:, 0, :] > 0)
+    selector = selector.unsqueeze(1)
+
+
+    if format_indicator == 1:
+        projected2d = projected2d.view(batchSize, 2, height, width)
+        projecDepth = projecDepth.view(batchSize, 1, height, width)
+    return projected2d, projecDepth, selector
+
+def sub2ind(matrixSize, rowSub, colSub):
+    """Convert row, col matrix subscripts to linear indices
+    """
+    m, n = matrixSize
+    return rowSub * (n-1) + colSub - 1
+
+def filter_duplicated_depth(imgSize, xx, yy, dpethvals):
+    xx = np.round(xx)
+    yy = np.round(yy)
+    inds = sub2ind(imgSize, yy, xx)
+    dupe_inds = [item for item, count in Counter(inds).items() if count > 1]
+    selector = np.ones([xx.shape[0]]) > 0
+    for dd in dupe_inds:
+        pts = np.where(inds == dd)[0]
+        selector[pts] = 0
+        max_local_ind = np.argmax(dpethvals[pts])
+        selector[pts[max_local_ind]] = 1
+    return selector
+
+def backProjTo3d(pixelLocs, depths, invcamK):
+    batchSize, channels, height, width = depths.shape
+    tmpcx = pixelLocs[:,0,:,:] * depths[:, 0, :, :]
+    tmpcy = pixelLocs[:,1,:,:] * depths[:, 0, :, :]
+    tmpcd = depths[:, 0, :, :]
+    tmpc1 = torch.ones([batchSize, height, width], device=torch.device('cuda'), dtype=torch.float32)
+    tmpPts3d = torch.stack([tmpcx, tmpcy, tmpcd, tmpc1], dim=1)
+    tmpPts3d = tmpPts3d.view(batchSize, 4, -1)
+    pts3d = torch.matmul(invcamK, tmpPts3d)
+    pts3d = pts3d.view(batchSize, 4, height, width)
+    return pts3d
+
+# Other
+def latlonToMercator(lat, lon, scale):
+    er = 6378137
+    mx = scale * lon * np.pi * er / 180
+    my = scale * er * np.log(np.tan((90 + lat) * np.pi / 360))
+    return mx, my
+
+def latToScale(lat):
+    scale = np.cos(lat * np.pi / 180.0)
+    return scale

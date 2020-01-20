@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from utils import *
+
 
 def disp_to_depth(disp, min_depth, max_depth):
     """Convert network's sigmoid output into depth prediction
@@ -267,3 +269,177 @@ def compute_depth_errors(gt, pred):
     sq_rel = torch.mean((gt - pred) ** 2 / gt)
 
     return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3
+
+class Pooler(nn.Module):
+    # This is an irregular roi align framework
+    def __init__(self, batch_size, shrinkScale, imageHeight, maxLoad = 100, featureSize = 14):
+        super(Pooler, self).__init__()
+        self.batch_size = batch_size
+        self.maxLoad = maxLoad
+        self.featureSize = featureSize
+        self.shrinkScale = shrinkScale
+        self.imageHeight = imageHeight
+        self.indicator = torch.from_numpy(np.array(range(0, self.batch_size))).unsqueeze(1).repeat([1, self.maxLoad]).view(-1).cuda()
+        xx, yy = np.meshgrid(range(self.featureSize), range(self.featureSize), indexing='xy')
+        self.xx = torch.from_numpy(xx).cuda().float()
+        self.yy = torch.from_numpy(yy).cuda().float()
+
+    def translateROIToGrid(self, rois, dscale):
+        # To make it 14 by 14 size
+        # Input Res Layer 3 features, 16x times downsampled
+
+        # Select out valid proposals
+        rois_flatten = rois.view(-1, 4)
+        valSel = rois_flatten[:, 0] > 0
+        valBInd = self.indicator[valSel]
+        valRois = rois_flatten[valSel]
+
+        # Initialize
+        valNum = len(valBInd)
+        gridxx = self.xx.unsqueeze(0).repeat(valNum, 1, 1)
+        gridyy = self.yy.unsqueeze(0).repeat(valNum, 1, 1)
+
+        # Add scale and bias
+        # For x
+        biasx = valRois[:, 0]
+        scalex = valRois[:, 2] - valRois[:, 0]
+        gridxx_e = self.scale_bias(gridxx, biasx, scalex, dscale)
+        # For y
+        biasy = valRois[:, 1] + valBInd.float() * float(self.imageHeight)
+        scaley = valRois[:, 3] - valRois[:, 1]
+        gridyy_e = self.scale_bias(gridyy, biasy, scaley, dscale)
+
+        return gridxx_e, gridyy_e, valRois, valBInd
+
+    def translateROIToGridFlat(self, rois, dscale):
+        # To make it 14 by 14 size
+        # Input Res Layer 3 features, 16x times downsampled
+
+        # Select out valid proposals
+        rois_flatten = rois.view(-1, 4)
+        valSel = rois_flatten[:, 0] > 0
+        valBInd = self.indicator[valSel]
+        valRois = rois_flatten[valSel]
+
+        # Initialize
+        valNum = len(valBInd)
+        gridxx = self.xx.unsqueeze(0).repeat(valNum, 1, 1)
+        gridyy = self.yy.unsqueeze(0).repeat(valNum, 1, 1)
+
+        # Add scale and bias
+        # For x
+        biasx = valRois[:, 0]
+        scalex = valRois[:, 2] - valRois[:, 0]
+        gridxx_e = self.scale_bias(gridxx, biasx, scalex, dscale)
+        # For y
+        biasy = valRois[:, 1]
+        scaley = valRois[:, 3] - valRois[:, 1]
+        gridyy_e = self.scale_bias(gridyy, biasy, scaley, dscale)
+
+        return gridxx_e, gridyy_e, valRois, valBInd
+
+    def scale_bias(self, gridcoord, bias, scale, dscale):
+        tot_num = len(bias)
+        bias_e = bias.unsqueeze(1).expand(-1, self.featureSize * self.featureSize).view(tot_num, self.featureSize, self.featureSize)
+        scale_e = scale.unsqueeze(1).expand(-1, self.featureSize * self.featureSize).view(tot_num, self.featureSize, self.featureSize)
+        gridcoord_e = gridcoord / float(self.featureSize - 1) * scale_e + bias_e
+
+        gridcoord_e = gridcoord_e / float(dscale)
+        return gridcoord_e
+
+    def bilinearSample(self, sfeature, gridx, gridy):
+        batch_size, channels, height, width = sfeature.shape
+
+        gridxs = (gridx / (width - 1) - 0.5) * 2
+        gridys = (gridy / (height - 1) - 0.5) * 2
+        gridxs = gridxs.view(-1, self.featureSize)
+        gridys = gridys.view(-1, self.featureSize)
+        gridcoords = torch.stack([gridxs, gridys], dim=2).unsqueeze(0)
+        sampledFeatures = F.grid_sample(sfeature, gridcoords, mode='bilinear', padding_mode='border')
+        # tensor2rgb(sampledFeatures, ind=0).show()
+        return sampledFeatures
+
+    def get_grids(self, rois):
+        dscale = self.shrinkScale
+        gridxx_e, gridyy_e, valRois, valBInd = self.translateROIToGridFlat(rois, dscale)
+        # gridxx_e = gridxx_e.unsqueeze(1)
+        # gridyy_e = gridyy_e.unsqueeze(1)
+        return gridxx_e, gridyy_e, valRois, valBInd
+
+    def forward(self, features, rois, isflapped = True):
+        dscale = self.shrinkScale
+        gridxx_e, gridyy_e, valRois, valBInd = self.translateROIToGrid(rois, dscale)
+
+        # --For debug--
+        # features = F.interpolate(features, size = [int(features.shape[2] / dscale), int(features.shape[3] / dscale)], mode = 'bilinear', align_corners = True)
+        # -- End --
+
+        batch_size, channels, height, width = features.shape
+        features_flat = features.permute([1,0,2,3])
+        features_flat = features_flat.contiguous().view(channels, batch_size * height, width).unsqueeze(0)
+        sampledFeatures = self.bilinearSample(features_flat, gridxx_e, gridyy_e)
+        if isflapped:
+            sampledFeatures = sampledFeatures.view([1, channels, len(valBInd), self.featureSize, self.featureSize]).squeeze(0).permute(1,0,2,3)
+
+        # --Debug visualization--
+        # figrgb = tensor2rgb(features_flat, ind = 0)
+        # figplt, ax = plt.subplots(1)
+        # ax.imshow(figrgb)
+        # gridxx_e_flat = gridxx_e.view(len(valBInd), -1).cpu().numpy()
+        # gridyy_e_flat = gridyy_e.view(len(valBInd), -1).cpu().numpy()
+        # for k in range(len(valBInd)):
+        #     plt.scatter(gridxx_e_flat, gridyy_e_flat, s = 0.1, c = 'c')
+        # figplt.show()
+        # -- End --
+
+        return sampledFeatures, valBInd
+
+
+
+# From Project: https://github.com/facebookresearch/maskrcnn-benchmark
+# THe following operation is to handle special case when no objects is proposed
+class _NewEmptyTensorOp(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, new_shape):
+        ctx.shape = x.shape
+        return x.new_empty(new_shape)
+
+    @staticmethod
+    def backward(ctx, grad):
+        shape = ctx.shape
+        return _NewEmptyTensorOp.apply(grad, shape), None
+
+class ConvTranspose2d(torch.nn.ConvTranspose2d):
+    def forward(self, x):
+        if x.numel() > 0:
+            return super(ConvTranspose2d, self).forward(x)
+        # get output shape
+
+        output_shape = [
+            (i - 1) * d - 2 * p + (di * (k - 1) + 1) + op
+            for i, p, di, k, d, op in zip(
+                x.shape[-2:],
+                self.padding,
+                self.dilation,
+                self.kernel_size,
+                self.stride,
+                self.output_padding,
+            )
+        ]
+        output_shape = [x.shape[0], self.bias.shape[0]] + output_shape
+        return _NewEmptyTensorOp.apply(x, output_shape)
+
+class Conv2d(torch.nn.Conv2d):
+    def forward(self, x):
+        if x.numel() > 0:
+            return super(Conv2d, self).forward(x)
+        # get output shape
+
+        output_shape = [
+            (i + 2 * p - (di * (k - 1) + 1)) // d + 1
+            for i, p, di, k, d in zip(
+                x.shape[-2:], self.padding, self.dilation, self.kernel_size, self.stride
+            )
+        ]
+        output_shape = [x.shape[0], self.weight.shape[0]] + output_shape
+        return _NewEmptyTensorOp.apply(x, output_shape)

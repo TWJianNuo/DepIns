@@ -8,6 +8,8 @@ from __future__ import absolute_import, division, print_function
 
 import os
 import argparse
+import pathlib
+
 
 file_dir = os.path.dirname(__file__)  # the directory that options.py resides in
 
@@ -24,7 +26,7 @@ class MonodepthOptions:
         self.parser.add_argument("--log_dir",
                                  type=str,
                                  help="log directory",
-                                 default=os.path.join(os.path.expanduser("~"), "tmp"))
+                                 default=os.path.join(str(pathlib.Path().absolute()), "tmp"))
 
         # TRAINING options
         self.parser.add_argument("--model_name",
@@ -34,7 +36,6 @@ class MonodepthOptions:
         self.parser.add_argument("--split",
                                  type=str,
                                  help="which training split to use",
-                                 choices=["eigen_zhou", "eigen_full", "odom", "benchmark"],
                                  default="eigen_zhou")
         self.parser.add_argument("--num_layers",
                                  type=int,
@@ -82,6 +83,26 @@ class MonodepthOptions:
                                  type=int,
                                  help="frames to load",
                                  default=[0, -1, 1])
+
+        self.parser.add_argument("--predins",
+                                 help="if set, predict instance",
+                                 action="store_true")
+        self.parser.add_argument("--detect_path",
+                                 type=str,
+                                 help="path of detection labels",
+                                 default="")
+        self.parser.add_argument("--noshuffle",
+                                 action="store_true")
+        self.parser.add_argument("--loadSeman",
+                                 action="store_true")
+        self.parser.add_argument("--noAug",
+                                 action="store_true")
+        self.parser.add_argument("--loadPose",
+                                 action="store_true")
+        self.parser.add_argument("--loadPredDepth",
+                                 action="store_true")
+        self.parser.add_argument("--predDepthPath",
+                                 type=str)
 
         # OPTIMIZATION options
         self.parser.add_argument("--batch_size",

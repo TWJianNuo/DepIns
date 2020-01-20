@@ -25,6 +25,8 @@ import datasets
 import networks
 from IPython import embed
 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import axes3d, Axes3D #<-- Note the capitalization!
 
 class Trainer:
     def __init__(self, options):
@@ -57,7 +59,7 @@ class Trainer:
         self.parameters_to_train += list(self.models["encoder"].parameters())
 
         self.models["depth"] = networks.DepthDecoder(
-            self.models["encoder"].num_ch_enc, self.opt.scales)
+            self.models["encoder"].num_ch_enc, self.opt.scales, predins = self.opt.predins)
         self.models["depth"].to(self.device)
         self.parameters_to_train += list(self.models["depth"].parameters())
 
@@ -126,15 +128,16 @@ class Trainer:
 
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
+            self.opt.frame_ids, 4, is_train=True and not self.opt.noAug, img_ext=img_ext,
+            load_detect=self.opt.predins, detect_path=self.opt.detect_path, load_seman = self.opt.loadSeman)
         self.train_loader = DataLoader(
-            train_dataset, self.opt.batch_size, True,
+            train_dataset, self.opt.batch_size,  shuffle = not self.opt.noshuffle,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         val_dataset = self.dataset(
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, is_train=False, img_ext=img_ext)
+            self.opt.frame_ids, 4, is_train=False, img_ext=img_ext, load_detect=self.opt.predins, detect_path=self.opt.detect_path, load_seman = self.opt.loadSeman)
         self.val_loader = DataLoader(
-            val_dataset, self.opt.batch_size, True,
+            val_dataset, self.opt.batch_size, shuffle = not self.opt.noshuffle,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_iter = iter(self.val_loader)
 
@@ -165,6 +168,17 @@ class Trainer:
         print("There are {:d} training items and {:d} validation items\n".format(
             len(train_dataset), len(val_dataset)))
 
+        # Additional initialization
+        if self.opt.predins:
+            self.featureSize = 28
+            self.boxLargeRat = 1.2
+
+            self.models['insDecoder'] = networks.DynamicDecoder(resnet= self.models["encoder"], batch_size=self.opt.batch_size, imageHeight = self.opt.height).cuda()
+
+            self.models['movDecoder'] = networks.MovementDecoder(batch_size=self.opt.batch_size, imageHeight=self.opt.height).cuda()
+
+            self.layers = {}
+            self.layers['rgbPooler'] = Pooler(self.opt.batch_size, shrinkScale = 1, imageHeight = self.opt.height, featureSize = self.featureSize)
         self.save_opts()
 
     def set_train(self):
@@ -229,7 +243,8 @@ class Trainer:
         """Pass a minibatch through the network and generate images and losses
         """
         for key, ipt in inputs.items():
-            inputs[key] = ipt.to(self.device)
+            if key not in ['entry_tag']:
+                inputs[key] = ipt.to(self.device)
 
         if self.opt.pose_model_type == "shared":
             # If we are using a shared encoder for both depth and pose (as advocated
@@ -257,7 +272,159 @@ class Trainer:
         self.generate_images_pred(inputs, outputs)
         losses = self.compute_losses(inputs, outputs)
 
+        if self.opt.predins and torch.sum(inputs['detect_label'] > 0) > 0:
+            # Do the instance mask probability prediction
+            extractInd = 3
+            outputs.update(self.models['insDecoder'](features[extractInd], inputs['detect_label']))
+
+            # Sample Depth and Background prob
+            outputs.update(self.sample_depthAndBckprob(inputs, outputs))
+
+            # Predict object-movement
+            for f_i in self.opt.frame_ids[1:]:
+                if f_i != "s":
+                    axisangle, translation = self.models['movDecoder'](outputs[('seq_features', 1)][0][extractInd], inputs['detect_label'], outputs['insFeature'])
+
+                    outputs[("axisangle_obj", 0, f_i)] = axisangle
+                    outputs[("translation_obj", 0, f_i)] = translation
+
+                    # Invert the matrix if the frame id is negative
+                    outputs[("obj_mov", 0, f_i)] = transformation_from_parameters(
+                        axisangle[:, 0], translation[:, 0], invert=(f_i < 0))
+
+            # For debug usage
+            # draw_detection(inputs["color_aug", 0, 0], inputs['detect_label'], ind=0)
+            # self.models['insDecoder'](inputs["color_aug", 0, 0], inputs['detect_label'])
+            self.check_selfMov(inputs, outputs)
+
+            # Compute instance loss
+            # losses.update(self.compute_ins_loss(inputs, outputs))
         return outputs, losses
+
+    def check_selfMov(self, inputs, outputs):
+        cur_ind = 0
+        prev_ind = 1
+        next_ind = 2
+        projected2d, projecDepth, selector = project_3dptsTo2dpts(pts3d = inputs['velo'], camKs = inputs['camK'])
+        sampledColor = sampleImgs(inputs[('color', 0, 0)], projected2d)
+        sampledType = sampleImgs(inputs['semanLabel'].float(), projected2d, mode = 'nearest')
+        movs = outputs[('cam_T_cam', 0, -1)]
+
+        # Mask out moving objects
+        staticMask = sampledType < 10.9 # From semantic label 0 to 10 is staic categrory
+        selector = selector * staticMask
+
+        # Prepare to Draw
+        velo_np = inputs['velo'].cpu().numpy()
+        selector_np = selector.cpu().numpy() > 0
+        sampledColor_np = sampledColor.cpu().numpy()
+
+        # Draw current and prev Frame
+        convertM = torch.inverse(inputs['realEx'][prev_ind, :, :]) @ outputs[('cam_T_cam', 0, -1)][cur_ind, :, :] @ inputs['realEx'][cur_ind, :, :]
+        curInPrev = convertM @ inputs['velo'][cur_ind, :, :].permute([1, 0])
+        curInPrev = curInPrev.permute([1, 0])
+        curInPrev_np = curInPrev.cpu().detach().numpy()
+
+        draw_cur = velo_np[cur_ind, selector_np[cur_ind, 0, :], :]
+        draw_curInPrev = curInPrev_np[selector_np[cur_ind, 0, :], :]
+        sampledColor_curInPrev = sampledColor_np[cur_ind, :, selector_np[cur_ind, 0, :]]
+        draw_prev = velo_np[prev_ind, selector_np[prev_ind, 0, :], :]
+        sampledColor_prev = sampledColor_np[prev_ind, :, selector_np[prev_ind, 0, :]]
+
+        fig = plt.figure()
+        ax = Axes3D(fig)
+        ax.view_init(elev=7., azim=-135)
+        ax.dist = 1.7
+        downsample_rat = 1
+        # ax.scatter(draw_prev[::downsample_rat, 0], draw_prev[::downsample_rat, 1], draw_prev[::downsample_rat, 2], s = 1, c = sampledColor_prev)
+        # ax.scatter(draw_curInPrev[::downsample_rat, 0], draw_curInPrev[::downsample_rat, 1], draw_curInPrev[::downsample_rat, 2], s=1, c=sampledColor_curInPrev)
+        ax.scatter(draw_prev[::downsample_rat, 0], draw_prev[::downsample_rat, 1], draw_prev[::downsample_rat, 2], s = 1, c = 'b')
+        ax.scatter(draw_curInPrev[::downsample_rat, 0], draw_curInPrev[::downsample_rat, 1], draw_curInPrev[::downsample_rat, 2], s=1, c='r')
+        ax.scatter(draw_cur[::downsample_rat, 0], draw_cur[::downsample_rat, 1], draw_cur[::downsample_rat, 2], s=1,
+                   c='g')
+        set_axes_equal(ax)
+        plt.show()
+
+        fig = plt.figure()
+        ax = Axes3D(fig)
+        ax.view_init(elev=7., azim=-135)
+        ax.dist = 1.7
+        downsample_rat = 1
+        # ax.scatter(draw_prev[::downsample_rat, 0], draw_prev[::downsample_rat, 1], draw_prev[::downsample_rat, 2], s = 1, c = sampledColor_prev)
+        # ax.scatter(draw_curInPrev[::downsample_rat, 0], draw_curInPrev[::downsample_rat, 1], draw_curInPrev[::downsample_rat, 2], s=1, c=sampledColor_curInPrev)
+        ax.scatter(draw_prev[::downsample_rat, 0], draw_prev[::downsample_rat, 1], draw_prev[::downsample_rat, 2], s = 1, c = 'b')
+        ax.scatter(draw_cur[::downsample_rat, 0], draw_cur[::downsample_rat, 1], draw_cur[::downsample_rat, 2], s=1, c='r')
+        set_axes_equal(ax)
+        plt.show()
+
+        # Draw in 2d
+        fig = plt.figure()
+        plt.scatter(draw_prev[::downsample_rat, 0], draw_prev[::downsample_rat, 1], s = 0.3, c = 'b')
+        plt.scatter(draw_curInPrev[::downsample_rat, 0], draw_curInPrev[::downsample_rat, 1], s=0.3, c='r')
+        plt.scatter(draw_cur[::downsample_rat, 0], draw_cur[::downsample_rat, 1], s=0.3, c='g')
+
+
+    def compute_ins_loss(self, inputs, outputs):
+        # For debug purpose
+
+        projected2d, projecDepth, selector = project_3dptsTo2dpts(pts3d = inputs['velo'], camKs = inputs['camK'])
+        sampledColor = sampleImgs(inputs[('color', 0, 0)], projected2d)
+
+        # Visualization
+        draw_index = 0
+        velo_np = inputs['velo'].cpu().numpy()
+        selector_np = selector.cpu().numpy() > 0
+        sampledColor_np = sampledColor.cpu().numpy()
+        projected2d_np = projected2d.cpu().numpy()
+        projecDepth_np = projecDepth.cpu().numpy()
+
+
+        drawx = projected2d_np[draw_index, 0, selector_np[draw_index, 0, :]]
+        drawy = projected2d_np[draw_index, 1, selector_np[draw_index, 0, :]]
+        drawDepth = projecDepth_np[draw_index, 0, selector_np[draw_index, 0, :]]
+
+        dup_selector = filter_duplicated_depth([self.opt.height, self.opt.width], drawx, drawy, drawDepth)
+        cm = plt.get_cmap('plasma')
+        pts2dColor = cm(drawDepth[dup_selector] / 20)
+
+        plt.figure()
+        figrgb = tensor2rgb(inputs[('color', 0, 0)], ind = draw_index)
+        plt.imshow(np.array(figrgb))
+        plt.scatter(drawx[dup_selector], drawy[dup_selector], s = 0.5, c = pts2dColor)
+
+
+        drawPts3d = velo_np[draw_index, selector_np[draw_index, 0, :], :]
+        drawColors = sampledColor_np[draw_index, :, selector_np[draw_index, 0, :]]
+        fig = plt.figure()
+        ax = Axes3D(fig)
+        ax.view_init(elev=6., azim=-153)
+        ax.dist = 1.7
+        downsample_rat = 1
+        ax.scatter(drawPts3d[::downsample_rat, 0], drawPts3d[::downsample_rat, 1], drawPts3d[::downsample_rat, 2], s = 1, c = drawColors)
+        set_axes_equal(ax)
+        plt.show()
+
+
+
+
+
+
+
+    def sample_depthAndBckprob(self, inputs, outputs):
+        localoutputs = {}
+        insBckProb, _ = self.layers['rgbPooler'](outputs['staticProb'], inputs['detect_label'])
+        insDisp, _ = self.layers['rgbPooler'](outputs[('disp', 0)], inputs['detect_label'])
+
+        # Debug purpose
+        # insRgb, _ = self.layers['rgbPooler'](inputs[('color_aug', 0, 0)], inputs['detect_label'])
+        # batchnum, chnum, l, l = insRgb.shape
+        # insRgb = insRgb.permute(1,0,2,3).view(chnum, batchnum * l, l).unsqueeze(0)
+        # tensor2rgb(insRgb, ind=0).show()
+
+        localoutputs['insBckProb'] = insBckProb
+        localoutputs['insDisp'] = insDisp
+        return localoutputs
+
 
     def predict_poses(self, inputs, features):
         """Predict poses between input frames for monocular sequences.
@@ -294,6 +461,8 @@ class Trainer:
                     outputs[("cam_T_cam", 0, f_i)] = transformation_from_parameters(
                         axisangle[:, 0], translation[:, 0], invert=(f_i < 0))
 
+                    if self.opt.predins:
+                        outputs[('seq_features', f_i)] = pose_inputs
         else:
             # Here we input all frames to the pose net (and predict all poses) together
             if self.opt.pose_model_type in ["separate_resnet", "posecnn"]:

@@ -12,10 +12,14 @@ import numpy as np
 import copy
 from PIL import Image  # using pillow-simd for increased speed
 
+
 import torch
 import torch.utils.data as data
 from torchvision import transforms
 
+from utils import *
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 def pil_loader(path):
     # open path as file to avoid ResourceWarning
@@ -46,7 +50,14 @@ class MonoDataset(data.Dataset):
                  frame_idxs,
                  num_scales,
                  is_train=False,
-                 img_ext='.jpg'):
+                 img_ext='.png',
+                 load_detect = False,
+                 load_seman = False,
+                 detect_path = '',
+                 load_pose = False,
+                 loadPredDepth = False,
+                 predDepthPath = ''
+                 ):
         super(MonoDataset, self).__init__()
 
         self.data_path = data_path
@@ -86,7 +97,14 @@ class MonoDataset(data.Dataset):
                                                interpolation=self.interp)
 
         self.load_depth = self.check_depth()
-
+        self.load_detect = load_detect
+        self.load_seman = load_seman
+        if self.load_detect:
+            self.detect_path = detect_path
+            self.maxLoad = 100 # Load 100 objects per frame at most
+        self.load_pose = load_pose
+        self.loadPredDepth = loadPredDepth
+        self.predDepthPath = predDepthPath
     def preprocess(self, inputs, color_aug):
         """Resize colour images to the required scales and augment if required
 
@@ -180,6 +198,40 @@ class MonoDataset(data.Dataset):
 
         self.preprocess(inputs, color_aug)
 
+        # Read Detection Label
+        imorgSize = inputs[("color", 0, -1)].shape[1:3]
+        if self.load_detect:
+            inputs["detect_label"] = self.get_detection(folder, frame_index, side, do_flip, imorgSize)
+
+            # detect_label = inputs["detect_label"][inputs["detect_label"][:,0] > 0]
+            # if(len(detect_label) > 0):
+            #     # Create figure and axes
+            #     fig, ax = plt.subplots(1)
+            #
+            #     # Display the image
+            #     im = tensor2rgb(inputs[("color", 0, 0)].unsqueeze(0), ind=0)
+            #     ax.imshow(im)
+            #
+            #     for k in range(len(inputs["detect_label"])):
+            #         # Read Label
+            #         sx = inputs["detect_label"][k][0]
+            #         sy = inputs["detect_label"][k][1]
+            #         rw = inputs["detect_label"][k][2] - sx
+            #         rh = inputs["detect_label"][k][3] - sy
+            #
+            #         # Create a Rectangle patch
+            #         rect = patches.Rectangle((sx, sy), rw, rh, linewidth=1, edgecolor='r', facecolor='none')
+            #
+            #         # Add the patch to the Axes
+            #         ax.add_patch(rect)
+            #     fig.savefig(os.path.join('/home/shengjie/Documents/Depins/tmp', str(index).zfill(10) + '.png'))  # save the figure to file
+            #     plt.close(fig)
+
+        # Read The Entry tag
+        comps = self.filenames[index].split(' ')
+        inputs['entry_tag'] = str(comps[0] + ' ' + comps[1].zfill(10) + ' ' + comps[2])
+
+
         for i in self.frame_idxs:
             del inputs[("color", i, -1)]
             del inputs[("color_aug", i, -1)]
@@ -197,6 +249,19 @@ class MonoDataset(data.Dataset):
 
             inputs["stereo_T"] = torch.from_numpy(stereo_T)
 
+        inputs.update(self.get_camK(folder, frame_index, side, do_flip))
+
+        if self.load_seman:
+            inputs['semanLabel'] = self.get_seman(folder, frame_index, side, do_flip)
+
+        if self.load_pose:
+            inputs['poseM'] = self.get_pose(folder, frame_index)
+            inputs['bundledPoseM'] = self.get_bundlePose(folder, frame_index)
+
+        if self.loadPredDepth:
+            inputs['predDepth'] = self.get_predDepth(folder, frame_index, side, do_flip)
+
+        inputs['indicesRec'] = index
         return inputs
 
     def get_color(self, folder, frame_index, side, do_flip):
@@ -206,4 +271,22 @@ class MonoDataset(data.Dataset):
         raise NotImplementedError
 
     def get_depth(self, folder, frame_index, side, do_flip):
+        raise NotImplementedError
+
+    def get_predDepth(self, folder, frame_index, side, do_flip):
+        raise NotImplementedError
+
+    def get_detection(self, folder, frame_index, side, do_flip, imorgSize):
+        raise NotImplementedError
+
+    def get_camK(self, folder, frame_index, side, do_flip):
+        raise NotImplementedError
+
+    def get_seman(self, folder, frame_index, side, do_flip):
+        raise NotImplementedError
+
+    def get_pose(self, folder, frame_index):
+        raise NotImplementedError
+
+    def get_bundlePose(self, folder, frame_index):
         raise NotImplementedError

@@ -15,7 +15,7 @@ from layers import *
 
 
 class DepthDecoder(nn.Module):
-    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_skips=True):
+    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_skips=True, predins=False):
         super(DepthDecoder, self).__init__()
 
         self.num_output_channels = num_output_channels
@@ -47,6 +47,10 @@ class DepthDecoder(nn.Module):
         self.decoder = nn.ModuleList(list(self.convs.values()))
         self.sigmoid = nn.Sigmoid()
 
+        self.predins = predins
+        if self.predins:
+            self.predStatic = Conv3x3(self.num_ch_dec[0], self.num_output_channels)
+
     def forward(self, input_features):
         self.outputs = {}
 
@@ -61,5 +65,8 @@ class DepthDecoder(nn.Module):
             x = self.convs[("upconv", i, 1)](x)
             if i in self.scales:
                 self.outputs[("disp", i)] = self.sigmoid(self.convs[("dispconv", i)](x))
+
+        if self.predins:
+            self.outputs['staticProb'] = self.sigmoid(self.predStatic(x))
 
         return self.outputs
