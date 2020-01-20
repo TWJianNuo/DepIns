@@ -94,10 +94,6 @@ class InsTrainer:
             self.models["predictive_mask"].to(self.device)
             self.parameters_to_train += list(self.models["predictive_mask"].parameters())
 
-        self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
-        self.model_lr_scheduler = optim.lr_scheduler.StepLR(
-            self.model_optimizer, self.opt.scheduler_step_size, 0.1)
-
         if self.opt.load_weights_folder is not None:
             self.load_model()
 
@@ -168,12 +164,18 @@ class InsTrainer:
             self.boxLargeRat = 1.2
 
             self.models['insDecoder'] = networks.DynamicDecoder(resnet= self.models["encoder"], batch_size=self.opt.batch_size, imageHeight = self.opt.height).cuda()
-
             self.models['movDecoder'] = networks.MovementDecoder(batch_size=self.opt.batch_size, imageHeight=self.opt.height).cuda()
 
             self.layers = {}
             self.layers['rgbPooler'] = Pooler(self.opt.batch_size, shrinkScale = 1, imageHeight = self.opt.height, featureSize = self.featureSize)
+
+            self.parameters_to_train += list(self.models["insDecoder"].parameters())
+            self.parameters_to_train += list(self.models["movDecoder"].parameters())
         self.save_opts()
+
+        self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
+        self.model_lr_scheduler = optim.lr_scheduler.StepLR(
+            self.model_optimizer, self.opt.scheduler_step_size, 0.1)
 
     def set_train(self):
         """Convert all models to training mode
@@ -314,7 +316,8 @@ class InsTrainer:
                     fig_target = tensor2flatrgb(insRgb)
                     fig_mask = tensor2disp_flat(outputs['insProb'], vmax=1)
                     fig_combined = np.concatenate([np.array(fig_pred), np.array(fig_target), np.array(fig_mask)], axis=1)
-                    pil.fromarray(fig_combined).save(os.path.join('/media/shengjie/other/Depins/Depins/visualization/trivial_mask_change', str(self.step) + '.png'))
+                    if np.mod(self.step, 10) == 0:
+                        pil.fromarray(fig_combined).save(os.path.join('/media/shengjie/other/Depins/Depins/visualization/trivial_mask_change', str(self.step) + '.png'))
 
         totLoss = totLoss / 2
         losses['loss'] = totLoss
