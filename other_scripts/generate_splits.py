@@ -34,7 +34,8 @@ def generate_cycleGan_split():
             folder_root = os.path.join(data_root, split_type + set)
             imgs = glob.glob(os.path.join(folder_root, '*.jpg'))
             for img_path in imgs:
-                entry_list.append(img_path)
+                comps = img_path.split('/')
+                entry_list.append(comps[-2] + '/' + comps[-1])
 
             wf = open(os.path.join(split_root, split_type + set + '.txt'), "w")
             for entry in entry_list:
