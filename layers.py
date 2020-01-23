@@ -373,7 +373,6 @@ class Pooler(nn.Module):
         # --For debug--
         # features = F.interpolate(features, size = [int(features.shape[2] / dscale), int(features.shape[3] / dscale)], mode = 'bilinear', align_corners = True)
         # -- End --
-
         batch_size, channels, height, width = features.shape
         features_flat = features.permute([1,0,2,3])
         features_flat = features_flat.contiguous().view(channels, batch_size * height, width).unsqueeze(0)

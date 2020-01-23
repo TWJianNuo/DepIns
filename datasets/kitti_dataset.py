@@ -138,13 +138,13 @@ class KITTIRAWDataset(KITTIDataset):
         return rescaleMat
 
     def get_velo(self, velo_filename):
-        if os.path.isfile(velo_filename):
-            velo = load_velodyne_points(velo_filename)
-            velo = velo[velo[:, 0] >= 0, :]
-            np.random.shuffle(velo)
-            velo = velo[0 : 10000, :]
-        else:
-            velo = np.zeros([10000, 4]).astype(np.float32)
+        velo = np.zeros([100000, 4]).astype(np.float32)
+        velo_pts = load_velodyne_points(velo_filename)
+        velo_pts = velo_pts[velo_pts[:, 0] > 0, :]
+        np.random.shuffle(velo_pts)
+        copyNum = np.min([velo_pts.shape[0], velo.shape[0]])
+        velo[0 : copyNum, :] = velo_pts[0 : copyNum, :]
+
         return velo
 
     def get_camK(self, folder, frame_index, side, do_flip):
@@ -206,10 +206,10 @@ class KITTIRAWDataset(KITTIDataset):
         return semantic_label_copy
 
     def get_bundlePose(self, folder, frame_index):
-        poseM_cur = self.get_pose(folder, frame_index)
-        poseM_prev = self.get_pose(folder, frame_index - 1)
-        poseM_next = self.get_pose(folder, frame_index + 1)
-        return np.stack([poseM_cur, poseM_prev, poseM_next], axis=0)
+        poseM = list()
+        for i in range(len(self.frame_idxs)):
+            poseM.append(self.get_pose(folder, frame_index + i))
+        return np.stack(poseM, axis=0)
 
     def get_pose(self, folder, frame_index):
         filePath = os.path.join(self.data_path, folder, 'oxts', 'data', str(frame_index).zfill(10) + '.txt')

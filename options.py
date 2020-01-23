@@ -91,7 +91,7 @@ class MonodepthOptions:
                                  type=str,
                                  help="path of detection labels",
                                  default="")
-        self.parser.add_argument("--noshuffle",
+        self.parser.add_argument("--serial_batches",
                                  action="store_true")
         self.parser.add_argument("--loadSeman",
                                  action="store_true")
@@ -105,6 +105,11 @@ class MonodepthOptions:
                                  type=str)
         self.parser.add_argument("--doVisualization",
                                  action="store_true")
+        self.parser.add_argument("--insResolution",
+                                 type=int)
+        self.parser.add_argument("--bbxEnlargeRat",
+                                 type=float)
+
 
         # OPTIMIZATION options
         self.parser.add_argument("--batch_size",
@@ -225,6 +230,26 @@ class MonodepthOptions:
                                  help="if set will perform the flipping post processing "
                                       "from the original monodepth paper",
                                  action="store_true")
+
+
+        # Cycle GAN additional
+        self.parser.add_argument('--max_dataset_size',
+                                 type=int,
+                                 default=float("inf"),
+                                 help='Maximum number of samples allowed per dataset. If the dataset directory contains more than max_dataset_size, only a subset is loaded.')
+
+        self.parser.add_argument('--direction',
+                                 type=str,
+                                 default='AtoB',
+                                 help='AtoB or BtoA')
+        self.parser.add_argument("--crop_height",
+                                 type=int,
+                                 help="cropped input image height",
+                                 default=256)
+        self.parser.add_argument("--crop_width",
+                                 type=int,
+                                 help="cropped input image width",
+                                 default=256)
 
     def parse(self):
         self.options = self.parser.parse_args()

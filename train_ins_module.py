@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d, Axes3D #<-- Note the capitalization!
 from options import MonodepthOptions
 
+
 class InsTrainer:
     def __init__(self, options):
         self.opt = options
@@ -94,8 +95,6 @@ class InsTrainer:
             self.models["predictive_mask"].to(self.device)
             self.parameters_to_train += list(self.models["predictive_mask"].parameters())
 
-        if self.opt.load_weights_folder is not None:
-            self.load_model()
 
         print("Training model named:\n  ", self.opt.model_name)
         print("Models and tensorboard events files are saved to:\n  ", self.opt.log_dir)
@@ -174,6 +173,8 @@ class InsTrainer:
         self.save_opts()
 
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
+        if self.opt.load_weights_folder is not None:
+            self.load_model()
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(
             self.model_optimizer, self.opt.scheduler_step_size, 0.1)
 
@@ -269,7 +270,7 @@ class InsTrainer:
                         axisangle[:, 0], translation[:, 0], invert=(f_i < 0))
 
             # self.check_selfMov(inputs, outputs)
-            # self.check_depthMap(inputs, outputs)
+            self.check_depthMap(inputs, outputs)
             losses.update(self.computeInsLoss(inputs, outputs))
         return outputs, losses
 
@@ -316,8 +317,8 @@ class InsTrainer:
                     fig_target = tensor2flatrgb(insRgb)
                     fig_mask = tensor2disp_flat(outputs['insProb'], vmax=1)
                     fig_combined = np.concatenate([np.array(fig_pred), np.array(fig_target), np.array(fig_mask)], axis=1)
-                    if np.mod(self.step, 10) == 0:
-                        pil.fromarray(fig_combined).save(os.path.join('/media/shengjie/other/Depins/Depins/visualization/trivial_mask_change', str(self.step) + '.png'))
+                    if np.mod(self.step, 1) == 0:
+                        pil.fromarray(fig_combined).save(os.path.join('/media/shengjie/other/Depins/Depins/visualization/trivialView', str(self.step) + '.png'))
 
         totLoss = totLoss / 2
         losses['loss'] = totLoss
@@ -344,7 +345,39 @@ class InsTrainer:
         pixelLocs = torch.cat([xx, yy], dim=1)
         predDepth = inputs['predDepth']
         pts3d = backProjTo3d(pixelLocs, predDepth, inputs['invcamK'])
+        mono_projected2d, _, _ = project_3dptsTo2dpts(pts3d=pts3d, camKs=inputs['camK'])
+        mono_sampledColor = sampleImgs(inputs[('color', 0, 0)], mono_projected2d)
 
+        tensor2rgb(inputs[('color_aug', 0, 0)], ind= 0).show()
+
+        drawIndex = 0
+        # Set camera of matplotlib
+        camPos = np.linalg.inv(inputs['realEx'][drawIndex, :, :].cpu().numpy()) @ np.array([[0, 0, 0, 1]]).transpose()
+        forwardPos = np.linalg.inv(inputs['realEx'][drawIndex, :, :].cpu().numpy()) @ np.array([[0, 0, 10, 1]]).transpose()
+        viewDir = np.linalg.inv(inputs['realEx'][drawIndex, :, :].cpu().numpy()) @ np.array([[0, 0, 1, 1]]).transpose() - camPos
+        viewDir = viewDir[0 : 3] / np.linalg.norm(viewDir[0 : 3])
+        azim = np.arccos(viewDir[0]) * 180
+        distance = np.linalg.norm(camPos[0:3])
+
+        downsample_rat = 10
+        draw_mono_sampledColor = mono_sampledColor[drawIndex, :, :, :].detach().cpu().view(3, -1).permute([1,0]).numpy()
+        drawX = pts3d[drawIndex, 0, :, :].detach().cpu().numpy().flatten()
+        drawY = pts3d[drawIndex, 1, :, :].detach().cpu().numpy().flatten()
+        drawZ = pts3d[drawIndex, 2, :, :].detach().cpu().numpy().flatten()
+        fig = plt.figure()
+        ax = Axes3D(fig)
+        ax.scatter(drawX[::downsample_rat], drawY[::downsample_rat],
+                   drawZ[::downsample_rat], s=0.7, c=draw_mono_sampledColor[::downsample_rat,:])
+        ax.scatter(camPos[0], camPos[1], camPos[2], s=3, c='r')
+        ax.plot([float(camPos[0]), float(forwardPos[0])], [float(camPos[1]), float(forwardPos[1])], [float(camPos[2]), float(forwardPos[2])], linewidth = 2, color = 'red')
+        # set_axes_equal(ax)
+        # for angle in range(0, 360):
+        #     ax.view_init(elev=0, azim=angle)
+        #     plt.draw()
+        #     plt.pause(0.1)
+        ax.view_init(elev=6, azim=-153)
+        ax.dist = 1.7
+        plt.show()
 
         # prepare to draw
         drawIndex = 0
@@ -362,13 +395,22 @@ class InsTrainer:
 
         fig = plt.figure()
         ax = Axes3D(fig)
-        ax.view_init(elev=6., azim=-153)
-        ax.dist = 1.7
-        ax.scatter(drawX, drawY, drawZ, s = 1, c = drawColor)
-        set_axes_equal(ax)
+        # ax.view_init(elev=6., azim=-153)
+        # ax.dist = 1.7
+        # ax.scatter(drawX, drawY, drawZ, s = 1, c = drawColor)
+        # set_axes_equal(ax)
         ax.scatter(drawPts3dVal[::downsample_rat, 0], drawPts3dVal[::downsample_rat, 1],
                    drawPts3dVal[::downsample_rat, 2], s=0.7, c='r')
+        ax.scatter(drawX, drawY, drawZ, s=1, c=drawColor)
         plt.show()
+
+
+        drawX_mat = matlab.double(drawX.tolist())
+        drawY_mat = matlab.double(drawY.tolist())
+        drawZ_mat = matlab.double(drawZ.tolist())
+        h = eng.scatter3(drawX_mat, drawY_mat, drawZ_mat, '.')
+        eng.eval('axis equal', nargout = 0)
+        eng.eval('camzoom(8)', nargout = 0)
 
     def check_selfMov(self, inputs, outputs):
         cur_ind = 0
