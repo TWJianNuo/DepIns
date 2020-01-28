@@ -83,6 +83,8 @@ def export_gt_depths_kitti():
 
         velo_filename = os.path.join(opt.data_path, folder,
                                      "velodyne_points/data", "{:010d}.bin".format(frame_id))
+        if not os.path.isfile(velo_filename):
+            continue
 
         gt_depth = generate_depth_map(calib_dir, velo_filename, 2, True)
         gt_depth = cv2.resize(gt_depth, (1242, 375), cv2.INTER_NEAREST)
