@@ -170,16 +170,17 @@ class BaseModel(ABC):
         else:
             self.__patch_instance_norm_state_dict(state_dict, getattr(module, key), keys, i + 1)
 
-    def load_networks(self, epoch):
+    def load_networks(self, sv_apth):
         """Load all the networks from the disk.
 
         Parameters:
             epoch (int) -- current epoch; used in the file name '%s_net_%s.pth' % (epoch, name)
         """
+        passSumCheck = True
         for name in self.model_names:
             if isinstance(name, str):
-                load_filename = '%s_net_%s.pth' % (epoch, name)
-                load_path = os.path.join(self.save_dir, load_filename)
+                load_filename = 'latest_net_%s.pth' % name
+                load_path = os.path.join(sv_apth, load_filename)
                 net = getattr(self, 'net' + name)
                 if isinstance(net, torch.nn.DataParallel):
                     net = net.module
@@ -191,9 +192,27 @@ class BaseModel(ABC):
                     del state_dict._metadata
 
                 # patch InstanceNorm checkpoints prior to 0.4
-                for key in list(state_dict.keys()):  # need to copy keys here because we mutate in loop
-                    self.__patch_instance_norm_state_dict(state_dict, net, key.split('.'))
+                # for key in list(state_dict.keys()):  # need to copy keys here because we mutate in loop
+                #     self.__patch_instance_norm_state_dict(state_dict, net, key.split('.'))
                 net.load_state_dict(state_dict)
+
+                if not self.sum_check(state_dict, net.state_dict()):
+                    passSumCheck = False
+        if passSumCheck:
+            print("pass sum check")
+        else:
+            print("fail sum check")
+    def sum_check(self, state_dict1, state_dict2):
+        count1 = 0
+        count2 = 0
+        for key in state_dict1.keys():
+            count1 = count1 + torch.sum(torch.abs(state_dict1[key].data))
+        for key in state_dict1.keys():
+            count2 = count2 + torch.sum(torch.abs(state_dict2[key].data))
+        if torch.abs(count1 - count2) < 1:
+            return True
+        else:
+            return False
 
     def print_networks(self, verbose):
         """Print the total number of parameters in the network and (if verbose) network architecture

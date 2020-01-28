@@ -82,7 +82,8 @@ def get_transform(opt, params=None, grayscale=False, method=Image.BICUBIC, conve
     transform_list.append(transforms.Resize(osize, method))
 
     # crop
-    transform_list.append(transforms.RandomCrop([opt.crop_height, opt.crop_width]))
+    if opt.crop_height > 0 and opt.crop_width > 0:
+        transform_list.append(transforms.RandomCrop([opt.crop_height, opt.crop_width]))
 
     # flip
     transform_list.append(transforms.RandomHorizontalFlip())
