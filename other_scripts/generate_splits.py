@@ -1,6 +1,7 @@
 import glob
 import os
 import shutil
+import numpy as np
 def generate_visualization_split():
     data_root = '/media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw'
     sequenceList = {
@@ -200,6 +201,59 @@ def create_kitti_style_real2virtual():
             wf.write(entry + '\n')
         wf.close()
 
+def create_sfnorm_split():
+    real_root = '/media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw'
+    vir_root = '/media/shengjie/other/Data/virtual_kitti_organized'
+    raw_seqs = ['2011_09_26/2011_09_26_drive_0009_sync',
+                '2011_09_26/2011_09_26_drive_0011_sync',
+                '2011_09_26/2011_09_26_drive_0018_sync',
+                '2011_09_29/2011_09_29_drive_0004_sync',
+                '2011_10_03/2011_10_03_drive_0047_sync'
+                ]
 
+    vir_seqs = ['0001',
+                '0002',
+                '0006',
+                '0018',
+                '0020'
+                ]
+
+    splitA = list()
+    splitB = list()
+
+    split_types = ['train']
+    split_root = '../splits/sfnorm'
+
+    mapping = {0 : 'l', 1 : 'r'}
+
+    for seq in raw_seqs:
+        img_list = glob.glob(os.path.join(real_root, seq, 'image_02', 'data', '*.png'))
+        for i in range(0, len(img_list)):
+            if os.path.exists(os.path.join(real_root, seq, 'image_02', 'data', str(i).zfill(10) + '.png')):
+                splitA.append(seq + ' ' + str(i).zfill(10) + ' ' + mapping[np.random.randint(2, size=1)[0]])
+
+
+    for seq in vir_seqs:
+        img_list = glob.glob(os.path.join(vir_root, seq, 'rgb', '*.png'))
+        for i in range(0, len(img_list)):
+            if os.path.exists(os.path.join(vir_root, seq, 'rgb', str(i).zfill(5) + '.png')):
+                splitB.append(seq + ' ' + str(i).zfill(5) + ' ' + 'm')
+
+    for split_type in split_types:
+        wf = open(os.path.join(split_root, split_type + 'A' + '.txt'), "w")
+        for entry in splitA:
+            wf.write(entry + '\n')
+        wf.close()
+
+        wf = open(os.path.join(split_root, split_type + 'B' + '.txt'), "w")
+        for entry in splitB:
+            wf.write(entry + '\n')
+        wf.close()
+
+    # Copy test set
+    srcf = os.path.join('/media/shengjie/other/Depins/Depins/splits/eigen', 'test_files.txt')
+    dstf = os.path.join(split_root, 'test_files.txt')
+    docs = shutil.copyfile(srcf, dstf)
+    print("%s finished" % docs)
 if __name__ == "__main__":
-    create_kitti_style_real2virtual()
+    create_sfnorm_split()

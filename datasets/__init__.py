@@ -2,7 +2,7 @@ from .kitti_dataset import KITTIRAWDataset, KITTIOdomDataset, KITTIDepthDataset
 import torch.utils.data
 from datasets.base_dataset import BaseDataset
 from datasets.unaligned_dataset import UnalignedDataset
-
+from .sfnrm_dataset import SFNormDataset
 
 def create_dataset(opt):
     data_loader = CustomDatasetDataLoader(opt)
