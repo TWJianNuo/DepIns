@@ -6,6 +6,12 @@
 
 from __future__ import absolute_import, division, print_function
 
+import os,sys,inspect
+
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir)
+
 import os
 
 import argparse
