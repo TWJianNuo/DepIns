@@ -10,6 +10,7 @@ from tensorboardX import SummaryWriter
 import torch
 import time
 import os
+from utils import tensor2rgb
 
 torch.backends.cudnn.benchmark = True
 options = MonodepthOptions()
@@ -92,7 +93,8 @@ if __name__ == "__main__":
                 to_visuals = model.get_current_visuals()
                 for l, v in to_visuals.items():
                     # only pass the first image
-                    sum_writers.add_image(l, v[0, :, :, :], total_iters)
+                    # tensor2rgb((v + 1) / 2, ind=0).show()
+                    sum_writers.add_image(l, (v[0, :, :, :] + 1) / 2, total_iters)
                 train_time = time.time() - train_start_time
                 print("Epoch %d, time left %f hours" % (epoch, train_time / total_iters * dataset.__len__() * (opts.n_epochs + opts.n_epochs_decay) / 60 / 60))
 
