@@ -253,6 +253,9 @@ def compute_depth_losses(depth_pred, depth_gt):
     This isn't particularly accurate as it averages over the entire batch,
     so is only used to give an indication of validation performance
     """
+    if depth_gt.shape[2] != 375 or depth_gt.shape[3] != 1242:
+        print("Wrong shape : (%d, %d)" % (depth_gt.shape[2], depth_gt.shape[3]))
+
     losses = dict()
     depth_pred = (depth_pred + 1) / 2 * (80 - 1e-3) + 1e-3
     depth_pred = torch.clamp(F.interpolate(
@@ -328,7 +331,7 @@ if __name__ == "__main__":
                     sum_writers.add_scalar(l, v, total_iters)
                 to_visuals = model.get_current_visuals()
                 eval_metrics = compute_depth_losses(depth_pred = to_visuals['fake_B'], depth_gt = data['gt_depth'].cuda())
-                eval_metrics_bs = compute_depth_losses(depth_pred=to_visuals['real_A'], depth_gt=data['gt_depth'].cuda())
+                eval_metrics_bs = compute_depth_losses(depth_pred = to_visuals['real_A'], depth_gt = data['gt_depth'].cuda())
 
                 for l, v in eval_metrics.items():
                     sum_writers.add_scalar('train/' + l, v, total_iters)
