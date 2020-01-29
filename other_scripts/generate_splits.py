@@ -2,6 +2,7 @@ import glob
 import os
 import shutil
 import numpy as np
+import cv2
 def generate_visualization_split():
     data_root = '/media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw'
     sequenceList = {
@@ -255,5 +256,19 @@ def create_sfnorm_split():
     dstf = os.path.join(split_root, 'test_files.txt')
     docs = shutil.copyfile(srcf, dstf)
     print("%s finished" % docs)
+
+def confirm_projectedGt():
+    txt_path = os.path.join('/media/shengjie/other/Depins/Depins/splits/sfnorm', 'trainA.txt')
+    data_root = '/media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth'
+    with open(txt_path) as f:
+        lines = f.readlines()
+    mapping = {'l':'image_02', 'r':'image_03'}
+    for entry in lines:
+        folder, ind, dir = entry.split(' ')
+        filepath = os.path.join(data_root, folder, mapping[dir[0]], ind + '.png')
+        gt = cv2.imread(filepath, -1)
+        if gt is None:
+            print("Err")
+    print("Evaluation finished")
 if __name__ == "__main__":
-    create_sfnorm_split()
+    confirm_projectedGt()

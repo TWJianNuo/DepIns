@@ -330,14 +330,17 @@ if __name__ == "__main__":
                 for l, v in losses.items():
                     sum_writers.add_scalar(l, v, total_iters)
                 to_visuals = model.get_current_visuals()
-                eval_metrics = compute_depth_losses(depth_pred = to_visuals['fake_B'], depth_gt = data['gt_depth'].cuda())
-                eval_metrics_bs = compute_depth_losses(depth_pred = to_visuals['real_A'], depth_gt = data['gt_depth'].cuda())
 
-                for l, v in eval_metrics.items():
-                    sum_writers.add_scalar('train/' + l, v, total_iters)
+                if torch.sum(torch.sum(data['gt_depth'], [0,2,3]) == 0) == 0:
 
-                for l, v in eval_metrics_bs.items():
-                    sum_writers.add_scalar('train_bs/' + l, v, total_iters)
+                    eval_metrics = compute_depth_losses(depth_pred = to_visuals['fake_B'], depth_gt = data['gt_depth'].cuda())
+                    eval_metrics_bs = compute_depth_losses(depth_pred = to_visuals['real_A'], depth_gt = data['gt_depth'].cuda())
+
+                    for l, v in eval_metrics.items():
+                        sum_writers.add_scalar('train/' + l, v, total_iters)
+
+                    for l, v in eval_metrics_bs.items():
+                        sum_writers.add_scalar('train_bs/' + l, v, total_iters)
 
             if total_iters % opts.display_freq == 0:   # display images on visdom and save images to a HTML file
                 to_visuals = model.get_current_visuals()
