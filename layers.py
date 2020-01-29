@@ -445,7 +445,7 @@ class Conv2d(torch.nn.Conv2d):
 
 
 class ComputeSurfaceNormal(nn.Module):
-    def __init__(self, height, width, batch_size):
+    def __init__(self, height, width, batch_size, minDepth, maxDepth):
         super(ComputeSurfaceNormal, self).__init__()
         self.height = height
         self.width = width
@@ -461,14 +461,16 @@ class ComputeSurfaceNormal(nn.Module):
         self.ones = self.ones.cuda()
         self.init_gradconv()
 
+        self.minDepth = minDepth
+        self.maxDepth = maxDepth
+
+
     def init_gradconv(self):
-        weightsx = torch.Tensor([
-                                [-1., 0., 1.],
+        weightsx = torch.Tensor([[-1., 0., 1.],
                                 [-2., 0., 2.],
                                 [-1., 0., 1.]]).unsqueeze(0).unsqueeze(0)
 
-        weightsy = torch.Tensor([
-                                [1., 2., 1.],
+        weightsy = torch.Tensor([[1., 2., 1.],
                                 [0., 0., 0.],
                                 [-1., -2., -1.]]).unsqueeze(0).unsqueeze(0)
         self.convx = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=0, bias=False)
@@ -479,6 +481,9 @@ class ComputeSurfaceNormal(nn.Module):
 
 
     def forward(self, depthMap, invcamK):
+        depthMap = depthMap * 0.5 + 0.5
+        depthMap = depthMap * (self.maxDepth - self.minDepth) + self.minDepth
+
         depthMap = depthMap.view(self.batch_size, -1)
         cam_coords = self.pix_coords * torch.stack([depthMap, depthMap, depthMap], dim=1)
         cam_coords = torch.cat([cam_coords, self.ones], dim=1)

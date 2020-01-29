@@ -3,7 +3,8 @@ import itertools
 from util.image_pool import ImagePool
 from .cycle_gan_base_model import BaseModel
 from . import networks
-
+from utils import *
+from layers import *
 
 class CycleGANModel(BaseModel):
     """
@@ -76,9 +77,9 @@ class CycleGANModel(BaseModel):
                                         not opt.no_dropout, opt.init_type, opt.init_gain, self.gpu_ids)
 
         if self.isTrain:  # define discriminators
-            self.netD_A = networks.define_D(opt.output_nc, opt.ndf, opt.netD,
+            self.netD_A = networks.define_D(3 if self.opt.mode_sfnorm else opt.output_nc, opt.ndf, opt.netD,
                                             opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids)
-            self.netD_B = networks.define_D(opt.input_nc, opt.ndf, opt.netD,
+            self.netD_B = networks.define_D(3 if self.opt.mode_sfnorm else opt.input_nc, opt.ndf, opt.netD,
                                             opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids)
 
         if self.isTrain:
@@ -96,6 +97,10 @@ class CycleGANModel(BaseModel):
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
 
+        if self.opt.mode_sfnorm:
+            self.compute_sfnorm = ComputeSurfaceNormal(batch_size=self.opt.batch_size, height=self.opt.height, width=self.opt.width, minDepth=self.opt.min_depth, maxDepth=self.opt.max_depth).cuda()
+            self.visual_names = self.visual_names + ['real_A_sfnorm', 'fake_A_sfnorm', 'rec_A_sfnorm'] + ['real_B_sfnorm', 'fake_B_sfnorm', 'rec_B_sfnorm']
+
     def set_input(self, input):
         """Unpack input data from the dataloader and perform necessary pre-processing steps.
 
@@ -104,10 +109,16 @@ class CycleGANModel(BaseModel):
 
         The option 'direction' can be used to swap domain A and domain B.
         """
+
         AtoB = self.opt.direction == 'AtoB'
-        self.real_A = input['A' if AtoB else 'B'].to(self.device)
-        self.real_B = input['B' if AtoB else 'A'].to(self.device)
-        self.image_paths = input['A_paths' if AtoB else 'B_paths']
+        if not self.opt.mode_sfnorm:
+            self.real_A = input['A' if AtoB else 'B'].to(self.device)
+            self.real_B = input['B' if AtoB else 'A'].to(self.device)
+            self.image_paths = input['A_paths' if AtoB else 'B_paths']
+        else:
+            self.real_A = input['A_depth' if AtoB else 'B_depth'].to(self.device)
+            self.real_B = input['B_depth' if AtoB else 'A_depth'].to(self.device)
+            self.inv_camK = torch.inverse(input['intrinsic_A'] @ input['extrinsic_A']).to(self.device)
 
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
@@ -115,6 +126,7 @@ class CycleGANModel(BaseModel):
         self.rec_A = self.netG_B(self.fake_B)   # G_B(G_A(A))
         self.fake_A = self.netG_B(self.real_B)  # G_B(B)
         self.rec_B = self.netG_A(self.fake_A)   # G_A(G_B(B))
+
 
     def backward_D_basic(self, netD, real, fake):
         """Calculate GAN loss for the discriminator
@@ -140,14 +152,20 @@ class CycleGANModel(BaseModel):
 
     def backward_D_A(self):
         """Calculate GAN loss for discriminator D_A"""
-        fake_B = self.fake_B_pool.query(self.fake_B)
-        self.loss_D_A = self.backward_D_basic(self.netD_A, self.real_B, fake_B)
-
+        if not self.opt.mode_sfnorm:
+            fake_B = self.fake_B_pool.query(self.fake_B)
+            self.loss_D_A = self.backward_D_basic(self.netD_A, self.real_B, fake_B)
+        else:
+            fake_B_sfnorm = self.fake_B_pool.query(self.fake_B_sfnorm)
+            self.loss_D_A = self.backward_D_basic(self.netD_A, self.real_B_sfnorm, fake_B_sfnorm)
     def backward_D_B(self):
         """Calculate GAN loss for discriminator D_B"""
-        fake_A = self.fake_A_pool.query(self.fake_A)
-        self.loss_D_B = self.backward_D_basic(self.netD_B, self.real_A, fake_A)
-
+        if not self.opt.mode_sfnorm:
+            fake_A = self.fake_A_pool.query(self.fake_A)
+            self.loss_D_B = self.backward_D_basic(self.netD_B, self.real_A, fake_A)
+        else:
+            fake_A_sfnorm = self.fake_A_pool.query(self.fake_A_sfnorm)
+            self.loss_D_B = self.backward_D_basic(self.netD_B, self.real_A_sfnorm, fake_A_sfnorm)
     def backward_G(self):
         """Calculate the loss for generators G_A and G_B"""
         lambda_idt = self.opt.lambda_identity
@@ -165,10 +183,24 @@ class CycleGANModel(BaseModel):
             self.loss_idt_A = 0
             self.loss_idt_B = 0
 
-        # GAN loss D_A(G_A(A))
-        self.loss_G_A = self.criterionGAN(self.netD_A(self.fake_B), True)
-        # GAN loss D_B(G_B(B))
-        self.loss_G_B = self.criterionGAN(self.netD_B(self.fake_A), True)
+        if not self.opt.mode_sfnorm:
+            # GAN loss D_A(G_A(A))
+            self.loss_G_A = self.criterionGAN(self.netD_A(self.fake_B), True)
+            # GAN loss D_B(G_B(B))
+            self.loss_G_B = self.criterionGAN(self.netD_B(self.fake_A), True)
+        else:
+            self.real_A_sfnorm = self.compute_sfnorm(self.real_A, self.inv_camK)
+            self.fake_A_sfnorm = self.compute_sfnorm(self.fake_A, self.inv_camK)
+            self.rec_A_sfnorm = self.compute_sfnorm(self.rec_A, self.inv_camK)
+
+            self.real_B_sfnorm = self.compute_sfnorm(self.real_B, self.inv_camK)
+            self.fake_B_sfnorm = self.compute_sfnorm(self.fake_B, self.inv_camK)
+            self.rec_B_sfnorm = self.compute_sfnorm(self.rec_B, self.inv_camK)
+
+            # GAN loss D_A(G_A(A))
+            self.loss_G_A = self.criterionGAN(self.netD_A(self.fake_B_sfnorm), True)
+            # GAN loss D_B(G_B(B))
+            self.loss_G_B = self.criterionGAN(self.netD_B(self.fake_A_sfnorm), True)
         # Forward cycle loss || G_B(G_A(A)) - A||
         self.loss_cycle_A = self.criterionCycle(self.rec_A, self.real_A) * lambda_A
         # Backward cycle loss || G_A(G_B(B)) - B||

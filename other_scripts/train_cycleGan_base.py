@@ -89,11 +89,8 @@ if __name__ == "__main__":
                     sum_writers.add_scalar(l, v, total_iters)
 
             if total_iters % opts.display_freq == 0:   # display images on visdom and save images to a HTML file
-                model.compute_visuals()
                 to_visuals = model.get_current_visuals()
                 for l, v in to_visuals.items():
-                    # only pass the first image
-                    # tensor2rgb((v + 1) / 2, ind=0).show()
                     sum_writers.add_image(l, (v[0, :, :, :] + 1) / 2, total_iters)
                 train_time = time.time() - train_start_time
                 print("Epoch %d, time left %f hours" % (epoch, train_time / total_iters * dataset.__len__() * (opts.n_epochs + opts.n_epochs_decay) / 60 / 60))
