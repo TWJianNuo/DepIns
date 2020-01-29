@@ -282,7 +282,6 @@ def compute_depth_losses(depth_pred, depth_gt):
 if __name__ == "__main__":
 
     opts = init_opts(opts)
-    opts.print_freq = 1
     dataset = SFNormDataset(opts)
     dataset = torch.utils.data.DataLoader(
         dataset,
