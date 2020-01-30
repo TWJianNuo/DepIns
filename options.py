@@ -117,6 +117,8 @@ class MonodepthOptions:
                                  type=str)
         self.parser.add_argument("--discrimScale",
                                  type=float)
+        self.parser.add_argument("--lrD",
+                                 type=float)
         self.parser.add_argument("--print_freq",
                                  default=50,
                                  type=int)

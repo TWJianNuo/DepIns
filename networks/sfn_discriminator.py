@@ -14,12 +14,12 @@ class SfnD(nn.Module):
         self.gpu_ids = [0]
         self.device = torch.device("cuda")
         self.opt = opt
-        self.netD = networks.define_D( 3, opt.ndf, opt.netD, opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids)
+        self.netD = networks.define_D(3, opt.ndf, opt.netD, opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain, self.gpu_ids)
 
         self.fake_pool = ImagePool(opt.pool_size)  # create image buffer to store previously generated images
         # define loss functions
         self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
-        self.optimizer_D = torch.optim.Adam(itertools.chain(self.netD.parameters()), lr=opt.learning_rate, betas=(opt.beta1, 0.999))
+        self.optimizer_D = torch.optim.Adam(itertools.chain(self.netD.parameters()), lr=opt.lrD, betas=(opt.beta1, 0.999))
 
         self.compute_sfnorm = dict()
         for i in self.opt.scales:

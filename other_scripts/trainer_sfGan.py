@@ -271,7 +271,7 @@ class Trainer_GAN:
             #     self.log_time(batch_idx, duration, losses["loss"].cpu().data)
             #
             #     if "depth_gt" in inputs:
-            #         self.compute_depth_losses(inputs, outputs, losses) net    
+            #         self.compute_depth_losses(inputs, outputs, losses) net
             #
             #     self.log("train", inputs, outputs, losses)
             #     self.val()
@@ -561,7 +561,7 @@ class Trainer_GAN:
 
             loss_D = self.models['sfnD'].forward()
             losses["loss_D/{}".format(scale)] = loss_D
-            total_loss += loss_D
+            total_loss += loss_D * self.opt.discrimScale
 
         total_loss /= self.num_scales
         losses["loss"] = total_loss
