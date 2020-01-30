@@ -4,6 +4,7 @@ from .pose_decoder import PoseDecoder
 from .pose_cnn import PoseCNN
 from .dynamicIns_decoder import DynamicDecoder
 from .movment_decoder import MovementDecoder
+from .sfn_discriminator import SfnD
 
 from .cycle_gan_model import CycleGANModel
 

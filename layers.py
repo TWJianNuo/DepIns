@@ -473,8 +473,8 @@ class ComputeSurfaceNormal(nn.Module):
         weightsy = torch.Tensor([[1., 2., 1.],
                                 [0., 0., 0.],
                                 [-1., -2., -1.]]).unsqueeze(0).unsqueeze(0)
-        self.convx = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=0, bias=False)
-        self.convy = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=0, bias=False)
+        self.convx = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+        self.convy = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
 
         self.convx.weight = nn.Parameter(weightsx,requires_grad=False)
         self.convy.weight = nn.Parameter(weightsy,requires_grad=False)

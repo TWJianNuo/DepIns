@@ -109,6 +109,18 @@ class MonodepthOptions:
                                  type=int)
         self.parser.add_argument("--bbxEnlargeRat",
                                  type=float)
+        self.parser.add_argument("--gtDepthRoot",
+                                 type=str)
+        self.parser.add_argument("--loadVelo",
+                                 action="store_true")
+        self.parser.add_argument("--synRoot",
+                                 type=str)
+        self.parser.add_argument("--discrimScale",
+                                 type=float)
+        self.parser.add_argument("--print_freq",
+                                 default=50,
+                                 type=int)
+
 
 
         # OPTIMIZATION options

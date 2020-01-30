@@ -3,6 +3,65 @@ import os
 import shutil
 import numpy as np
 import cv2
+import random
+def gen_split_quadruplets():
+    root_dir = '/media/shengjie/other/Depins/Depins/splits/kitti_seman_mapped2depth'
+    split_train_path = os.path.join(root_dir, 'train_files.txt')
+    split_val_path = os.path.join(root_dir, 'val_files.txt')
+
+    target_dir = '/media/shengjie/other/Depins/Depins/splits/quadruplets'
+    split_train_write_path = os.path.join(target_dir, 'train_files.txt')
+    split_val_write_path = os.path.join(target_dir, 'val_files.txt')
+
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir)
+
+    with open(split_train_path) as f:
+        train_entries = f.readlines()
+    with open(split_val_path) as f:
+        val_entries = f.readlines()
+
+    opMap = {'l\n': 'r\n', 'r\n': 'l\n'}
+    to_write_list = list()
+    for entry in train_entries:
+        comps = entry.split(' ')
+
+        entry_cur = comps[0] + ' ' + comps[1].zfill(10) + ' ' + comps[2]
+        entry_prev = comps[0] + ' ' + str(int(comps[1]) - 1).zfill(10) + ' ' + comps[2]
+        entry_next = comps[0] + ' ' + str(int(comps[1]) + 1).zfill(10) + ' ' + comps[2]
+        entry_stereo = comps[0] + ' ' + comps[1].zfill(10) + ' ' + opMap[comps[2]]
+
+        to_write_list.append(entry_cur)
+        to_write_list.append(entry_prev)
+        to_write_list.append(entry_next)
+        to_write_list.append(entry_stereo)
+        # if not entry in to_write_list:
+        #     comps = entry.split(' ')
+        #     if comps[2][0] == 'l':
+        #         camid = 2
+        #     else:
+        #         camid = 3
+        #     ind = int(comps[1])
+        #     fpath0 = os.path.join(root_dir, comps[0], 'image_0' + str(camid), 'data', str(ind).zfill(10) + '.png')
+        #     fpath1 = os.path.join(root_dir, comps[0], 'image_0' + str(camid), 'data', str(ind + 1).zfill(10) + '.png')
+        #     fpath2 = os.path.join(root_dir, comps[0], 'image_0' + str(camid), 'data', str(ind + 2).zfill(10) + '.png')
+        #
+        #     tline1 = comps[0] + ' ' + str(ind) + ' ' + comps[2]
+        #     tline2 = comps[0] + ' ' + str(ind + 1) + ' ' + comps[2]
+        #     if os.path.exists(fpath0) and os.path.exists(fpath1) and os.path.exists(fpath2) and tline1 in train_entries and tline2 in train_entries:
+        #         tline1 = comps[0] + ' ' + str(ind).zfill(10) + ' ' + comps[2]
+        #         tline2 = comps[0] + ' ' + str(ind + 1).zfill(10) + ' ' + comps[2]
+        #         to_write_list.append(tline1)
+        #         to_write_list.append(tline2)
+
+    f = open(split_val_write_path, "w")
+    for entry in val_entries:
+        f.writelines(entry)
+
+    f = open(split_train_write_path, "w")
+    for entry in to_write_list:
+        f.writelines(entry)
+
 def generate_visualization_split():
     data_root = '/media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw'
     sequenceList = {
@@ -287,5 +346,54 @@ def confirm_projectedGt():
         if gt is None:
             print("Err")
     print("Evaluation finished")
+
+
+def create_sfnorm2_split():
+    split_types = ['train', 'val']
+    split_root = '../splits/sfnorm2'
+
+    mapping = {0 : 'l', 1 : 'r'}
+
+    vir_root = '/media/shengjie/other/Data/virtual_kitti_organized'
+    vir_seqs = ['0001',
+                '0002',
+                '0006',
+                '0018',
+                '0020'
+                ]
+
+    splitB = list()
+    # Copy
+    dst_root = os.path.join('..', 'splits', 'sfnorm2')
+    copy_root = os.path.join('..', 'splits', 'eigen_zhou')
+    copy_list = ['train', 'val']
+    for entry in copy_list:
+        srcf = os.path.join(copy_root, '{}_files.txt'.format(entry))
+        dstf = os.path.join(dst_root, '{}_files.txt'.format(entry))
+        shutil.copyfile(srcf, dstf)
+
+    for seq in vir_seqs:
+        img_list = glob.glob(os.path.join(vir_root, seq, 'rgb', '*.png'))
+        for i in range(0, len(img_list)):
+            if os.path.exists(os.path.join(vir_root, seq, 'rgb', str(i).zfill(5) + '.png')):
+                splitB.append(seq + ' ' + str(i).zfill(5) + ' ' + 'm' + '\n')
+
+    random.shuffle(splitB)
+    split_ind = int(len(splitB) * 0.8)
+    split_train = splitB[0:split_ind:]
+    split_val = splitB[split_ind::]
+
+    split_type = 'train'
+    wf1 = open(os.path.join(split_root, 'syn_{}_files.txt'.format(split_type)), "w")
+    for idx, entry in enumerate(split_train):
+        wf1.write(entry)
+    wf1.close()
+
+    split_type = 'val'
+    wf1 = open(os.path.join(split_root, 'syn_{}_files.txt'.format(split_type)), "w")
+    for idx, entry in enumerate(split_val):
+        wf1.write(entry)
+    wf1.close()
+
 if __name__ == "__main__":
-    create_sfnorm_split()
+    create_sfnorm2_split()

@@ -201,10 +201,10 @@ def visualize_check(data, i):
 def organize_visuals(to_visuals, rgb_A, rgb_B, is_eval = False):
     to_visuals_organized = dict()
 
-    comb1_sets = ['real_A', 'fake_A', 'rec_A']
-    comb2_sets = ['real_B', 'fake_B', 'rec_B']
-    comb3_sets = ['real_A_sfnorm', 'fake_A_sfnorm', 'rec_A_sfnorm']
-    comb4_sets = ['real_B_sfnorm', 'fake_B_sfnorm', 'rec_B_sfnorm']
+    comb1_sets = ['real_A', 'fake_B', 'rec_A']
+    comb2_sets = ['real_B', 'fake_A', 'rec_B']
+    comb3_sets = ['real_A_sfnorm', 'fake_B_sfnorm', 'rec_A_sfnorm']
+    comb4_sets = ['real_B_sfnorm', 'fake_A_sfnorm', 'rec_B_sfnorm']
     comb5_sets = ['idt_A', 'idt_B']
 
     comb1 = list()
