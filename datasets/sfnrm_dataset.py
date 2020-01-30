@@ -139,6 +139,7 @@ class SFNormDataset(data.Dataset):
         gt_depth = cv2.imread(gt_depth_path, -1)
         if gt_depth is None:
             gt_depth = np.zeros([375, 1242])
+        # gt_depth = np.zeros([375, 1242])
         gt_depth = np.array(gt_depth).astype(np.float32) / 256
 
         inputs['A_rgb'] = A_rgb

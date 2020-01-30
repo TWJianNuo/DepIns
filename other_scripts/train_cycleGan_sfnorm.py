@@ -331,7 +331,7 @@ if __name__ == "__main__":
                     sum_writers.add_scalar(l, v, total_iters)
                 to_visuals = model.get_current_visuals()
 
-                if torch.sum(torch.sum(data['gt_depth'], [0,2,3]) == 0) == 0:
+                if torch.sum(torch.sum(data['gt_depth'], [0,2,3]) < 10) == 0:
 
                     eval_metrics = compute_depth_losses(depth_pred = to_visuals['fake_B'], depth_gt = data['gt_depth'].cuda())
                     eval_metrics_bs = compute_depth_losses(depth_pred = to_visuals['real_A'], depth_gt = data['gt_depth'].cuda())

@@ -64,11 +64,16 @@ def export_gt_depths_kitti():
 
     opt = parser.parse_args()
 
-    lines = collect_all_entries(opt.data_path)
+    # lines = collect_all_entries(opt.data_path)
+    # split_file = '/media/shengjie/other/Depins/Depins/splits/eigen/test_files.txt'
+    split_file = '/media/shengjie/other/Depins/Depins/splits/sfnorm/trainA.txt'
+    with open(split_file) as f:
+        lines = f.readlines()
 
     print("Exporting ground truth depths")
 
     mapping = {'l': 'image_02', 'r': 'image_03'}
+    mapping_cam = {'l': 2, 'r': 3}
 
     ts = time.time()
 
@@ -86,8 +91,8 @@ def export_gt_depths_kitti():
         if not os.path.isfile(velo_filename):
             continue
 
-        gt_depth = generate_depth_map(calib_dir, velo_filename, 2, True)
-        gt_depth = cv2.resize(gt_depth, (1242, 375), cv2.INTER_NEAREST)
+        gt_depth = generate_depth_map(calib_dir, velo_filename, cam=mapping_cam[direction], vel_depth = True)
+        # gt_depth = cv2.resize(gt_depth, (1242, 375), cv2.INTER_NEAREST)
 
         gt_depth = np.uint16(gt_depth * 256)
 
