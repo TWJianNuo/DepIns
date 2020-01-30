@@ -198,7 +198,7 @@ def visualize_check(data, i):
     if i < 100:
         pil.fromarray(figCombined).save(os.path.join(visualization_root, str(i).zfill(10) + '.png'))
 
-def organize_visuals(to_visuals, rgb_A, rgb_B):
+def organize_visuals(to_visuals, rgb_A, rgb_B, is_eval = False):
     to_visuals_organized = dict()
 
     comb1_sets = ['real_A', 'fake_A', 'rec_A']
@@ -231,18 +231,20 @@ def organize_visuals(to_visuals, rgb_A, rgb_B):
     comb4 = torch.cat(comb4, dim=2)
     comb4 = tensor2rgb(comb4, ind=0)
 
-    comb5 = list()
-    for img_name in comb5_sets:
-        comb5.append(1 - (to_visuals[img_name] + 1) / 2)
-    comb5 = torch.cat(comb5, dim=2)
-    comb5 = tensor2disp(comb5, vmax=1, ind=0)
+    if not is_eval:
+        comb5 = list()
+        for img_name in comb5_sets:
+            comb5.append(1 - (to_visuals[img_name] + 1) / 2)
+        comb5 = torch.cat(comb5, dim=2)
+        comb5 = tensor2disp(comb5, vmax=1, ind=0)
 
     comb6 = torch.cat([rgb_A, rgb_B], dim=2)
     comb6 = tensor2rgb(comb6, ind=0)
 
     to_visuals_organized['AB_depth'] = torch.from_numpy(np.concatenate([np.array(comb1), np.array(comb2)], axis=1)).permute([2,0,1]).float()/255
     to_visuals_organized['AB_sfnorm'] = torch.from_numpy(np.concatenate([np.array(comb3), np.array(comb4)], axis=1)).permute([2,0,1]).float()/255
-    to_visuals_organized['idt'] = torch.from_numpy(np.array(comb5)).permute([2,0,1]).float()/255
+    if not is_eval:
+        to_visuals_organized['idt'] = torch.from_numpy(np.array(comb5)).permute([2,0,1]).float()/255
     to_visuals_organized['rgb'] = torch.from_numpy(np.array(comb6)).permute([2,0,1]).float()/255
 
     return to_visuals_organized
@@ -262,7 +264,7 @@ def compute_depth_losses(depth_pred, depth_gt):
         depth_pred, [375, 1242], mode="bilinear", align_corners=False), 1e-3, 80)
     depth_pred = depth_pred.detach()
 
-    mask = depth_gt > 0
+    mask = (depth_gt > 1e-3) * (depth_gt < 80)
 
     # garg/eigen crop
     crop_mask = torch.zeros_like(mask)
@@ -271,7 +273,6 @@ def compute_depth_losses(depth_pred, depth_gt):
 
     depth_gt = depth_gt[mask]
     depth_pred = depth_pred[mask]
-    depth_pred *= torch.median(depth_gt) / torch.median(depth_pred)
 
     depth_pred = torch.clamp(depth_pred, min=1e-3, max=80)
 
@@ -281,6 +282,7 @@ def compute_depth_losses(depth_pred, depth_gt):
         losses[metric_name[i]] = np.array(depth_errors[i].cpu())
 
     return losses
+
 
 if __name__ == "__main__":
 
@@ -292,21 +294,22 @@ if __name__ == "__main__":
         shuffle=not opts.serial_batches,
         num_workers=int(opts.num_workers))
 
-    # opts_test = copy.deepcopy(opts)
-    # opts_test.phase = 'test'
-    # dataset_test = SFNormDataset(opts_test)
-    # dataset_test = torch.utils.data.DataLoader(
-    #     dataset_test,
-    #     batch_size=opts.batch_size,
-    #     shuffle=not opts.serial_batches,
-    #     num_workers=int(opts.num_workers))
+    opts_val = copy.deepcopy(opts)
+    opts_val.phase = 'val'
+    dataset_val = SFNormDataset(opts_val)
+    dataset_val = torch.utils.data.DataLoader(
+        dataset_val,
+        batch_size=opts.batch_size,
+        shuffle=not opts.serial_batches,
+        num_workers=int(opts.num_workers))
+    val_iter = iter(dataset_val)
 
     model = create_model(opts)  # create a model given opt.model and other options
     model.setup(opts)  # regular setup: load and print networks; create schedulers
     total_iters = 0                # the total number of training iterations
 
     sum_writers = SummaryWriter(os.path.join(opts.log_dir, opts.model_name, 'train'))
-    # sum_writers_val = SummaryWriter(os.path.join(opts.log_dir, opts.model_name, 'val'))
+    sum_writers_val = SummaryWriter(os.path.join(opts.log_dir, opts.model_name, 'val'))
 
     os.makedirs(os.path.join(opts.log_dir, opts.model_name, 'model'), exist_ok=True)
 
@@ -317,7 +320,14 @@ if __name__ == "__main__":
         iter_data_time = time.time()    # timer for data loading per iteration
         epoch_iter = 0                  # the number of training iterations in current epoch, reset to 0 every epoch
 
+        errs = list()
         for i, data in enumerate(dataset):  # inner loop within one epoch
+
+            # if torch.sum(torch.sum(data['gt_depth'], [0, 2, 3]) < 10) == 0:
+            #     eval_metrics_bs = compute_depth_losses(depth_pred=data['A_depth'].cuda(), depth_gt=data['gt_depth'].cuda())
+            #     errs.append([eval_metrics_bs[key] for key in eval_metrics_bs.keys()])
+            # print("finish %f" % (i / dataset.__len__()))
+            # continue
             iter_start_time = time.time()  # timer for computation per iteration
 
             total_iters += opts.batch_size
@@ -355,6 +365,44 @@ if __name__ == "__main__":
                 save_suffix = 'iter_%d' % total_iters if opts.save_by_iter else 'latest'
                 model.save_networks(save_suffix)
 
+
+            # Do evaluation
+            if total_iters % opts.print_freq == 0 or total_iters % opts.display_freq == 0:
+                with torch.no_grad():
+                    try:
+                        val_data = val_iter.next()
+                    except StopIteration:
+                        val_iter = iter(dataset_val)
+                        val_data = val_iter.next()
+                    model.set_input(val_data)
+                    model.forward()
+                    if total_iters % opts.print_freq == 0:
+                        eval_metrics = compute_depth_losses(depth_pred = model.fake_B, depth_gt = val_data['gt_depth'].cuda())
+                        eval_metrics_bs = compute_depth_losses(depth_pred = model.real_A, depth_gt = val_data['gt_depth'].cuda())
+
+                        for l, v in eval_metrics.items():
+                            sum_writers_val.add_scalar('train/' + l, v, total_iters)
+
+                        for l, v in eval_metrics_bs.items():
+                            sum_writers_val.add_scalar('train_bs/' + l, v, total_iters)
+
+                    if total_iters % opts.display_freq == 0:
+                        model.real_A_sfnorm = model.compute_sfnorm(model.real_A, model.inv_camK)
+                        model.fake_A_sfnorm = model.compute_sfnorm(model.fake_A, model.inv_camK)
+                        model.rec_A_sfnorm = model.compute_sfnorm(model.rec_A, model.inv_camK)
+
+                        model.real_B_sfnorm = model.compute_sfnorm(model.real_B, model.inv_camK)
+                        model.fake_B_sfnorm = model.compute_sfnorm(model.fake_B, model.inv_camK)
+                        model.rec_B_sfnorm = model.compute_sfnorm(model.rec_B, model.inv_camK)
+
+                        to_visuals = model.get_current_visuals()
+                        to_visuals = organize_visuals(to_visuals, rgb_A=data['A_rgb'], rgb_B=data['B_rgb'], is_eval = True)
+
+                        for l, v in to_visuals.items():
+                            sum_writers_val.add_image(l, v, total_iters)
+
+        # errs_stat= np.array(errs)
+        # break
         if epoch % opts.save_epoch_freq == 0:              # cache our model every <save_epoch_freq> epochs
             print('saving the model at the end of epoch %d, iters %d' % (epoch, total_iters))
             model.save_networks('latest')

@@ -191,6 +191,7 @@ def create_kitti_style_real2virtual():
                 docs = shutil.copyfile(srcf, dstf)
                 print("%s finished" % docs)
 
+
     for split_type in split_types:
         wf = open(os.path.join(split_root, split_type + 'A' + '.txt'), "w")
         for entry in splitA:
@@ -201,6 +202,8 @@ def create_kitti_style_real2virtual():
         for entry in splitB:
             wf.write(entry + '\n')
         wf.close()
+
+
 
 def create_sfnorm_split():
     real_root = '/media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw'
@@ -240,22 +243,36 @@ def create_sfnorm_split():
             if os.path.exists(os.path.join(vir_root, seq, 'rgb', str(i).zfill(5) + '.png')):
                 splitB.append(seq + ' ' + str(i).zfill(5) + ' ' + 'm')
 
-    for split_type in split_types:
-        wf = open(os.path.join(split_root, split_type + 'A' + '.txt'), "w")
-        for entry in splitA:
-            wf.write(entry + '\n')
-        wf.close()
+    # Create train split
+    split_type = 'train'
+    wf = open(os.path.join(split_root, split_type + 'A' + '.txt'), "w")
+    for entry in splitA:
+        wf.write(entry + '\n')
+    wf.close()
 
-        wf = open(os.path.join(split_root, split_type + 'B' + '.txt'), "w")
-        for entry in splitB:
-            wf.write(entry + '\n')
-        wf.close()
+    wf = open(os.path.join(split_root, split_type + 'B' + '.txt'), "w")
+    for entry in splitB:
+        wf.write(entry + '\n')
+    wf.close()
 
     # Copy test set
     srcf = os.path.join('/media/shengjie/other/Depins/Depins/splits/eigen', 'test_files.txt')
     dstf = os.path.join(split_root, 'test_files.txt')
     docs = shutil.copyfile(srcf, dstf)
-    print("%s finished" % docs)
+    # Create test split
+    srcf = os.path.join('/media/shengjie/other/Depins/Depins/splits/eigen', 'test_files.txt')
+    with open(srcf, 'r') as f:
+        test_entries = f.readlines()
+
+    split_type = 'val'
+    wf1 = open(os.path.join(split_root, split_type + 'A' + '.txt'), "w")
+    wf2 = open(os.path.join(split_root, split_type + 'B' + '.txt'), "w")
+    for idx, entry in enumerate(test_entries):
+        wf1.write(entry)
+        wf2.write(splitB[idx] + '\n')
+    wf1.close()
+    wf2.close()
+
 
 def confirm_projectedGt():
     txt_path = os.path.join('/media/shengjie/other/Depins/Depins/splits/sfnorm', 'trainA.txt')
@@ -271,4 +288,4 @@ def confirm_projectedGt():
             print("Err")
     print("Evaluation finished")
 if __name__ == "__main__":
-    confirm_projectedGt()
+    create_sfnorm_split()

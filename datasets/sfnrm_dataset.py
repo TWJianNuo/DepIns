@@ -33,6 +33,8 @@ class SFNormDataset(data.Dataset):
         self.opt = opt
         self.mapping = {'l' : 'image_02', 'r' : 'image_03', 'm' : ''}
         self.init_datasetB_extrinsics()
+        self.minEval_depth = 1e-3
+        self.maxEval_depth = 80
 
     def init_datasetB_extrinsics(self):
         seqs = ['0001', '0002', '0006', '0018', '0020']
@@ -82,8 +84,8 @@ class SFNormDataset(data.Dataset):
         return intrinsic_B, extrinsic_B
 
     def normalize_depth(self, depthmap):
-        depthmap = np.clip(depthmap, a_min=self.opt.min_depth, a_max=self.opt.max_depth)
-        depthmap = (depthmap - self.opt.min_depth) / (self.opt.max_depth - self.opt.min_depth)
+        depthmap = np.clip(depthmap, a_min=self.minEval_depth, a_max=self.maxEval_depth)
+        depthmap = (depthmap - self.minEval_depth) / (self.maxEval_depth - self.minEval_depth)
         depthmap = (depthmap - 0.5) / 0.5
         return depthmap
 
@@ -137,10 +139,13 @@ class SFNormDataset(data.Dataset):
         gt_depth_path = os.path.join(self.opt.gtDepth_path, strAComps[0], self.mapping[strAComps[2]],
                               strAComps[1] + '.png')
         gt_depth = cv2.imread(gt_depth_path, -1)
+
         if gt_depth is None:
             gt_depth = np.zeros([375, 1242])
+        else:
+            gt_depth = gt_depth.astype(np.float32) / 256
+            gt_depth = cv2.resize(gt_depth, (1242, 375), interpolation = cv2.INTER_NEAREST)
         # gt_depth = np.zeros([375, 1242])
-        gt_depth = np.array(gt_depth).astype(np.float32) / 256
 
         inputs['A_rgb'] = A_rgb
         inputs['B_rgb'] = B_rgb
