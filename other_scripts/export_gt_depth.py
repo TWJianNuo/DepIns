@@ -64,11 +64,11 @@ def export_gt_depths_kitti():
 
     opt = parser.parse_args()
 
-    # lines = collect_all_entries(opt.data_path)
+    lines = collect_all_entries(opt.data_path)
     # split_file = '/media/shengjie/other/Depins/Depins/splits/eigen/test_files.txt'
-    split_file = '/media/shengjie/other/Depins/Depins/splits/sfnorm/trainA.txt'
-    with open(split_file) as f:
-        lines = f.readlines()
+    # split_file = '/media/shengjie/other/Depins/Depins/splits/sfnorm/trainA.txt'
+    # with open(split_file) as f:
+    #     lines = f.readlines()
 
     print("Exporting ground truth depths")
 
