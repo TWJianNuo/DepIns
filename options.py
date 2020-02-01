@@ -122,6 +122,9 @@ class MonodepthOptions:
         self.parser.add_argument("--print_freq",
                                  default=50,
                                  type=int)
+        self.parser.add_argument("--script_name",
+                                 type=str
+                                 )
 
 
 

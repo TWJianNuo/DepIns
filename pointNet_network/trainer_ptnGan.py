@@ -25,6 +25,7 @@ import networks
 from IPython import embed
 
 import torchvision.transforms
+from pointNet_network.pointNet_model import PointNetCls
 def additional_opts_init(opts):
     opts.phase = 'train'
     opts.lr_policy = 'linear'
@@ -101,32 +102,8 @@ class Trainer_GAN:
         self.models["depth"].to(self.device)
         self.parameters_to_train += list(self.models["depth"].parameters())
 
-        self.models['sfnD'] = networks.SfnD(self.opt)
-        if self.use_pose_net:
-            if self.opt.pose_model_type == "separate_resnet":
-                self.models["pose_encoder"] = networks.ResnetEncoder(
-                    self.opt.num_layers,
-                    self.opt.weights_init == "pretrained",
-                    num_input_images=self.num_pose_frames)
-
-                self.models["pose_encoder"].to(self.device)
-                self.parameters_to_train += list(self.models["pose_encoder"].parameters())
-
-                self.models["pose"] = networks.PoseDecoder(
-                    self.models["pose_encoder"].num_ch_enc,
-                    num_input_features=1,
-                    num_frames_to_predict_for=2)
-
-            elif self.opt.pose_model_type == "shared":
-                self.models["pose"] = networks.PoseDecoder(
-                    self.models["encoder"].num_ch_enc, self.num_pose_frames)
-
-            elif self.opt.pose_model_type == "posecnn":
-                self.models["pose"] = networks.PoseCNN(
-                    self.num_input_frames if self.opt.pose_model_input == "all" else 2)
-
-            self.models["pose"].to(self.device)
-            self.parameters_to_train += list(self.models["pose"].parameters())
+        self.models['sfnD'] = PointNetCls(k = 2, feature_transform = False)
+        self.models['sfnD'].to(self.device)
 
         if self.opt.predictive_mask:
             assert self.opt.disable_automasking, \
@@ -166,13 +143,13 @@ class Trainer_GAN:
 
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, syn_train_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, opts = opts, is_train=True)
+            self.opt.frame_ids, 4, opts = opts, is_train=True, load_seman=True)
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         val_dataset = self.dataset(
             self.opt.data_path, val_filenames, syn_val_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, opts = opts, is_train=False)
+            self.opt.frame_ids, 4, opts = opts, is_train=False, load_seman=True)
         self.val_loader = DataLoader(
             val_dataset, self.opt.batch_size, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
@@ -719,5 +696,7 @@ opts = options.parse()
 
 
 if __name__ == "__main__":
+    script_name = os.path.basename(__file__)
+    assert opts.script_name == script_name, print("Please Specify correct script name\n")
     trainer = Trainer_GAN(opts)
     trainer.train()

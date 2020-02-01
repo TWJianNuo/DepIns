@@ -222,7 +222,7 @@ class SFGAN_Base_Dataset(data.Dataset):
         inputs.update(self.get_camK(folder, frame_index, side, do_flip))
 
         if self.load_seman:
-            inputs['semanLabel'] = self.get_seman(folder, frame_index, side, do_flip)
+            inputs['real_semanLabel'] = self.get_seman_real(folder, frame_index, side, do_flip)
 
         return inputs
 
@@ -329,26 +329,46 @@ class SFGAN_Base_Dataset(data.Dataset):
 
         return outputs
 
-    def get_seman(self, folder, frame_index, side, do_flip):
-        rgb_path = self.get_image_path(folder, frame_index, side)
+    def get_seman_real(self, folder, frame_index, side, do_flip):
+        seman_real_path = os.path.join(self.opts.data_path, folder, 'semantic_prediction', "image_0{}".format(self.side_map[side]), str(frame_index).zfill(10) + '.png')
 
-        if 'image_03' in rgb_path:
-            semantic_label_path = rgb_path.replace('image_03/data', 'semantic_prediction/image_03')
-        elif 'image_02' in rgb_path:
-            semantic_label_path = rgb_path.replace('image_02/data', 'semantic_prediction/image_02')
+        semantic_label = pil.open(seman_real_path)
 
-        semantic_label = pil.open(semantic_label_path)
+        # Do resize
+        semantic_label = pil.Image.resize(semantic_label, [self.opts.width, self.opts.height], resample = Image.NEAREST)
 
+        # Do flip
         if do_flip:
             semantic_label = semantic_label.transpose(pil.FLIP_LEFT_RIGHT)
         semantic_label_copy = np.array(semantic_label.copy())
 
+        # Do label transformation
         for k in np.unique(semantic_label):
             semantic_label_copy[semantic_label_copy == k] = labels[k].trainId
 
         # visualize_semantic(semantic_label_copy)
         semantic_label_copy = np.expand_dims(semantic_label_copy, axis=0)
         return semantic_label_copy
+
+    def get_seman_syn(self, folder, frame_index, do_flip):
+        seman_real_path = os.path.join(self.opts.synRoot, folder, 'scenegt', str(frame_index).zfill(4) + '.png')
+
+        semantic_label = pil.open(seman_real_path)
+
+        # Do resize
+        semantic_label = pil.Image.resize(semantic_label, [self.opts.width, self.opts.height], resample = Image.NEAREST)
+
+        # Do flip
+        if do_flip:
+            semantic_label = semantic_label.transpose(pil.FLIP_LEFT_RIGHT)
+        semantic_label_copy = np.array(semantic_label.copy())
+
+        # Do label transformation
+        for k in np.unique(semantic_label):
+            semantic_label_copy[semantic_label_copy == k] = labels[k].trainId
+
+        # visualize_semantic(semantic_label_copy)
+        semantic_label_copy = np.expand_dims(semantic_label_copy, axis=0)
 
     def get_syn_data(self, index):
         do_flip = random.random() > 0.5
@@ -365,6 +385,8 @@ class SFGAN_Base_Dataset(data.Dataset):
         B_path = os.path.join(self.opts.synRoot, seq, 'depthgt', frame_ind + '.png')
         B_depth = np.array(cv2.imread(B_path, -1)).astype(np.float32) / 100 # 1 intensity inidicates 1 cm, max is 655.35 meters
 
+        # Read Semantic Label
+        inputs['syn_semanLabel'] = self.get_seman_syn(folder = seq, frame_index=frame_ind, do_flip = do_flip)
         if do_flip:
             B_rgb = np.copy(np.fliplr(B_rgb))
             B_depth = np.copy(np.fliplr(B_depth))
