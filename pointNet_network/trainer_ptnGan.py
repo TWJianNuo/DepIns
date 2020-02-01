@@ -444,6 +444,75 @@ class Trainer_GAN:
 
         return reprojection_loss
 
+    def check_depthMap(self, inputs, outputs):
+        import matlab
+        import matlab.engine
+        eng = matlab.engine.start_matlab()
+
+        xx, yy = np.meshgrid(range(self.opt.width), range(self.opt.height), indexing='xy')
+        xx = torch.from_numpy(xx).unsqueeze(0).unsqueeze(0).expand([self.opt.batch_size, 1, -1, -1]).cuda().float()
+        yy = torch.from_numpy(yy).unsqueeze(0).unsqueeze(0).expand([self.opt.batch_size, 1, -1, -1]).cuda().float()
+        pixelLocs = torch.cat([xx, yy], dim=1)
+
+
+        pts3d_rec = list()
+        mono_sampledColor_rec = list()
+
+        # Sync
+        predDepth = inputs[('syn_depth', 0)]
+        pts3d = backProjTo3d(pixelLocs, predDepth, inputs[('invcamK', 0)])
+        mono_projected2d, _, _ = project_3dptsTo2dpts(pts3d=pts3d, camKs=inputs[('camK', 0)])
+        mono_sampledColor = sampleImgs(inputs[('syn_rgb', 0)], mono_projected2d)
+        pts3d_rec.append(pts3d)
+        mono_sampledColor_rec.append(mono_sampledColor)
+
+        # Real
+        predDepth = outputs[('depth', 0, 0)]
+        pts3d = backProjTo3d(pixelLocs, predDepth, inputs[('invcamK', 0)])
+        mono_projected2d, _, _ = project_3dptsTo2dpts(pts3d=pts3d, camKs=inputs[('camK', 0)])
+        mono_sampledColor = sampleImgs(inputs[('color', 0, 0)], mono_projected2d)
+        pts3d_rec.append(pts3d)
+        mono_sampledColor_rec.append(mono_sampledColor)
+
+
+        downsample_rat = 10
+        drawIndex = 0
+
+        eng.eval('figure()', nargout=0)
+        for i in range(2):
+            # In order of Sync-Real
+            pts3d = pts3d_rec[i]
+            mono_sampledColor = mono_sampledColor_rec[i]
+
+            draw_mono_sampledColor = mono_sampledColor[drawIndex, :, :, :].detach().cpu().view(3, -1).permute([1,0]).numpy()[::downsample_rat, :]
+            drawX_mono = pts3d[drawIndex, 0, :, :].detach().cpu().numpy().flatten()[::downsample_rat]
+            drawY_mono = pts3d[drawIndex, 1, :, :].detach().cpu().numpy().flatten()[::downsample_rat]
+            drawZ_mono = pts3d[drawIndex, 2, :, :].detach().cpu().numpy().flatten()[::downsample_rat]
+            draw_mono_sampledColor = matlab.double(draw_mono_sampledColor.tolist())
+            drawX_mono = matlab.double(drawX_mono.tolist())
+            drawY_mono = matlab.double(drawY_mono.tolist())
+            drawZ_mono = matlab.double(drawZ_mono.tolist())
+            if i == 0:
+                h = eng.scatter3(drawX_mono, drawY_mono, drawZ_mono, 5, 'r', 'filled', nargout=0)
+            else:
+                h = eng.scatter3(drawX_mono, drawY_mono, drawZ_mono, 5, draw_mono_sampledColor, 'filled', nargout = 0)
+            eng.eval('hold on', nargout=0)
+        eng.eval('axis equal', nargout = 0)
+        xlim = matlab.double([0, 50])
+        ylim = matlab.double([-10, 10])
+        zlim = matlab.double([-5, 5])
+        eng.xlim(xlim, nargout=0)
+        eng.ylim(ylim, nargout=0)
+        eng.zlim(zlim, nargout=0)
+        eng.eval('view([-79 17])', nargout=0)
+        eng.eval('camzoom(1.2)', nargout=0)
+        eng.eval('grid off', nargout=0)
+        # eng.eval('set(gca,\'YTickLabel\',[]);', nargout=0)
+        # eng.eval('set(gca,\'XTickLabel\',[]);', nargout=0)
+        # eng.eval('set(gca,\'ZTickLabel\',[]);', nargout=0)
+        eng.eval('set(gca, \'XColor\', \'none\', \'YColor\', \'none\', \'ZColor\', \'none\')', nargout=0)
+
+
     def compute_losses(self, inputs, outputs, istrain = True):
         """Compute the reprojection and smoothness losses for a minibatch
         """
@@ -531,17 +600,12 @@ class Trainer_GAN:
             total_loss += loss
             losses["loss/{}".format(scale)] = loss
 
-
-            # Add discriminator loss
-            self.models['sfnD'].set_input(real=outputs[('orgScale_depth', 0, scale)], syn=inputs[('syn_depth', scale)], inv_camK=inputs[('invcamK', scale)], scale=scale)
-            if istrain:
-                self.models['sfnD'].optimize_parameters()
-
-            loss_D = self.models['sfnD'].forward()
-            losses["loss_D/{}".format(scale)] = loss_D
-            total_loss += loss_D * self.opt.discrimScale
-
         total_loss /= self.num_scales
+
+
+        # Add Discriminator Loss
+        self.check_depthMap(inputs, outputs)
+
         losses["loss"] = total_loss
         return losses
 

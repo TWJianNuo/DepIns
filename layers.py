@@ -450,7 +450,6 @@ class ComputeSurfaceNormal(nn.Module):
         self.height = height
         self.width = width
         self.batch_size = batch_size
-        # self.surnormType = ['road', 'sidewalk', 'building', 'wall', 'fence', 'pole', 'traffic sign', 'terrain']
         xx, yy = np.meshgrid(np.arange(self.width), np.arange(self.height))
         xx = xx.flatten().astype(np.float32)
         yy = yy.flatten().astype(np.float32)
@@ -495,49 +494,3 @@ class ComputeSurfaceNormal(nn.Module):
         surfnorm = torch.cross(changex, changey, dim=1)
         surfnorm = F.normalize(surfnorm, dim = 1)
         return surfnorm
-
-    def visualize(self, depthMap, invcamK, orgEstPts = None, gtEstPts = None, viewindex = 0):
-        # First compute 3d points in vehicle coordinate system
-        depthMap = depthMap.view(self.batch_size, -1)
-        cam_coords = self.pix_coords * torch.stack([depthMap, depthMap, depthMap], dim=1)
-        cam_coords = torch.cat([cam_coords, self.ones], dim=1)
-        veh_coords = torch.matmul(invcamK, cam_coords)
-        veh_coords = veh_coords.view(self.batch_size, 4, self.height, self.width)
-        veh_coords = veh_coords
-        changex = torch.cat([self.convx(veh_coords[:, 0:1, :, :]), self.convx(veh_coords[:, 1:2, :, :]), self.convx(veh_coords[:, 2:3, :, :])], dim=1)
-        changey = torch.cat([self.convy(veh_coords[:, 0:1, :, :]), self.convy(veh_coords[:, 1:2, :, :]), self.convy(veh_coords[:, 2:3, :, :])], dim=1)
-        surfnorm = torch.cross(changex, changey, dim=1)
-        surfnorm = F.normalize(surfnorm, dim = 1)
-
-        # check
-        # ckInd = 22222
-        # x = self.pix_coords[viewindex, 0, ckInd].long()
-        # y = self.pix_coords[viewindex, 1, ckInd].long()
-        # ptsck = veh_coords[viewindex, :, y, x]
-        # projecteck = torch.inverse(invcamK)[viewindex, :, :].cpu().numpy() @ ptsck.cpu().numpy().T
-        # x_ = projecteck[0] / projecteck[2]
-        # y_ = projecteck[1] / projecteck[2] # (x, y) and (x_, y_) should be equal
-
-        # colorize this figure
-        surfacecolor = surfnorm / 2 + 0.5
-        img = surfacecolor[viewindex, :, :, :].permute(1,2,0).detach().cpu().numpy()
-        img = (img * 255).astype(np.uint8)
-        # pil.fromarray(img).show()
-
-        # objreg = ObjRegularization()
-        # varloss = varLoss(scale=1, windowsize=7, inchannel=surfnorm.shape[1])
-        # var = varloss(surfnorm)
-        # if orgEstPts is not None and gtEstPts is not None:
-        #     testPts = veh_coords[viewindex, :, :].permute(1,0).cpu().numpy()
-        #     fig = plt.figure()
-        #     ax = Axes3D(fig)
-        #     ax.view_init(elev=6., azim=170)
-        #     ax.dist = 4
-        #     ax.scatter(orgEstPts[0::100, 0], orgEstPts[0::100, 1], orgEstPts[0::100, 2], s=0.1, c='b')
-        #     ax.scatter(testPts[0::10, 0], testPts[0::10, 1], testPts[0::10, 2], s=0.1, c='g')
-        #     ax.scatter(gtEstPts[0::100, 0], gtEstPts[0::100, 1], gtEstPts[0::100, 2], s=0.1, c='r')
-        #     ax.set_zlim(-10, 10)
-        #     plt.ylim([-10, 10])
-        #     plt.xlim([10, 16])
-        #     set_axes_equal(ax)
-        return pil.fromarray(img)

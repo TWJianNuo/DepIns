@@ -351,7 +351,7 @@ class SFGAN_Base_Dataset(data.Dataset):
         return semantic_label_copy
 
     def get_seman_syn(self, folder, frame_index, do_flip):
-        seman_real_path = os.path.join(self.opts.synRoot, folder, 'scenegt', str(frame_index).zfill(4) + '.png')
+        seman_real_path = os.path.join(self.opts.synRoot, folder, 'scene_label', str(frame_index).zfill(4) + '.png')
 
         semantic_label = pil.open(seman_real_path)
 
@@ -370,6 +370,8 @@ class SFGAN_Base_Dataset(data.Dataset):
         # visualize_semantic(semantic_label_copy)
         semantic_label_copy = np.expand_dims(semantic_label_copy, axis=0)
 
+        return semantic_label_copy
+
     def get_syn_data(self, index):
         do_flip = random.random() > 0.5
         index = index % len(self.syn_filenames)
@@ -386,16 +388,15 @@ class SFGAN_Base_Dataset(data.Dataset):
         B_depth = np.array(cv2.imread(B_path, -1)).astype(np.float32) / 100 # 1 intensity inidicates 1 cm, max is 655.35 meters
 
         # Read Semantic Label
-        inputs['syn_semanLabel'] = self.get_seman_syn(folder = seq, frame_index=frame_ind, do_flip = do_flip)
+        B_semanLabel = self.get_seman_syn(folder = seq, frame_index=frame_ind, do_flip = do_flip)
         if do_flip:
             B_rgb = np.copy(np.fliplr(B_rgb))
             B_depth = np.copy(np.fliplr(B_depth))
-
-        inputs[('syn_rgb', 0)] = np.moveaxis(cv2.resize(B_rgb, (self.opts.width, self.opts.height), interpolation = cv2.INTER_LINEAR), [0,1,2], [2,0,1])
-        inputs[('syn_depth', 0)] = cv2.resize(B_depth, (self.opts.width, self.opts.height), interpolation = cv2.INTER_LINEAR)
+            B_semanLabel = np.copy(np.fliplr(B_semanLabel ))
+        inputs[('syn_rgb', 0)] = np.moveaxis(cv2.resize(B_rgb, (self.opts.width, self.opts.height), interpolation = cv2.INTER_LINEAR), [0,1,2], [1,2,0])
+        inputs[('syn_depth', 0)] = np.expand_dims(cv2.resize(B_depth, (self.opts.width, self.opts.height), interpolation = cv2.INTER_LINEAR), axis=0)
+        inputs['syn_semanLabel'] = B_semanLabel
         for i in range(1, self.num_scales):
             inputs[('syn_depth', i)] = np.expand_dims(cv2.resize(B_depth, (int(self.opts.width / np.power(2,i)), int(self.opts.height / np.power(2,i))), interpolation = cv2.INTER_LINEAR), axis=0)
-
-
 
         return inputs
