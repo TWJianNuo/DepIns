@@ -221,7 +221,8 @@ class Trainer_GAN:
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
             # if (self.epoch + 1) % self.opt.save_frequency == 0:
-            #     self.save_model()
+            if (self.step + 1) % self.opt.save_frequency == 0:
+                self.save_model()
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -845,7 +846,7 @@ class Trainer_GAN:
     def save_model(self):
         """Save model weights to disk
         """
-        save_folder = os.path.join(self.log_path, "models", "weights_{}".format(self.epoch))
+        save_folder = os.path.join(self.log_path, "models", "weights_step{}".format(self.step))
         if not os.path.exists(save_folder):
             os.makedirs(save_folder)
 
@@ -864,9 +865,9 @@ class Trainer_GAN:
         torch.save(self.model_optimizer.state_dict(), save_path)
 
         # Save SfnD adam params
-        save_path = os.path.join(save_folder, "{}.pth".format("sfn_adam"))
+        save_path = os.path.join(save_folder, "{}.pth".format("ptn_adam"))
         torch.save(self.models['sfnD'].optimizer_D.state_dict(), save_path)
-        print("Model %f saved" % self.opt.model_name)
+        print("Model %s saved" % self.opt.model_name)
     def load_model(self):
         """Load model(s) from disk
         """
