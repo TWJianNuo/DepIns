@@ -276,7 +276,7 @@ class SFGAN_Base_Dataset(data.Dataset):
 
     def get_velo(self, velo_filename):
         maxNum = 100000
-        velo = np.zeros([maxNum, 4]).astype(np.float32)
+        velo = np.ones([maxNum, 4]).astype(np.float32) * (-10.0)
 
         velo_pts = load_velodyne_points(velo_filename)
         velo_pts = velo_pts[velo_pts[:, 0] > 0, :]
@@ -373,7 +373,7 @@ class SFGAN_Base_Dataset(data.Dataset):
         return semantic_label_copy
 
     def get_syn_data(self, index):
-        do_flip = random.random() > 0.5
+        do_flip = self.is_train and random.random() > 0.5
         index = index % len(self.syn_filenames)
 
         inputs = {}

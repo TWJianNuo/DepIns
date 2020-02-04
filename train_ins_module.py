@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d, Axes3D #<-- Note the capitalization!
 from options import MonodepthOptions
 
+import copy
 
 class InsTrainer:
     def __init__(self, options):
@@ -120,13 +121,13 @@ class InsTrainer:
             detect_path=self.opt.detect_path, load_seman = self.opt.loadSeman, load_pose=self.opt.loadPose,
             loadPredDepth = self.opt.loadPredDepth, predDepthPath = self.opt.predDepthPath)
         self.train_loader = DataLoader(
-            train_dataset, self.opt.batch_size,  shuffle = not self.opt.noshuffle,
+            train_dataset, self.opt.batch_size,  shuffle = not self.opt.noShuffle,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         val_dataset = self.dataset(
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=False, img_ext=img_ext, load_detect=self.opt.predins, detect_path=self.opt.detect_path, load_seman = self.opt.loadSeman)
         self.val_loader = DataLoader(
-            val_dataset, self.opt.batch_size, shuffle = not self.opt.noshuffle,
+            val_dataset, self.opt.batch_size, shuffle = not self.opt.noShuffle,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_iter = iter(self.val_loader)
 
@@ -348,7 +349,7 @@ class InsTrainer:
         mono_projected2d, _, _ = project_3dptsTo2dpts(pts3d=pts3d, camKs=inputs['camK'])
         mono_sampledColor = sampleImgs(inputs[('color', 0, 0)], mono_projected2d)
 
-        tensor2rgb(inputs[('color_aug', 0, 0)], ind= 0).show()
+        # tensor2rgb(inputs[('color_aug', 0, 0)], ind= 0).show()
 
         drawIndex = 0
         # Set camera of matplotlib
@@ -364,6 +365,12 @@ class InsTrainer:
         drawX = pts3d[drawIndex, 0, :, :].detach().cpu().numpy().flatten()
         drawY = pts3d[drawIndex, 1, :, :].detach().cpu().numpy().flatten()
         drawZ = pts3d[drawIndex, 2, :, :].detach().cpu().numpy().flatten()
+
+        draw_mono_sampledColor_pred = copy.deepcopy(draw_mono_sampledColor)
+        drawX_pred = copy.deepcopy(drawX)
+        drawY_pred = copy.deepcopy(drawY)
+        drawZ_pred = copy.deepcopy(drawZ)
+
         fig = plt.figure()
         ax = Axes3D(fig)
         ax.scatter(drawX[::downsample_rat], drawY[::downsample_rat],
@@ -390,6 +397,11 @@ class InsTrainer:
         drawZ = drawVelo[drawSelector, 2]
         drawColor = sampledColor[drawIndex, :, :].cpu().permute([1, 0]).numpy()[drawSelector, :]
 
+        draw_mono_sampledColor_velo = copy.deepcopy(drawColor)
+        drawX_velo = copy.deepcopy(drawX)
+        drawY_velo = copy.deepcopy(drawY)
+        drawZ_velo = copy.deepcopy(drawZ)
+
         drawPts3dVal = pts3d[drawIndex, :, :, :].view(4, -1).cpu().permute([1, 0]).numpy()
         downsample_rat = 10
 
@@ -405,12 +417,20 @@ class InsTrainer:
         plt.show()
 
 
-        drawX_mat = matlab.double(drawX.tolist())
-        drawY_mat = matlab.double(drawY.tolist())
-        drawZ_mat = matlab.double(drawZ.tolist())
-        h = eng.scatter3(drawX_mat, drawY_mat, drawZ_mat, '.')
+        import matlab
+        import matlab.engine
+        eng = matlab.engine.start_matlab()
+        drawX_pred = matlab.double(drawX_pred.tolist())
+        drawY_pred = matlab.double(drawY_pred.tolist())
+        drawZ_pred = matlab.double(drawZ_pred.tolist())
+        h = eng.scatter3(drawX_pred, drawY_pred, drawZ_pred, '.', 'r')
+        eng.eval('hold on', nargout=0)
+
+        drawX_velo = matlab.double(drawX_velo.tolist())
+        drawY_velo = matlab.double(drawY_velo.tolist())
+        drawZ_velo = matlab.double(drawZ_velo.tolist())
+        h = eng.scatter3(drawX_velo, drawY_velo, drawZ_velo, '.', 'g')
         eng.eval('axis equal', nargout = 0)
-        eng.eval('camzoom(8)', nargout = 0)
 
     def check_selfMov(self, inputs, outputs):
         cur_ind = 0

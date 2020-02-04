@@ -26,6 +26,9 @@ from IPython import embed
 
 import torchvision.transforms
 from pointNet_network.pointNet_model import PointNetCls
+
+from pointNet_network.ptn_discriminator import PtnD
+from mpl_toolkits.mplot3d import axes3d, Axes3D #<-- Note the capitalization!
 def additional_opts_init(opts):
     opts.phase = 'train'
     opts.lr_policy = 'linear'
@@ -53,7 +56,6 @@ def additional_opts_init(opts):
     opts.epoch_count = 1
     opts.n_epochs = 100 # number of epochs with the initial learning rate
     opts.n_epochs_decay = 100 # number of epochs to linearly decay learning rate to zero
-    opts.print_freq = 10
     opts.display_freq = 400
     opts.save_epoch_freq = 5
     opts.save_latest_freq = 5000
@@ -102,7 +104,8 @@ class Trainer_GAN:
         self.models["depth"].to(self.device)
         self.parameters_to_train += list(self.models["depth"].parameters())
 
-        self.models['sfnD'] = PointNetCls(k = 2, feature_transform = False)
+        # self.models['sfnD'] = PointNetCls(k = 1, feature_transform = False)
+        self.models['sfnD'] = PtnD(opt=self.opt, k = 1, feature_transform=False)
         self.models['sfnD'].to(self.device)
 
         if self.opt.predictive_mask:
@@ -143,9 +146,9 @@ class Trainer_GAN:
 
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, syn_train_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, opts = opts, is_train=True, load_seman=True)
+            self.opt.frame_ids, 4, opts = opts, is_train=False, load_seman=True)
         self.train_loader = DataLoader(
-            train_dataset, self.opt.batch_size, True,
+            train_dataset, self.opt.batch_size, shuffle= not self.opt.noShuffle,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         val_dataset = self.dataset(
             self.opt.data_path, val_filenames, syn_val_filenames, self.opt.height, self.opt.width,
@@ -156,7 +159,8 @@ class Trainer_GAN:
         self.val_iter = iter(self.val_loader)
 
         self.writers = {}
-        for mode in ["train", "val"]:
+        # for mode in ["train", "val"]:
+        for mode in ["train"]:
             self.writers[mode] = SummaryWriter(os.path.join(self.log_path, mode))
 
         if not self.opt.no_ssim:
@@ -175,6 +179,10 @@ class Trainer_GAN:
             self.project_3d[scale] = Project3D(self.opt.batch_size, h, w)
             self.project_3d[scale].to(self.device)
 
+        self.distillPtClound = DistillPtCloud(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size)
+        self.distillPtClound.to(self.device)
+        self.STEREO_SCALE_FACTOR = 5.4
+
         self.depth_metric_names = [
             "de/abs_rel", "de/sq_rel", "de/rms", "de/log_rms", "da/a1", "da/a2", "da/a3"]
 
@@ -185,6 +193,13 @@ class Trainer_GAN:
         self.save_opts()
 
         self.toTensor = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
+
+        self.sfnCom = ComputeSurfaceNormal(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size, minDepth=self.opt.min_depth, maxDepth=self.opt.max_depth).cuda()
+        if self.opt.doVisualization:
+            import matlab
+            import matlab.engine
+            self.eng = matlab.engine.start_matlab()
+
     def set_train(self):
         """Convert all models to training mode
         """
@@ -205,8 +220,8 @@ class Trainer_GAN:
         self.start_time = time.time()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
-            if (self.epoch + 1) % self.opt.save_frequency == 0:
-                self.save_model()
+            # if (self.epoch + 1) % self.opt.save_frequency == 0:
+            #     self.save_model()
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -235,22 +250,10 @@ class Trainer_GAN:
             if self.step % self.opt.log_frequency == 0:
                 if "depth_gt" in inputs:
                     self.compute_depth_losses(inputs, outputs, losses)
-                self.log_data(mode="train", losses=losses)
+                # self.log_data(mode="train", losses=losses)
                 self.log_img(mode="train", inputs=inputs, outputs=outputs)
-                self.val()
+                # self.val()
 
-            # log less frequently after the first 2000 steps to save time & disk space
-            # early_phase = batch_idx % self.opt.log_frequency == 0 and self.step < 2000
-            # late_phase = self.step % 2000 == 0
-            #
-            # if early_phase or late_phase:
-            #     self.log_time(batch_idx, duration, losses["loss"].cpu().data)
-            #
-            #     if "depth_gt" in inputs:
-            #         self.compute_depth_losses(inputs, outputs, losses) net
-            #
-            #     self.log("train", inputs, outputs, losses)
-            #     self.val()
 
             self.step += 1
 
@@ -444,10 +447,10 @@ class Trainer_GAN:
 
         return reprojection_loss
 
-    def check_depthMap(self, inputs, outputs):
+    def check_depthMap(self, inputs, outputs, drawIndex):
+        STEREO_SCALE_FACTOR = 5.4
         import matlab
-        import matlab.engine
-        eng = matlab.engine.start_matlab()
+        downsample_rat = 10
 
         xx, yy = np.meshgrid(range(self.opt.width), range(self.opt.height), indexing='xy')
         xx = torch.from_numpy(xx).unsqueeze(0).unsqueeze(0).expand([self.opt.batch_size, 1, -1, -1]).cuda().float()
@@ -467,18 +470,30 @@ class Trainer_GAN:
         mono_sampledColor_rec.append(mono_sampledColor)
 
         # Real
-        predDepth = outputs[('depth', 0, 0)]
+        predDepth = outputs[("depth", 0, 0)] * STEREO_SCALE_FACTOR
         pts3d = backProjTo3d(pixelLocs, predDepth, inputs[('invcamK', 0)])
         mono_projected2d, _, _ = project_3dptsTo2dpts(pts3d=pts3d, camKs=inputs[('camK', 0)])
         mono_sampledColor = sampleImgs(inputs[('color', 0, 0)], mono_projected2d)
         pts3d_rec.append(pts3d)
         mono_sampledColor_rec.append(mono_sampledColor)
 
+        # Velo
+        projected2d, projecDepth, selector = project_3dptsTo2dpts(pts3d=inputs['velo'], camKs=inputs[('camK', 0)])
+        sampledColor = sampleImgs(inputs[('color', 0, 0)], projected2d)
+        drawVelo = inputs['velo'][drawIndex, :, :].cpu().numpy()
+        drawSelector = selector[drawIndex, 0, :].cpu().numpy() > 0
+        drawX_velo = drawVelo[drawSelector, 0]
+        drawY_velo = drawVelo[drawSelector, 1]
+        drawZ_velo = drawVelo[drawSelector, 2]
+        drawColor_velo = sampledColor[drawIndex, :, :].cpu().permute([1, 0]).numpy()[drawSelector, :]
 
-        downsample_rat = 10
-        drawIndex = 0
+        drawX_velo = matlab.double(drawX_velo.tolist())
+        drawY_velo = matlab.double(drawY_velo.tolist())
+        drawZ_velo = matlab.double(drawZ_velo.tolist())
+        drawColor_velo = matlab.double(drawColor_velo.tolist())
 
-        eng.eval('figure()', nargout=0)
+        # self.eng.eval('figure(\'visible\', \'off\')', nargout=0)
+        self.eng.eval('figure()', nargout=0)
         for i in range(2):
             # In order of Sync-Real
             pts3d = pts3d_rec[i]
@@ -493,24 +508,38 @@ class Trainer_GAN:
             drawY_mono = matlab.double(drawY_mono.tolist())
             drawZ_mono = matlab.double(drawZ_mono.tolist())
             if i == 0:
-                h = eng.scatter3(drawX_mono, drawY_mono, drawZ_mono, 5, 'r', 'filled', nargout=0)
+                h = self.eng.scatter3(drawX_mono, drawY_mono, drawZ_mono, 5, 'r', 'filled', nargout=0)
             else:
-                h = eng.scatter3(drawX_mono, drawY_mono, drawZ_mono, 5, draw_mono_sampledColor, 'filled', nargout = 0)
-            eng.eval('hold on', nargout=0)
-        eng.eval('axis equal', nargout = 0)
+                h = self.eng.scatter3(drawX_mono, drawY_mono, drawZ_mono, 5, draw_mono_sampledColor, 'filled', nargout = 0)
+            self.eng.eval('hold on', nargout=0)
+
+        # Draw velo
+        h = self.eng.scatter3(drawX_velo, drawY_velo, drawZ_velo, 5, 'b', 'filled', nargout=0)
+
+        self.eng.eval('axis equal', nargout = 0)
         xlim = matlab.double([0, 50])
         ylim = matlab.double([-10, 10])
         zlim = matlab.double([-5, 5])
-        eng.xlim(xlim, nargout=0)
-        eng.ylim(ylim, nargout=0)
-        eng.zlim(zlim, nargout=0)
-        eng.eval('view([-79 17])', nargout=0)
-        eng.eval('camzoom(1.2)', nargout=0)
-        eng.eval('grid off', nargout=0)
+        self.eng.xlim(xlim, nargout=0)
+        self.eng.ylim(ylim, nargout=0)
+        self.eng.zlim(zlim, nargout=0)
+        self.eng.eval('view([-79 17])', nargout=0)
+        self.eng.eval('camzoom(1.2)', nargout=0)
+        self.eng.eval('grid off', nargout=0)
         # eng.eval('set(gca,\'YTickLabel\',[]);', nargout=0)
         # eng.eval('set(gca,\'XTickLabel\',[]);', nargout=0)
         # eng.eval('set(gca,\'ZTickLabel\',[]);', nargout=0)
-        eng.eval('set(gca, \'XColor\', \'none\', \'YColor\', \'none\', \'ZColor\', \'none\')', nargout=0)
+        self.eng.eval('set(gca, \'XColor\', \'none\', \'YColor\', \'none\', \'ZColor\', \'none\')', nargout=0)
+
+        folder, frame_index, _, _, _, _ = inputs['entry_tag'][drawIndex].split('\n')
+        folder = folder.split(' ')[1].split('/')[1]
+        frame_index = frame_index.split(' ')[1]
+        sv_folder = os.path.join('/media/shengjie/other/Depins/Depins/visualization/vrKitti_unsuperDep_scale_visualizaiton', folder)
+        os.makedirs(sv_folder, exist_ok = True)
+        sv_path = os.path.join(sv_folder, frame_index + '.png')
+        command = 'saveas(gcf, \'{}\')'.format(sv_path)
+        self.eng.eval(command, nargout=0)
+        self.eng.eval('close all', nargout=0)
 
 
     def compute_losses(self, inputs, outputs, istrain = True):
@@ -603,8 +632,74 @@ class Trainer_GAN:
         total_loss /= self.num_scales
 
 
-        # Add Discriminator Loss
-        self.check_depthMap(inputs, outputs)
+        if self.opt.doVisualization:
+            for i in range(self.opt.batch_size):
+                self.check_depthMap(inputs, outputs, drawIndex=i)
+            eval_losses = dict()
+            self.compute_depth_losses(inputs, outputs, eval_losses)
+            print("Batch %d Metric of prediction:" % self.step)
+            print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+            print(("&{: 8.3f}  " * 7).format(*eval_losses.values()))
+
+            outputs[('depth', 0, 0)] = inputs[('syn_depth', 0)]
+            self.compute_depth_losses(inputs, outputs, eval_losses)
+            print("Batch %d Metric of Synthetic:" % self.step)
+            print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+            print(("&{: 8.3f}  " * 7).format(*eval_losses.values()))
+
+        ptCloud_syn, val_syn = self.distillPtClound(predDepth = inputs[("syn_depth", 0)], invcamK = inputs[('invcamK', 0)], semanticLabel = inputs['syn_semanLabel'], is_shrink = True)
+        ptCloud_pred, val_pred = self.distillPtClound(predDepth = outputs[("depth", 0, 0)] * self.STEREO_SCALE_FACTOR, invcamK =inputs[('invcamK', 0)], semanticLabel = inputs['real_semanLabel'], is_shrink = False)
+        outputs['pts_real'] = ptCloud_pred
+        outputs['pts_realv'] = val_pred
+        outputs['pts_syn'] = ptCloud_syn
+        outputs['pts_synv'] = val_syn
+
+        # Compute GAN Loss
+
+        # Visualization
+        # import matlab
+        # import matlab.engine
+        # self.eng = matlab.engine.start_matlab()
+        # self.check_depthMap(inputs, outputs, drawIndex=0)
+        # draw_index = 0
+        # figrgb_pred = tensor2rgb(inputs[('color', 0, 0)], ind=draw_index)
+        # figrgb_syn = tensor2rgb(inputs[('syn_rgb', 0)], ind=draw_index)
+        # figSeman_pred = tensor2semantic(inputs['real_semanLabel'], ind=draw_index)
+        # figSeman_syn = tensor2semantic(inputs['syn_semanLabel'], ind=draw_index)
+        # fig = pil.fromarray(np.concatenate([np.concatenate([figrgb_pred, figrgb_syn], axis=1), np.concatenate([figSeman_pred, figSeman_syn], axis=1)], axis=0))
+        #
+        # import matlab
+        # import matlab.engine
+        # self.eng = matlab.engine.start_matlab()
+        # draw_x_pred = matlab.double(ptCloud_pred[draw_index, :, 0].detach().cpu().numpy().tolist())
+        # draw_y_pred = matlab.double(ptCloud_pred[draw_index, :, 1].detach().cpu().numpy().tolist())
+        # draw_z_pred = matlab.double(ptCloud_pred[draw_index, :, 2].detach().cpu().numpy().tolist())
+        #
+        # draw_x_syn = matlab.double(ptCloud_syn[draw_index, :, 0].detach().cpu().numpy().tolist())
+        # draw_y_syn = matlab.double(ptCloud_syn[draw_index, :, 1].detach().cpu().numpy().tolist())
+        # draw_z_syn = matlab.double(ptCloud_syn[draw_index, :, 2].detach().cpu().numpy().tolist())
+        # self.eng.eval('figure()', nargout=0)
+        # self.eng.scatter3(draw_x_pred, draw_y_pred, draw_z_pred, 5, 'r', 'filled', nargout=0)
+        # self.eng.eval('hold on', nargout=0)
+        # self.eng.scatter3(draw_x_syn, draw_y_syn, draw_z_syn, 5, 'g', 'filled', nargout=0)
+        # self.eng.eval('axis equal', nargout = 0)
+        # xlim = matlab.double([0, 50])
+        # ylim = matlab.double([-10, 10])
+        # zlim = matlab.double([-5, 5])
+        # self.eng.xlim(xlim, nargout=0)
+        # self.eng.ylim(ylim, nargout=0)
+        # self.eng.zlim(zlim, nargout=0)
+        # self.eng.eval('view([-79 17])', nargout=0)
+        # self.eng.eval('camzoom(1.2)', nargout=0)
+        # self.eng.eval('grid off', nargout=0)
+
+        self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
+        loss_D = self.models['sfnD'].optimize_parameters()
+        losses['GAN/_{}'.format('D')] = loss_D
+        ganLoss = self.models['sfnD'].forward()
+        losses['GAN/_{}'.format('G')] = ganLoss
+        if self.step > self.opt.discriminator_pretrain_round:
+            total_loss = total_loss + self.opt.discrimScale * ganLoss
 
         losses["loss"] = total_loss
         return losses
@@ -659,12 +754,9 @@ class Trainer_GAN:
         """Write an event to the tensorboard events file
         """
         writer = self.writers[mode]
-
-        with torch.no_grad():
-            self.models['sfnD'].set_input(real=outputs[('orgScale_depth', 0, 0)], syn=inputs[('syn_depth', 0)],
-                                          inv_camK=inputs[('invcamK', 0)], scale=0)
-
-        for j in range(min(4, self.opt.batch_size)):  # write a maxmimum of four images
+        # if self.eng is None:
+        #     self.eng = matlab.engine.start_matlab()
+        for j in range(min(2, self.opt.batch_size)):  # write a maxmimum of four images
             input_rgb = inputs[('color', 0, 0)][j].data
             reco_rgb = outputs[('color', 's', 0)][j].data
             combined_up = torch.cat([input_rgb, reco_rgb], dim=2)
@@ -673,9 +765,9 @@ class Trainer_GAN:
             input_rgb_stereo = inputs[('color', 's', 0)][j].data
             combined_mid = torch.cat([disp_rgb, input_rgb_stereo], dim=2)
 
-            sfn_real = self.models['sfnD'].real_sfnorm.data
+            sfn_real = self.sfnCom.visualization_forward(outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, invcamK=inputs[('invcamK', 0)])
             sfn_real = self.toTensor(tensor2rgb((sfn_real + 1) / 2, ind = j)).cuda().data
-            sfn_syn = self.models['sfnD'].syn_sfnorm.data
+            sfn_syn = self.sfnCom.visualization_forward(inputs[('syn_depth', 0)], invcamK=inputs[('invcamK', 0)])
             sfn_syn = self.toTensor(tensor2rgb((sfn_syn + 1) / 2, ind=j)).cuda().data
             combined_bot = torch.cat([sfn_real, sfn_syn], dim=2)
 
@@ -684,6 +776,60 @@ class Trainer_GAN:
             writer.add_image(
                 "color_{}".format(j),
                 combined, self.step)
+
+
+            if outputs['pts_realv'][j] and outputs['pts_synv'][j]:
+                # Matplotlib visualization
+                dns_rate = 10
+                # fig = plt.figure('visible', 'off')
+                fig, _ = plt.subplots()
+                ax = Axes3D(fig)
+                ax.view_init(elev=7., azim=-135)
+                ax.dist = 1.7
+                ax.scatter(outputs['pts_real'][j, 0, ::dns_rate].detach().cpu().numpy(),
+                           outputs['pts_real'][j, 1, ::dns_rate].detach().cpu().numpy(),
+                           outputs['pts_real'][j, 2, ::dns_rate].detach().cpu().numpy(), s=1, c='b')
+                ax.scatter(outputs['pts_syn'][j, 0, ::dns_rate].detach().cpu().numpy(),
+                           outputs['pts_syn'][j, 1, ::dns_rate].detach().cpu().numpy(),
+                           outputs['pts_syn'][j, 2, ::dns_rate].detach().cpu().numpy(), s=1, c='r')
+                set_axes_equal(ax)
+                ax.set_xlim(left=0, right=50)
+                ax.set_ylim(bottom=-10, top=10)
+                ax.set_zlim(bottom=-3, top=5)
+                ax.view_init(elev=17, azim=-79)
+                ax.dist = 10
+                writer.add_figure("plot3d_{}".format(j), fig, self.step)
+                plt.close(fig)
+                # self.eng.xlim(xlim, nargout=0)
+                # self.eng.ylim(ylim, nargout=0)
+                # self.eng.zlim(zlim, nargout=0)
+
+
+                # Matlab visualization
+                # dns_rate = 10
+                # draw_x_pred = matlab.double(outputs['pts_real'][j, 0, ::dns_rate].detach().cpu().numpy().tolist())
+                # draw_y_pred = matlab.double(outputs['pts_real'][j, 1, ::dns_rate].detach().cpu().numpy().tolist())
+                # draw_z_pred = matlab.double(outputs['pts_real'][j, 2, ::dns_rate].detach().cpu().numpy().tolist())
+                #
+                # draw_x_syn = matlab.double(outputs['pts_syn'][j, 0, ::dns_rate].detach().cpu().numpy().tolist())
+                # draw_y_syn = matlab.double(outputs['pts_syn'][j, 1, ::dns_rate].detach().cpu().numpy().tolist())
+                # draw_z_syn = matlab.double(outputs['pts_syn'][j, 2, ::dns_rate].detach().cpu().numpy().tolist())
+                # self.eng.eval('figure()', nargout=0)
+                # self.eng.scatter3(draw_x_pred, draw_y_pred, draw_z_pred, 5, 'r', 'filled', nargout=0)
+                # self.eng.eval('hold on', nargout=0)
+                # self.eng.scatter3(draw_x_syn, draw_y_syn, draw_z_syn, 5, 'g', 'filled', nargout=0)
+                # self.eng.eval('axis equal', nargout = 0)
+                # xlim = matlab.double([0, 50])
+                # ylim = matlab.double([-10, 10])
+                # zlim = matlab.double([-5, 5])
+                # self.eng.xlim(xlim, nargout=0)
+                # self.eng.ylim(ylim, nargout=0)
+                # self.eng.zlim(zlim, nargout=0)
+                # self.eng.eval('view([-79 17])', nargout=0)
+                # self.eng.eval('camzoom(1.2)', nargout=0)
+                # F = self.eng.getframe()
+                # pil.fromarray(np.array(F['cdata']).astype(np.uint8))
+                # self.eng.eval('close all', nargout = 0)
 
     def save_opts(self):
         """Save options to disk so we know what we ran this experiment with

@@ -26,6 +26,8 @@ class STN3d(nn.Module):
         self.bn5 = nn.BatchNorm1d(256)
 
 
+        self.iden = torch.from_numpy(np.array([1,0,0,0,1,0,0,0,1]).astype(np.float32)).view(1,9).cuda()
+
     def forward(self, x):
         batchsize = x.size()[0]
         x = F.relu(self.bn1(self.conv1(x)))
@@ -38,10 +40,8 @@ class STN3d(nn.Module):
         x = F.relu(self.bn5(self.fc2(x)))
         x = self.fc3(x)
 
-        iden = Variable(torch.from_numpy(np.array([1,0,0,0,1,0,0,0,1]).astype(np.float32))).view(1,9).repeat(batchsize,1)
-        if x.is_cuda:
-            iden = iden.cuda()
-        x = x + iden
+        # iden = torch.from_numpy(np.array([1,0,0,0,1,0,0,0,1]).astype(np.float32)).view(1,9).repeat(batchsize,1).cuda()
+        x = x + self.iden.repeat(batchsize, 1)
         x = x.view(-1, 3, 3)
         return x
 
@@ -138,6 +138,7 @@ class PointNetCls(nn.Module):
         self.bn1 = nn.BatchNorm1d(512)
         self.bn2 = nn.BatchNorm1d(256)
         self.relu = nn.ReLU()
+        self.lrelu = nn.LeakyReLU(0.2, True)
 
     def forward(self, x):
         x, trans, trans_feat = self.feat(x)
@@ -146,6 +147,13 @@ class PointNetCls(nn.Module):
         x = self.fc3(x)
         return F.log_softmax(x, dim=1), trans, trans_feat
 
+    def discriminator_forward(self, x):
+        x, trans, trans_feat = self.feat(x)
+        x = F.relu(self.bn1(self.fc1(x)))
+        x = F.relu(self.bn2(self.dropout(self.fc2(x))))
+        x = self.fc3(x)
+        x = self.lrelu(x)
+        return x
 
 class PointNetDenseCls(nn.Module):
     def __init__(self, k = 2, feature_transform=False):

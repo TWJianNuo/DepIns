@@ -213,7 +213,7 @@ class GANLoss(nn.Module):
     that has the same size as the input.
     """
 
-    def __init__(self, gan_mode, target_real_label=1.0, target_fake_label=0.0):
+    def __init__(self, gan_mode, target_real_label=1.0, target_fake_label=0.0, reduction = 'mean'):
         """ Initialize the GANLoss class.
 
         Parameters:
@@ -229,9 +229,9 @@ class GANLoss(nn.Module):
         self.register_buffer('fake_label', torch.tensor(target_fake_label))
         self.gan_mode = gan_mode
         if gan_mode == 'lsgan':
-            self.loss = nn.MSELoss()
+            self.loss = nn.MSELoss(reduction=reduction)
         elif gan_mode == 'vanilla':
-            self.loss = nn.BCEWithLogitsLoss()
+            self.loss = nn.BCEWithLogitsLoss(reduction=reduction)
         elif gan_mode in ['wgangp']:
             self.loss = None
         else:

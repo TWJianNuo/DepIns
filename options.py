@@ -125,6 +125,11 @@ class MonodepthOptions:
         self.parser.add_argument("--script_name",
                                  type=str
                                  )
+        self.parser.add_argument("--noShuffle",
+                                 action="store_true")
+        self.parser.add_argument("--discriminator_pretrain_round",
+                                 default=0,
+                                 type=int)
 
 
 

@@ -4,6 +4,7 @@ import shutil
 import numpy as np
 import cv2
 import random
+import copy
 def gen_split_quadruplets():
     root_dir = '/media/shengjie/other/Depins/Depins/splits/kitti_seman_mapped2depth'
     split_train_path = os.path.join(root_dir, 'train_files.txt')
@@ -395,5 +396,72 @@ def create_sfnorm2_split():
         wf1.write(entry)
     wf1.close()
 
+
+def create_sfnorm_pair_split():
+    split_types = ['train', 'val']
+    split_root = '../splits/sfnorm_pair'
+
+    mapping = {0 : 'l', 1 : 'r'}
+
+    vir_root = '/media/shengjie/other/Data/virtual_kitti_organized'
+    vir_seqs = ['0001',
+                '0002',
+                '0006',
+                '0018',
+                '0020'
+                ]
+
+    real_root = '/media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw'
+    real_seqs = ['2011_09_26/2011_09_26_drive_0009_sync',
+                 '2011_09_26/2011_09_26_drive_0011_sync',
+                 '2011_09_26/2011_09_26_drive_0018_sync',
+                 '2011_09_29/2011_09_29_drive_0004_sync',
+                 '2011_10_03/2011_10_03_drive_0047_sync'
+                ]
+
+    splitA = list()
+    splitB = list()
+    # Copy
+    dst_root = os.path.join('..', 'splits', 'sfnorm_pair')
+    copy_root = os.path.join('..', 'splits', 'eigen_zhou')
+    copy_list = ['train', 'val']
+    for entry in copy_list:
+        srcf = os.path.join(copy_root, '{}_files.txt'.format(entry))
+        dstf = os.path.join(dst_root, '{}_files.txt'.format(entry))
+        shutil.copyfile(srcf, dstf)
+
+    for ii, seq in enumerate(vir_seqs):
+        img_list = glob.glob(os.path.join(vir_root, seq, 'rgb', '*.png'))
+        for i in range(0, len(img_list)):
+            if os.path.exists(os.path.join(real_root, real_seqs[ii], 'velodyne_points', 'data', str(i).zfill(10) + '.bin')):
+                if os.path.exists(os.path.join(vir_root, seq, 'rgb', str(i).zfill(5) + '.png')):
+                    splitB.append(seq + ' ' + str(i).zfill(5) + ' ' + 'm' + '\n')
+                if os.path.exists(os.path.join(real_root, real_seqs[ii], 'image_02', 'data', str(i).zfill(10) + '.png')):
+                    splitA.append(real_seqs[ii] + ' ' + str(i).zfill(10) + ' ' + 'l' + '\n')
+
+
+
+    split_ind = int(len(splitB) * 0.8)
+    split_train = copy.deepcopy(splitB)
+    random.shuffle(split_train)
+    split_val = split_train[split_ind::] # Validation file consist part of the training
+
+    split_type = 'train'
+    wf1 = open(os.path.join(split_root, 'syn_{}_files.txt'.format(split_type)), "w")
+    for idx, entry in enumerate(splitB):
+        wf1.write(entry)
+    wf1.close()
+
+    split_type = 'val'
+    wf1 = open(os.path.join(split_root, 'syn_{}_files.txt'.format(split_type)), "w")
+    for idx, entry in enumerate(split_val):
+        wf1.write(entry)
+    wf1.close()
+
+    wf1 = open(os.path.join(split_root, 'train_files.txt'), "w")
+    for idx, entry in enumerate(splitA):
+        wf1.write(entry)
+    wf1.close()
+
 if __name__ == "__main__":
-    create_sfnorm2_split()
+    create_sfnorm_pair_split()

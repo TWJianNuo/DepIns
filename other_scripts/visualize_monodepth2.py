@@ -46,7 +46,7 @@ class Visualizer:
             detect_path=self.opt.detect_path, load_seman = self.opt.loadSeman, load_pose=self.opt.loadPose,
             loadPredDepth = self.opt.loadPredDepth, predDepthPath = self.opt.predDepthPath)
         self.train_loader = DataLoader(
-            train_dataset, self.opt.batch_size,  shuffle = not self.opt.noshuffle,
+            train_dataset, self.opt.batch_size,  shuffle = not self.opt.noShuffle,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
 
     def visualize(self):
@@ -82,7 +82,8 @@ class Visualizer:
             drawX_mono = matlab.double(drawX_mono.tolist())
             drawY_mono = matlab.double(drawY_mono.tolist())
             drawZ_mono = matlab.double(drawZ_mono.tolist())
-            eng.eval('figure(\'visible\', \'off\')', nargout=0)
+            # eng.eval('figure(\'visible\', \'off\')', nargout=0)
+            eng.eval('figure()', nargout=0)
             h = eng.scatter3(drawX_mono, drawY_mono, drawZ_mono, 5, draw_mono_sampledColor, 'filled', nargout = 0)
             eng.eval('axis equal', nargout = 0)
             xlim = matlab.double([0, 50])

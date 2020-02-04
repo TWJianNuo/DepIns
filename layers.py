@@ -494,3 +494,145 @@ class ComputeSurfaceNormal(nn.Module):
         surfnorm = torch.cross(changex, changey, dim=1)
         surfnorm = F.normalize(surfnorm, dim = 1)
         return surfnorm
+
+    def visualization_forward(self, depthMap, invcamK):
+        depthMap = depthMap.view(self.batch_size, -1)
+        cam_coords = self.pix_coords * torch.stack([depthMap, depthMap, depthMap], dim=1)
+        cam_coords = torch.cat([cam_coords, self.ones], dim=1)
+        veh_coords = torch.matmul(invcamK, cam_coords)
+        veh_coords = veh_coords.view(self.batch_size, 4, self.height, self.width)
+        veh_coords = veh_coords
+        changex = torch.cat([self.convx(veh_coords[:, 0:1, :, :]), self.convx(veh_coords[:, 1:2, :, :]), self.convx(veh_coords[:, 2:3, :, :])], dim=1)
+        changey = torch.cat([self.convy(veh_coords[:, 0:1, :, :]), self.convy(veh_coords[:, 1:2, :, :]), self.convy(veh_coords[:, 2:3, :, :])], dim=1)
+        surfnorm = torch.cross(changex, changey, dim=1)
+        surfnorm = F.normalize(surfnorm, dim = 1)
+        return surfnorm
+
+
+
+class BackProj3D(nn.Module):
+    def __init__(self, height, width, batch_size):
+        super(BackProj3D, self).__init__()
+        self.height = height
+        self.width = width
+        self.batch_size = batch_size
+
+        # Init grid points
+        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        self.xx = torch.from_numpy(xx).unsqueeze(0).unsqueeze(0).expand([self.batch_size, 1, -1, -1]).float()
+        self.yy = torch.from_numpy(yy).unsqueeze(0).unsqueeze(0).expand([self.batch_size, 1, -1, -1]).float()
+        self.pixelLocs = nn.Parameter(torch.cat([self.xx, self.yy], dim=1), requires_grad=False)
+    def forward(self, predDepth, invcamK):
+        pts3d = backProjTo3d(self.pixelLocs, predDepth, invcamK)
+        return pts3d
+
+
+class DistillPtCloud(nn.Module):
+    def __init__(self, height, width, batch_size, ptsCloundNum = 10000):
+        super(DistillPtCloud, self).__init__()
+        self.height = height
+        self.width = width
+        self.batch_size = batch_size
+        self.ptsCloundNum = ptsCloundNum
+        self.maxDepth = 40
+
+        self.bck = BackProj3D(height=self.height, width=self.width, batch_size=self.batch_size)
+        self.bind = torch.arange(0, self.ptsCloundNum).view(1, self.ptsCloundNum).expand(self.batch_size, -1)
+        self.bind = self.bind[:, torch.randperm(self.ptsCloundNum)].float()
+        self.bind = nn.Parameter(self.bind, requires_grad=False)
+
+        self.bind_helper = torch.arange(0, self.batch_size).view(self.batch_size, 1).expand(-1, self.ptsCloundNum).float()
+        self.bind_helper = nn.Parameter(self.bind_helper, requires_grad=False)
+
+        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        ii = torch.arange(0, self.batch_size).view(self.batch_size, 1, 1, 1).expand(-1, 1, self.height, self.width).float()
+        xx = torch.from_numpy(xx).unsqueeze(0).unsqueeze(0).expand([self.batch_size, 1, -1, -1]).float()
+        yy = torch.from_numpy(yy).unsqueeze(0).unsqueeze(0).expand([self.batch_size, 1, -1, -1]).float()
+        self.lind = nn.Parameter(xx + yy * self.width + ii * self.width * self.height, requires_grad=False)
+
+        # 2d Convolution for shrinking
+        weights = torch.tensor([[1., 1., 1.],
+                                [1., 1., 1.],
+                                [1., 1., 1.]])
+        weights = weights.view(1, 1, 3, 3)
+        self.shrinkConv = nn.Conv2d(1, 1, 3, bias=False, padding=1)
+        self.shrinkConv.weight = nn.Parameter(weights, requires_grad=False)
+        self.bar = 6
+
+    def forward(self, predDepth, invcamK, semanticLabel, is_shrink = False):
+        pts3d = self.bck(predDepth = predDepth, invcamK = invcamK)
+        # Visualization
+        # draw_index = 0
+        # import matlab
+        # import matlab.engine
+        # self.eng = matlab.engine.start_matlab()
+        # draw_x_pred = matlab.double(pts3d[draw_index, 0, :, :].view(-1).detach().cpu().numpy().tolist())
+        # draw_y_pred = matlab.double(pts3d[draw_index, 1, :, :].view(-1).detach().cpu().numpy().tolist())
+        # draw_z_pred = matlab.double(pts3d[draw_index, 2, :, :].view(-1).detach().cpu().numpy().tolist())
+        # self.eng.eval('figure()', nargout=0)
+        # self.eng.scatter3(draw_x_pred, draw_y_pred, draw_z_pred, 5, 'r', 'filled', nargout=0)
+        # self.eng.eval('axis equal', nargout = 0)
+        # xlim = matlab.double([0, 50])
+        # ylim = matlab.double([-10, 10])
+        # zlim = matlab.double([-5, 5])
+        # self.eng.xlim(xlim, nargout=0)
+        # self.eng.ylim(ylim, nargout=0)
+        # self.eng.zlim(zlim, nargout=0)
+        # self.eng.eval('view([-79 17])', nargout=0)
+        # self.eng.eval('camzoom(1.2)', nargout=0)
+        # self.eng.eval('grid off', nargout=0)
+
+
+        typeind = 5
+        selector = (semanticLabel == typeind) * (predDepth < self.maxDepth)
+        if is_shrink:
+            selector = self.shrinkConv(selector.float()) > self.bar
+        lind_sel = self.lind[selector]
+        idx = torch.randperm(lind_sel.nelement())
+        lind_sel = lind_sel[idx]
+        val_num = torch.sum(selector, dim=[1,2,3]).unsqueeze(dim=1).float()
+        # 0 can not be a remainder
+        val_reminder = val_num.clone()
+        val_reminder[val_reminder == 0] = 1
+
+        expanded_ind = torch.remainder(self.bind, val_reminder.expand([-1, self.ptsCloundNum]))
+        bias = self.bind_helper * (val_num > 0).float() * torch.cat([torch.zeros([1,1], device=torch.device("cuda"), dtype=torch.float32), val_num[:-1,:]], dim=0).expand(-1, self.ptsCloundNum)
+        bias = bias + (val_num > 0).float() * 1
+        expanded_ind = expanded_ind + bias
+
+        expanded_ind = expanded_ind.view(-1)
+        # Pad one for zeros
+        lind_sel = torch.cat([torch.zeros(1, device=torch.device("cuda"), dtype=torch.float32), lind_sel])
+        lind_sel = lind_sel[expanded_ind.long()].long()
+
+        pts3d_sel = pts3d.permute([0,2,3,1]).contiguous().view(-1, 4)[lind_sel, :]
+        pts3d_sel = pts3d_sel.view([self.batch_size, self.ptsCloundNum, 4]).permute([0,2,1])[:,0:3,:]
+        val_indicator = (val_num > 1).float()
+
+        # visual_tmp = torch.zeros_like(semanticLabel)
+        # visual_tmp.view(-1)[lind_sel] = 1
+        # tensor2disp(visual_tmp, ind=0, vmax=1).show()
+        # tensor2semantic(semanticLabel, ind=0).show()
+
+
+        # Visualization
+        # draw_index = 0
+        # import matlab
+        # import matlab.engine
+        # self.eng = matlab.engine.start_matlab()
+        # draw_x_pred = matlab.double(pts3d_sel[draw_index, 0, :].view(-1).detach().cpu().numpy().tolist())
+        # draw_y_pred = matlab.double(pts3d_sel[draw_index, 1, :].view(-1).detach().cpu().numpy().tolist())
+        # draw_z_pred = matlab.double(pts3d_sel[draw_index, 2, :].view(-1).detach().cpu().numpy().tolist())
+        # self.eng.eval('figure()', nargout=0)
+        # self.eng.scatter3(draw_x_pred, draw_y_pred, draw_z_pred, 5, 'r', 'filled', nargout=0)
+        # self.eng.eval('axis equal', nargout = 0)
+        # xlim = matlab.double([0, 50])
+        # ylim = matlab.double([-10, 10])
+        # zlim = matlab.double([-5, 5])
+        # self.eng.xlim(xlim, nargout=0)
+        # self.eng.ylim(ylim, nargout=0)
+        # self.eng.zlim(zlim, nargout=0)
+        # self.eng.eval('view([-79 17])', nargout=0)
+        # self.eng.eval('camzoom(1.2)', nargout=0)
+        # self.eng.eval('grid off', nargout=0)
+        return pts3d_sel, val_indicator
