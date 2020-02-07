@@ -593,6 +593,7 @@ class DistillPtCloud(nn.Module):
 
 
         # Shrink
+        pts_minNum = 0
         typeind = 5  # Pole
         selector = semanticLabel == typeind
         selector = selector * (predDepth < self.maxDepth)
@@ -611,6 +612,10 @@ class DistillPtCloud(nn.Module):
         # Compute valid points within channel
         valid_number = torch.sum(selector_lineared, dim=[2])
         valid_number = valid_number.float()
+        valid_batch_indicator = (valid_number > pts_minNum).float()
+
+        if torch.sum(valid_batch_indicator) == 0:
+            return torch.zeros([self.batch_size, 3, self.ptsCloundNum], device = torch.device("cuda"), dtype = torch.float32), valid_batch_indicator
 
         selected_pos = lind_lineared[selector_lineared]
 
@@ -618,14 +623,14 @@ class DistillPtCloud(nn.Module):
         tmp[tmp == 0] = 1
         sampled_ind = torch.remainder(self.bind, (tmp).expand([-1, self.ptsCloundNum]))
 
-        sampled_ind = torch.sum(self.bias_helper * valid_number.t().expand(-1, self.batch_size), dim=1, keepdim=True).expand(-1, self.ptsCloundNum) + sampled_ind
+        sampled_ind = (torch.sum(self.bias_helper * valid_number.t().expand(-1, self.batch_size), dim=1, keepdim=True) * valid_batch_indicator.float()).expand(-1, self.ptsCloundNum) + sampled_ind
         sampled_ind = sampled_ind.view(-1)
 
         selected_pos = selected_pos[sampled_ind.long()].long()
 
         pts3d_sel = pts3d.permute([0,2,3,1]).contiguous().view(-1, 4)[selected_pos, :]
         pts3d_sel = pts3d_sel.view([self.batch_size, self.ptsCloundNum, 4]).permute([0,2,1])[:,0:3,:]
-        valid_batch_indicator = (valid_number > 0).float()
+
 
         # visual_tmp = torch.zeros_like(semanticLabel)
         # visual_tmp.view(-1)[lind_sel] = 1
