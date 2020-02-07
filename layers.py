@@ -201,7 +201,7 @@ def upsample(x):
     return F.interpolate(x, scale_factor=2, mode="nearest")
 
 
-def get_smooth_loss(disp, img):
+def get_smooth_loss(disp, img, semantics_mask = None):
     """Computes the smoothness loss for a disparity image
     The color image is used for edge-aware smoothness
     """
@@ -214,7 +214,10 @@ def get_smooth_loss(disp, img):
     grad_disp_x *= torch.exp(-grad_img_x)
     grad_disp_y *= torch.exp(-grad_img_y)
 
-    return grad_disp_x.mean() + grad_disp_y.mean()
+    if semantics_mask is None:
+        return grad_disp_x.mean() + grad_disp_y.mean()
+    else:
+        return torch.sum((grad_disp_x  + grad_disp_y) * semantics_mask) / (torch.sum(semantics_mask) + 1)
 
 
 class SSIM(nn.Module):
@@ -559,6 +562,11 @@ class DistillPtCloud(nn.Module):
         self.shrinkConv.weight = nn.Parameter(weights, requires_grad=False)
         self.bar = 6
 
+        self.bias_helper = torch.zeros(self.batch_size, self.batch_size)
+        for i in range(self.batch_size):
+            self.bias_helper[i, 0:i] = 1
+        self.bias_helper = nn.Parameter(self.bias_helper, requires_grad=False)
+
     def forward(self, predDepth, invcamK, semanticLabel, is_shrink = False):
         pts3d = self.bck(predDepth = predDepth, invcamK = invcamK)
         # Visualization
@@ -583,31 +591,41 @@ class DistillPtCloud(nn.Module):
         # self.eng.eval('grid off', nargout=0)
 
 
-        typeind = 5
-        selector = (semanticLabel == typeind) * (predDepth < self.maxDepth)
+
+        # Shrink
+        typeind = 5  # Pole
+        selector = semanticLabel == typeind
+        selector = selector * (predDepth < self.maxDepth)
         if is_shrink:
             selector = self.shrinkConv(selector.float()) > self.bar
-        lind_sel = self.lind[selector]
-        idx = torch.randperm(lind_sel.nelement())
-        lind_sel = lind_sel[idx]
-        val_num = torch.sum(selector, dim=[1,2,3]).unsqueeze(dim=1).float()
-        # 0 can not be a remainder
-        val_reminder = val_num.clone()
-        val_reminder[val_reminder == 0] = 1
 
-        expanded_ind = torch.remainder(self.bind, val_reminder.expand([-1, self.ptsCloundNum]))
-        bias = self.bind_helper * (val_num > 0).float() * torch.cat([torch.zeros([1,1], device=torch.device("cuda"), dtype=torch.float32), val_num[:-1,:]], dim=0).expand(-1, self.ptsCloundNum)
-        bias = bias + (val_num > 0).float() * 1
-        expanded_ind = expanded_ind + bias
+        # Random shuffle
+        permute_index = torch.randperm(self.width * self.height)
 
-        expanded_ind = expanded_ind.view(-1)
-        # Pad one for zeros
-        lind_sel = torch.cat([torch.zeros(1, device=torch.device("cuda"), dtype=torch.float32), lind_sel])
-        lind_sel = lind_sel[expanded_ind.long()].long()
+        lind_lineared = self.lind.view(self.batch_size, 1, -1)
+        lind_lineared = lind_lineared[:,:,permute_index]
 
-        pts3d_sel = pts3d.permute([0,2,3,1]).contiguous().view(-1, 4)[lind_sel, :]
+        selector_lineared = selector.view(self.batch_size, 1, -1)
+        selector_lineared = selector_lineared[:,:,permute_index]
+
+        # Compute valid points within channel
+        valid_number = torch.sum(selector_lineared, dim=[2])
+        valid_number = valid_number.float()
+
+        selected_pos = lind_lineared[selector_lineared]
+
+        tmp = valid_number.clone()
+        tmp[tmp == 0] = 1
+        sampled_ind = torch.remainder(self.bind, (tmp).expand([-1, self.ptsCloundNum]))
+
+        sampled_ind = torch.sum(self.bias_helper * valid_number.t().expand(-1, self.batch_size), dim=1, keepdim=True).expand(-1, self.ptsCloundNum) + sampled_ind
+        sampled_ind = sampled_ind.view(-1)
+
+        selected_pos = selected_pos[sampled_ind.long()].long()
+
+        pts3d_sel = pts3d.permute([0,2,3,1]).contiguous().view(-1, 4)[selected_pos, :]
         pts3d_sel = pts3d_sel.view([self.batch_size, self.ptsCloundNum, 4]).permute([0,2,1])[:,0:3,:]
-        val_indicator = (val_num > 1).float()
+        valid_batch_indicator = (valid_number > 0).float()
 
         # visual_tmp = torch.zeros_like(semanticLabel)
         # visual_tmp.view(-1)[lind_sel] = 1
@@ -635,4 +653,4 @@ class DistillPtCloud(nn.Module):
         # self.eng.eval('view([-79 17])', nargout=0)
         # self.eng.eval('camzoom(1.2)', nargout=0)
         # self.eng.eval('grid off', nargout=0)
-        return pts3d_sel, val_indicator
+        return pts3d_sel, valid_batch_indicator

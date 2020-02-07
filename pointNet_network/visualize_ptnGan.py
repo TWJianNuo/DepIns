@@ -97,32 +97,14 @@ class Trainer_GAN:
         self.models["encoder"] = networks.ResnetEncoder(
             self.opt.num_layers, self.opt.weights_init == "pretrained")
         self.models["encoder"].to(self.device)
-        self.parameters_to_train += list(self.models["encoder"].parameters())
 
         self.models["depth"] = networks.DepthDecoder(
             self.models["encoder"].num_ch_enc, self.opt.scales)
         self.models["depth"].to(self.device)
-        self.parameters_to_train += list(self.models["depth"].parameters())
 
         # self.models['sfnD'] = PointNetCls(k = 1, feature_transform = False)
         self.models['sfnD'] = PtnD(opt=self.opt, k = 1, feature_transform=False)
         self.models['sfnD'].to(self.device)
-
-        if self.opt.predictive_mask:
-            assert self.opt.disable_automasking, \
-                "When using predictive_mask, please disable automasking with --disable_automasking"
-
-            # Our implementation of the predictive masking baseline has the the same architecture
-            # as our depth decoder. We predict a separate mask for each source frame.
-            self.models["predictive_mask"] = networks.DepthDecoder(
-                self.models["encoder"].num_ch_enc, self.opt.scales,
-                num_output_channels=(len(self.opt.frame_ids) - 1))
-            self.models["predictive_mask"].to(self.device)
-            self.parameters_to_train += list(self.models["predictive_mask"].parameters())
-
-        self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
-        self.model_lr_scheduler = optim.lr_scheduler.StepLR(
-            self.model_optimizer, self.opt.scheduler_step_size, 0.1)
 
         if self.opt.load_weights_folder is not None:
             self.load_model()
@@ -217,12 +199,8 @@ class Trainer_GAN:
         """
         self.epoch = 0
         self.step = 0
-        self.start_time = time.time()
-        for self.epoch in range(self.opt.num_epochs):
+        with torch.no_grad():
             self.run_epoch()
-            # if (self.epoch + 1) % self.opt.save_frequency == 0:
-            # if (self.step + 1) % self.opt.save_frequency == 0:
-            #     self.save_model()
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -231,36 +209,16 @@ class Trainer_GAN:
         print("Training")
         self.set_train()
 
+
+        self.vis_path = os.path.join('/media/shengjie/other/Depins/Depins/visualization', self.opt.load_weights_folder.split('/')[-3] + '_' + self.opt.load_weights_folder.split('/')[-1])
+        os.makedirs(self.vis_path, exist_ok = True)
+        os.makedirs(os.path.join(self.vis_path, 'rgb'), exist_ok=True)
+        os.makedirs(os.path.join(self.vis_path, 'pts3d'), exist_ok=True)
+
         for batch_idx, inputs in enumerate(self.train_loader):
-
-            before_op_time = time.time()
-
             outputs, losses = self.process_batch(inputs)
-
-            # Optimize Unet
-            self.model_optimizer.zero_grad()
-            losses["loss"].backward()
-            self.model_optimizer.step()
-
-            duration = time.time() - before_op_time
-
-            if self.step % self.opt.print_freq == 0 or (self.step < 2000 and self.step % 5 == 0):
-                self.log_time(batch_idx, duration, losses["loss"].cpu().data)
-                self.log_data(mode="train", losses=losses)
-
-            if self.step % self.opt.log_frequency == 0:
-                if "depth_gt" in inputs:
-                    self.compute_depth_losses(inputs, outputs, losses)
-                # self.log_data(mode="train", losses=losses)
-                self.log_img(mode="train", inputs=inputs, outputs=outputs)
-                # self.val()
-
-            if (self.step + 1) % self.opt.save_frequency == 0:
-                self.save_model()
-
-            self.step += 1
-
-        self.model_lr_scheduler.step()
+            self.log_img(mode='train', inputs=inputs, outputs=outputs)
+            print("%d finished" % batch_idx)
     def process_batch(self, inputs, istrain = True):
         """Pass a minibatch through the network and generate images and losses
         """
@@ -284,12 +242,6 @@ class Trainer_GAN:
             # Otherwise, we only feed the image with frame_id 0 through the depth encoder
             features = self.models["encoder"](inputs["color_aug", 0, 0])
             outputs = self.models["depth"](features)
-
-        if self.opt.predictive_mask:
-            outputs["predictive_mask"] = self.models["predictive_mask"](features)
-
-        if self.use_pose_net:
-            outputs.update(self.predict_poses(inputs, features))
 
         self.generate_images_pred(inputs, outputs)
         losses = self.compute_losses(inputs, outputs, istrain = istrain)
@@ -548,144 +500,17 @@ class Trainer_GAN:
     def compute_losses(self, inputs, outputs, istrain = True):
         """Compute the reprojection and smoothness losses for a minibatch
         """
-        losses = {}
-        total_loss = 0
-        # If only pole area imposed with loss, eliminating bad effects from over-all photometric
-        typeind = 5
-        semantics_mask = (inputs['real_semanLabel'] == typeind).float()
-        for scale in self.opt.scales:
-            loss = 0
-            reprojection_losses = []
 
-            if self.opt.v1_multiscale:
-                source_scale = scale
-            else:
-                source_scale = 0
-
-            disp = outputs[("disp", scale)]
-            color = inputs[("color", 0, scale)]
-            target = inputs[("color", 0, source_scale)]
-
-            for frame_id in self.opt.frame_ids[1:]:
-                pred = outputs[("color", frame_id, scale)]
-                reprojection_losses.append(self.compute_reprojection_loss(pred, target))
-
-            reprojection_losses = torch.cat(reprojection_losses, 1)
-
-            if not self.opt.disable_automasking:
-                identity_reprojection_losses = []
-                for frame_id in self.opt.frame_ids[1:]:
-                    pred = inputs[("color", frame_id, source_scale)]
-                    identity_reprojection_losses.append(
-                        self.compute_reprojection_loss(pred, target))
-
-                identity_reprojection_losses = torch.cat(identity_reprojection_losses, 1)
-                identity_reprojection_loss = identity_reprojection_losses
-                reprojection_loss = reprojection_losses
-
-            if not self.opt.disable_automasking:
-                # add random numbers to break ties
-                identity_reprojection_loss += torch.randn(
-                    identity_reprojection_loss.shape).cuda() * 0.00001
-
-                combined = torch.cat((identity_reprojection_loss, reprojection_loss), dim=1)
-            else:
-                combined = reprojection_loss
-
-            if combined.shape[1] == 1:
-                to_optimise = combined
-            else:
-                to_optimise, idxs = torch.min(combined, dim=1, keepdim=True)
-
-            if not self.opt.disable_automasking:
-                outputs["identity_selection/{}".format(scale)] = (
-                    idxs > identity_reprojection_loss.shape[1] - 1).float()
-
-            # loss += to_optimise.mean()
-            loss += torch.sum(to_optimise * semantics_mask) / (torch.sum(semantics_mask) + 1)
-
-            mean_disp = disp.mean(2, True).mean(3, True)
-            norm_disp = disp / (mean_disp + 1e-7)
-            smooth_loss = get_smooth_loss(norm_disp, color)
-
-            loss += self.opt.disparity_smoothness * smooth_loss / (2 ** scale)
-            total_loss += loss
-            losses["loss/{}".format(scale)] = loss
-
-        total_loss /= self.num_scales
-
-
-        if self.opt.doVisualization:
-            for i in range(self.opt.batch_size):
-                self.check_depthMap(inputs, outputs, drawIndex=i)
-            eval_losses = dict()
-            self.compute_depth_losses(inputs, outputs, eval_losses)
-            print("Batch %d Metric of prediction:" % self.step)
-            print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
-            print(("&{: 8.3f}  " * 7).format(*eval_losses.values()))
-
-            outputs[('depth', 0, 0)] = inputs[('syn_depth', 0)]
-            self.compute_depth_losses(inputs, outputs, eval_losses)
-            print("Batch %d Metric of Synthetic:" % self.step)
-            print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
-            print(("&{: 8.3f}  " * 7).format(*eval_losses.values()))
-
-        ptCloud_syn, val_syn = self.distillPtClound(predDepth = inputs[("syn_depth", 0)], invcamK = inputs[('invcamK', 0)], semanticLabel = inputs['syn_semanLabel'], is_shrink = True)
-        ptCloud_pred, val_pred = self.distillPtClound(predDepth = outputs[("depth", 0, 0)] * self.STEREO_SCALE_FACTOR, invcamK =inputs[('invcamK', 0)], semanticLabel = inputs['real_semanLabel'], is_shrink = False)
+        ptCloud_syn, val_syn = self.distillPtClound(predDepth=inputs[("syn_depth", 0)], invcamK=inputs[('invcamK', 0)],
+                                                    semanticLabel=inputs['syn_semanLabel'], is_shrink=True)
+        ptCloud_pred, val_pred = self.distillPtClound(predDepth=outputs[("depth", 0, 0)] * self.STEREO_SCALE_FACTOR,
+                                                      invcamK=inputs[('invcamK', 0)],
+                                                      semanticLabel=inputs['real_semanLabel'], is_shrink=False)
         outputs['pts_real'] = ptCloud_pred
         outputs['pts_realv'] = val_pred
         outputs['pts_syn'] = ptCloud_syn
         outputs['pts_synv'] = val_syn
-
-        # Compute GAN Loss
-
-        # Visualization
-        # import matlab
-        # import matlab.engine
-        # self.eng = matlab.engine.start_matlab()
-        # self.check_depthMap(inputs, outputs, drawIndex=0)
-        # draw_index = 0
-        # figrgb_pred = tensor2rgb(inputs[('color', 0, 0)], ind=draw_index)
-        # figrgb_syn = tensor2rgb(inputs[('syn_rgb', 0)], ind=draw_index)
-        # figSeman_pred = tensor2semantic(inputs['real_semanLabel'], ind=draw_index)
-        # figSeman_syn = tensor2semantic(inputs['syn_semanLabel'], ind=draw_index)
-        # fig = pil.fromarray(np.concatenate([np.concatenate([figrgb_pred, figrgb_syn], axis=1), np.concatenate([figSeman_pred, figSeman_syn], axis=1)], axis=0))
-        #
-        # import matlab
-        # import matlab.engine
-        # self.eng = matlab.engine.start_matlab()
-        # draw_x_pred = matlab.double(ptCloud_pred[draw_index, :, 0].detach().cpu().numpy().tolist())
-        # draw_y_pred = matlab.double(ptCloud_pred[draw_index, :, 1].detach().cpu().numpy().tolist())
-        # draw_z_pred = matlab.double(ptCloud_pred[draw_index, :, 2].detach().cpu().numpy().tolist())
-        #
-        # draw_x_syn = matlab.double(ptCloud_syn[draw_index, :, 0].detach().cpu().numpy().tolist())
-        # draw_y_syn = matlab.double(ptCloud_syn[draw_index, :, 1].detach().cpu().numpy().tolist())
-        # draw_z_syn = matlab.double(ptCloud_syn[draw_index, :, 2].detach().cpu().numpy().tolist())
-        # self.eng.eval('figure()', nargout=0)
-        # self.eng.scatter3(draw_x_pred, draw_y_pred, draw_z_pred, 5, 'r', 'filled', nargout=0)
-        # self.eng.eval('hold on', nargout=0)
-        # self.eng.scatter3(draw_x_syn, draw_y_syn, draw_z_syn, 5, 'g', 'filled', nargout=0)
-        # self.eng.eval('axis equal', nargout = 0)
-        # xlim = matlab.double([0, 50])
-        # ylim = matlab.double([-10, 10])
-        # zlim = matlab.double([-5, 5])
-        # self.eng.xlim(xlim, nargout=0)
-        # self.eng.ylim(ylim, nargout=0)
-        # self.eng.zlim(zlim, nargout=0)
-        # self.eng.eval('view([-79 17])', nargout=0)
-        # self.eng.eval('camzoom(1.2)', nargout=0)
-        # self.eng.eval('grid off', nargout=0)
-
-        self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
-        loss_D = self.models['sfnD'].optimize_parameters()
-        losses['GAN/_{}'.format('D')] = loss_D
-        ganLoss = self.models['sfnD'].forward()
-        losses['GAN/_{}'.format('G')] = ganLoss
-        if self.step > self.opt.discriminator_pretrain_round:
-            total_loss = total_loss + self.opt.discrimScale * ganLoss
-
-        losses["loss"] = total_loss
-        return losses
+        return outputs
 
     def compute_depth_losses(self, inputs, outputs, losses):
         """Compute depth metrics, to allow monitoring during training
@@ -731,18 +556,12 @@ class Trainer_GAN:
     def log_data(self, mode, losses):
         writer = self.writers[mode]
         for l, v in losses.items():
-            if v < 1e-3:
-                continue
-            else:
-                writer.add_scalar("{}".format(l), v, self.step)
+            writer.add_scalar("{}".format(l), v, self.step)
 
     def log_img(self, mode, inputs, outputs):
         """Write an event to the tensorboard events file
         """
-        writer = self.writers[mode]
-        # if self.eng is None:
-        #     self.eng = matlab.engine.start_matlab()
-        for j in range(min(2, self.opt.batch_size)):  # write a maxmimum of four images
+        for j in range(self.opt.batch_size):  # write a maxmimum of four images
             input_rgb = inputs[('color', 0, 0)][j].data
             reco_rgb = outputs[('color', 's', 0)][j].data
             combined_up = torch.cat([input_rgb, reco_rgb], dim=2)
@@ -759,9 +578,7 @@ class Trainer_GAN:
 
             combined = torch.cat([combined_up, combined_mid, combined_bot], dim=1)
 
-            writer.add_image(
-                "color_{}".format(j),
-                combined, self.step)
+            tensor2rgb(combined.unsqueeze(0), ind = 0).save(os.path.join(self.vis_path, 'rgb', inputs['entry_tag'][j].split('\n')[3].split(' ')[1] + '.png'))
 
 
             if outputs['pts_realv'][j] and outputs['pts_synv'][j]:
@@ -784,7 +601,7 @@ class Trainer_GAN:
                 ax.set_zlim(bottom=-3, top=5)
                 ax.view_init(elev=17, azim=-79)
                 ax.dist = 10
-                writer.add_figure("plot3d_{}".format(j), fig, self.step)
+                plt.savefig(os.path.join(self.vis_path, 'pts3d', inputs['entry_tag'][j].split('\n')[3].split(' ')[1] + '.png'))
                 plt.close(fig)
                 # self.eng.xlim(xlim, nargout=0)
                 # self.eng.ylim(ylim, nargout=0)
@@ -870,21 +687,6 @@ class Trainer_GAN:
             pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
             model_dict.update(pretrained_dict)
             self.models[n].load_state_dict(model_dict)
-
-        # loading adam state
-        optimizer_load_path = os.path.join(self.opt.load_weights_folder, "adam.pth")
-        if os.path.isfile(optimizer_load_path):
-            print("Loading Adam weights")
-            optimizer_dict = torch.load(optimizer_load_path)
-            self.model_optimizer.load_state_dict(optimizer_dict)
-
-
-            optimizer_load_path = os.path.join(self.opt.load_weights_folder, "sfn_adam.pth")
-            if os.path.isfile(optimizer_load_path):
-                optimizer_dict = torch.load(optimizer_load_path)
-                self.models['sfnD'].optimizer_D.load_state_dict(optimizer_dict)
-        else:
-            print("Cannot find Adam weights so Adam is randomly initialized")
 
 
 from options import MonodepthOptions

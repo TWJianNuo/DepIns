@@ -272,7 +272,6 @@ class MonodepthOptions:
                                  type=int,
                                  help="cropped input image width",
                                  default=256)
-
     def parse(self):
         self.options = self.parser.parse_args()
         return self.options
