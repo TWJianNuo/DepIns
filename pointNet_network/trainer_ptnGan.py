@@ -601,8 +601,8 @@ class Trainer_GAN:
                 outputs["identity_selection/{}".format(scale)] = (
                     idxs > identity_reprojection_loss.shape[1] - 1).float()
 
-            # loss += to_optimise.mean()
-            loss += torch.sum(to_optimise * semantics_mask) / (torch.sum(semantics_mask) + 1)
+            loss += to_optimise.mean()
+            # loss += torch.sum(to_optimise * semantics_mask) / (torch.sum(semantics_mask) + 1)
 
             mean_disp = disp.mean(2, True).mean(3, True)
             norm_disp = disp / (mean_disp + 1e-7)
@@ -679,10 +679,10 @@ class Trainer_GAN:
         self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
         loss_D = self.models['sfnD'].optimize_parameters()
         losses['GAN/_{}'.format('D')] = loss_D
-        ganLoss = self.models['sfnD'].forward()
-        losses['GAN/_{}'.format('G')] = ganLoss
-        if self.step > self.opt.discriminator_pretrain_round:
-            total_loss = total_loss + self.opt.discrimScale * ganLoss
+        # ganLoss = self.models['sfnD'].forward()
+        # losses['GAN/_{}'.format('G')] = ganLoss
+        # if self.step > self.opt.discriminator_pretrain_round:
+        #     total_loss = total_loss + self.opt.discrimScale * ganLoss
 
         losses["loss"] = total_loss
         return losses
