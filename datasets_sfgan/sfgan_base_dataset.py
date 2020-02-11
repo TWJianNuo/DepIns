@@ -54,6 +54,7 @@ class SFGAN_Base_Dataset(data.Dataset):
                  opts,
                  is_train=False,
                  load_seman = False,
+                 load_pred = False
                  ):
         super(SFGAN_Base_Dataset, self).__init__()
 
@@ -104,6 +105,7 @@ class SFGAN_Base_Dataset(data.Dataset):
         self.full_res_shape = (1242, 375)
         self.side_map = {"2": 2, "3": 3, "l": 2, "r": 3}
 
+        self.load_pred = load_pred
     def preprocess(self, inputs, color_aug):
         """Resize colour images to the required scales and augment if required
 
@@ -223,6 +225,9 @@ class SFGAN_Base_Dataset(data.Dataset):
 
         if self.load_seman:
             inputs['real_semanLabel'] = self.get_seman_real(folder, frame_index, side, do_flip)
+
+        if self.load_pred:
+            inputs['pred_depth'] = self.get_pred_depth(folder, frame_index, side, do_flip)
 
         return inputs
 
@@ -400,3 +405,13 @@ class SFGAN_Base_Dataset(data.Dataset):
             inputs[('syn_depth', i)] = np.expand_dims(cv2.resize(B_depth, (int(self.opts.width / np.power(2,i)), int(self.opts.height / np.power(2,i))), interpolation = cv2.INTER_LINEAR), axis=0)
 
         return inputs
+
+    def get_pred_depth(self, folder, frame_index, side, do_flip):
+        mapping = {'l' : 'image_02', 'r' : 'image_03'}
+        filePath = os.path.join(self.opts.predDepthPath, folder, mapping[side], str(frame_index).zfill(10) + '.png')
+        predDepth = np.array(cv2.imread(filePath, -1))
+        if do_flip:
+            predDepth = np.fliplr(predDepth)
+        predDepth = predDepth.astype(np.float32) / 256
+        predDepth = np.expand_dims(predDepth, axis=0)
+        return predDepth

@@ -529,6 +529,60 @@ class BackProj3D(nn.Module):
         pts3d = backProjTo3d(self.pixelLocs, predDepth, invcamK)
         return pts3d
 
+class SampleDepthMap2PointCloud(nn.Module):
+    def __init__(self, height, width, batch_size, ptsCloundNum = 10000):
+        super(SampleDepthMap2PointCloud, self).__init__()
+        self.height = height
+        self.width = width
+        self.batch_size = batch_size
+        self.ptsCloundNum = ptsCloundNum
+        self.maxDepth = 40
+
+        self.bck = BackProj3D(height=self.height, width=self.width, batch_size=self.batch_size)
+        self.bind = torch.arange(0, self.ptsCloundNum).view(1, self.ptsCloundNum).expand(self.batch_size, -1)
+        self.bind = self.bind[:, torch.randperm(self.ptsCloundNum)].float()
+        self.bind = nn.Parameter(self.bind, requires_grad=False)
+
+        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        ii = torch.arange(0, self.batch_size).view(self.batch_size, 1, 1, 1).expand(-1, 1, self.height, self.width).float()
+        xx = torch.from_numpy(xx).unsqueeze(0).unsqueeze(0).expand([self.batch_size, 1, -1, -1]).float()
+        yy = torch.from_numpy(yy).unsqueeze(0).unsqueeze(0).expand([self.batch_size, 1, -1, -1]).float()
+        self.lind = nn.Parameter(xx + yy * self.width + ii * self.width * self.height, requires_grad=False)
+
+        self.bias_helper = torch.zeros(self.batch_size, self.batch_size)
+        for i in range(self.batch_size):
+            self.bias_helper[i, 0:i] = 1
+        self.bias_helper = nn.Parameter(self.bias_helper, requires_grad=False)
+    def forward(self, predDepth, invcamK, semanticLabel):
+        pts3d = self.bck(predDepth=predDepth, invcamK=invcamK)
+        selector = predDepth < self.maxDepth
+
+        # Random shuffle
+        permute_index = torch.randperm(self.width * self.height)
+
+        lind_lineared = self.lind.view(self.batch_size, 1, -1)
+        lind_lineared = lind_lineared[:,:,permute_index]
+
+        selector_lineared = selector.view(self.batch_size, 1, -1)
+        selector_lineared = selector_lineared[:,:,permute_index]
+
+        # Compute valid points within channel
+        valid_number = torch.sum(selector_lineared, dim=[2])
+        valid_number = valid_number.float()
+
+
+        selected_pos = lind_lineared[selector_lineared]
+
+        sampled_ind = torch.remainder(self.bind, (valid_number.clone()).expand([-1, self.ptsCloundNum]))
+        sampled_ind = (torch.sum(self.bias_helper * valid_number.t().expand(-1, self.batch_size), dim=1, keepdim=True)).expand(-1, self.ptsCloundNum) + sampled_ind
+        sampled_ind = sampled_ind.view(-1)
+
+        selected_pos = selected_pos[sampled_ind.long()].long()
+
+        pts3d_sel = pts3d.permute([0,2,3,1]).contiguous().view(-1, 4)[selected_pos, :]
+        pts3d_sel = pts3d_sel.view([self.batch_size, self.ptsCloundNum, 4]).permute([0,2,1])[:,0:3,:]
+
+
 
 class DistillPtCloud(nn.Module):
     def __init__(self, height, width, batch_size, ptsCloundNum = 10000):

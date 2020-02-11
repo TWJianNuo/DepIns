@@ -679,10 +679,10 @@ class Trainer_GAN:
         self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
         loss_D = self.models['sfnD'].optimize_parameters()
         losses['GAN/_{}'.format('D')] = loss_D
-        # ganLoss = self.models['sfnD'].forward()
-        # losses['GAN/_{}'.format('G')] = ganLoss
-        # if self.step > self.opt.discriminator_pretrain_round:
-        #     total_loss = total_loss + self.opt.discrimScale * ganLoss
+        ganLoss = self.models['sfnD'].forward()
+        losses['GAN/_{}'.format('G')] = ganLoss
+        if self.step > self.opt.discriminator_pretrain_round:
+            total_loss = total_loss + self.opt.discrimScale * ganLoss
 
         losses["loss"] = total_loss
         return losses
