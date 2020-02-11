@@ -61,7 +61,7 @@ class PtnD(nn.Module):
 
         # Normalization
         self.real = (self.real - self.mean) / self.std
-        self.syn = (self.syn - self.mean) / self.std
+        # self.syn = (self.syn - self.mean) / self.std
 
         # self.real = self.real + torch.Tensor([0.5, 0, 0]).unsqueeze(0).unsqueeze(2).expand([self.opt.batch_size,-1,10000]).cuda()
 
@@ -107,8 +107,8 @@ class PtnD(nn.Module):
         # Combined loss and calculate gradients
         # loss_D = (loss_D_real + loss_D_fake) * 0.5
         # loss_D = torch.mean((pred_real - 1) * (pred_real - 1) + (pred_fake - 0) * (pred_fake - 0))
-        # loss_D = torch.mean((pred_real - 1) * (pred_real - 1))
-        loss_D = torch.mean((pred_real - 20) * (pred_real - 20))
+        loss_D = torch.mean((pred_real - 1) * (pred_real - 1))
+        # loss_D = torch.mean((pred_real - 20) * (pred_real - 20))
 
         print(loss_D)
         print(pred_real)
