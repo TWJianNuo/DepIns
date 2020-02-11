@@ -463,5 +463,56 @@ def create_sfnorm_pair_split():
         wf1.write(entry)
     wf1.close()
 
+def create_sfnorm_pair_with_pole(opts):
+    from datasets_sfgan import SFGAN_Base_Dataset
+    from torch.utils.data import DataLoader
+    from utils import readlines
+    import torch
+    from utils import tensor2disp
+
+    fpath = os.path.join(os.path.dirname(__file__), "..", "splits", opts.split, "{}_files.txt")
+    train_filenames = readlines(fpath.format("train"))
+    val_filenames = readlines(fpath.format("val"))
+    syn_train_filenames = readlines(fpath.format("syn_train"))
+    syn_val_filenames = readlines(fpath.format("syn_val"))
+
+    train_dataset = SFGAN_Base_Dataset(
+        opts.data_path, train_filenames, syn_train_filenames, opts.height, opts.width,
+        opts.frame_ids, 4, opts=opts, is_train=False, load_seman=True)
+    train_loader = DataLoader(
+        train_dataset, 1, shuffle=not opts.noShuffle,
+        num_workers=opts.num_workers, pin_memory=True, drop_last=False)
+
+    min_num = 100
+    poleId = 5
+    pole_ind_rec = list()
+    for batch_idx, inputs in enumerate(train_loader):
+        num_syn = torch.sum(inputs['syn_semanLabel'] == poleId)
+        num_real = torch.sum(inputs['real_semanLabel'] == poleId)
+
+        if num_syn > min_num and num_real > min_num:
+            pole_ind_rec.append(batch_idx)
+
+        print(batch_idx)
+
+
+    split_root = '../splits/sfnorm_pole'
+
+    wf1 = open(os.path.join(split_root, 'train_files.txt'), "w")
+    for pole_ind in pole_ind_rec:
+        wf1.write(train_filenames[pole_ind] + '\n')
+    wf1.close()
+
+    wf1 = open(os.path.join(split_root, 'syn_train_files.txt'), "w")
+    for pole_ind in pole_ind_rec:
+        wf1.write(syn_train_filenames[pole_ind] + '\n')
+    wf1.close()
+
+
+from options import MonodepthOptions
+
+options = MonodepthOptions()
+opts = options.parse()
 if __name__ == "__main__":
-    create_sfnorm_pair_split()
+    create_sfnorm_pair_with_pole(opts)
+    # create_sfnorm_pair_split()

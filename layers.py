@@ -683,7 +683,7 @@ class DistillPtCloud(nn.Module):
         sampled_ind = sampled_ind.view(-1)
 
         selected_pos = selected_pos[sampled_ind.long()].long()
-        
+
         pts3d_sel = pts3d.permute([0,2,3,1]).contiguous().view(-1, 4)[selected_pos, :]
         pts3d_sel = pts3d_sel.view([self.batch_size, self.ptsCloundNum, 4]).permute([0,2,1])[:,0:3,:]
 
