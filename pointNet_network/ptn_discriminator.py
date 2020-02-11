@@ -34,6 +34,8 @@ class PtnD(nn.Module):
 
         self.set_requires_grad(self.netD, requires_grad=True)
 
+        self.mean = torch.Tensor([25, 0, 0]).unsqueeze(0).unsqueeze(2).expand([self.opt.batch_size,-1,10000]).cuda()
+        self.std = torch.Tensor([25, 10, 5]).unsqueeze(0).unsqueeze(2).expand([self.opt.batch_size,-1,10000]).cuda()
     def set_requires_grad(self, nets, requires_grad=False):
         """Set requies_grad=Fasle for all the networks to avoid unnecessary computations
         Parameters:
@@ -53,6 +55,9 @@ class PtnD(nn.Module):
         self.syn = syn
         self.synv = synv
 
+        # Normalization
+        self.real = (self.real - self.mean) / self.std
+        self.syn = (self.syn - self.mean) / self.std
     def forward(self):
         pred_real = self.netD.discriminator_forward(self.real)
         loss_D_real = torch.sum(self.criterionGAN(pred_real, False) * self.realv) / (torch.sum(self.realv) + self.eps)
