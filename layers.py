@@ -670,8 +670,8 @@ class DistillPtCloud(nn.Module):
         valid_number = valid_number.float()
         valid_batch_indicator = (valid_number > pts_minNum).float()
 
-        # if torch.sum(valid_batch_indicator) == 0:
-        #     return torch.zeros([self.batch_size, 3, self.ptsCloundNum], device = torch.device("cuda"), dtype = torch.float32), valid_batch_indicator
+        if torch.sum(valid_batch_indicator) == 0:
+            return torch.zeros([self.batch_size, 3, self.ptsCloundNum], device = torch.device("cuda"), dtype = torch.float32), valid_batch_indicator
 
         selected_pos = lind_lineared[selector_lineared]
 
@@ -683,7 +683,7 @@ class DistillPtCloud(nn.Module):
         sampled_ind = sampled_ind.view(-1)
 
         selected_pos = selected_pos[sampled_ind.long()].long()
-
+        
         pts3d_sel = pts3d.permute([0,2,3,1]).contiguous().view(-1, 4)[selected_pos, :]
         pts3d_sel = pts3d_sel.view([self.batch_size, self.ptsCloundNum, 4]).permute([0,2,1])[:,0:3,:]
 
