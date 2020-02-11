@@ -109,10 +109,10 @@ class PtnD(nn.Module):
         # loss_D = torch.mean((pred_real - 1) * (pred_real - 1) + (pred_fake - 0) * (pred_fake - 0))
         # loss_D = torch.mean((pred_real - 1) * (pred_real - 1))
         # loss_D = torch.mean((pred_real - 20) * (pred_real - 20))
-
-        print(loss_D)
-        print(pred_real)
-        print(pred_fake)
+        #
+        # print(loss_D)
+        # print(pred_real)
+        # print(pred_fake)
         loss_D.backward()
         self.optimizer_D.step()  # update D_A and D_B's weights
 
