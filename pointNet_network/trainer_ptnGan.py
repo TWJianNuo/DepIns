@@ -255,8 +255,8 @@ class Trainer_GAN:
                 self.log_img(mode="train", inputs=inputs, outputs=outputs)
                 # self.val()
 
-            if (self.step + 1) % self.opt.save_frequency == 0:
-                self.save_model()
+            # if (self.step + 1) % self.opt.save_frequency == 0:
+            #     self.save_model()
 
             self.step += 1
 
