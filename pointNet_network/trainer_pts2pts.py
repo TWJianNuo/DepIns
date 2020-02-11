@@ -512,6 +512,7 @@ class Trainer_GAN:
 
         ptCloud_syn, val_syn = self.distillPtClound(predDepth = inputs[("syn_depth", 0)], invcamK = inputs[('invcamK', 0)], semanticLabel = inputs['syn_semanLabel'], is_shrink = True)
         ptCloud_pred, val_pred = self.distillPtClound(predDepth = outputs[("depth", 0, 0)] * self.STEREO_SCALE_FACTOR, invcamK =inputs[('invcamK', 0)], semanticLabel = inputs['real_semanLabel'], is_shrink = False)
+        ptCloud_pred = ptCloud_pred + torch.Tensor([25, 0, 0]).unsqueeze(0).unsqueeze(2).expand([self.opt.batch_size,-1,10000]).cuda()
         outputs['pts_real'] = ptCloud_pred
         outputs['pts_realv'] = val_pred
         outputs['pts_syn'] = ptCloud_syn

@@ -63,7 +63,7 @@ class PtnD(nn.Module):
         self.real = (self.real - self.mean) / self.std
         self.syn = (self.syn - self.mean) / self.std
 
-        self.real = self.real + torch.Tensor([0.5, 0, 0]).unsqueeze(0).unsqueeze(2).expand([self.opt.batch_size,-1,10000]).cuda()
+        # self.real = self.real + torch.Tensor([0.5, 0, 0]).unsqueeze(0).unsqueeze(2).expand([self.opt.batch_size,-1,10000]).cuda()
 
         # print(torch.mean(self.real, dim=[1,2]))
         # print(torch.mean(self.syn, dim=[1, 2]))
@@ -109,9 +109,9 @@ class PtnD(nn.Module):
         loss_D = torch.mean((pred_real - 1) * (pred_real - 1) + (pred_fake - 0) * (pred_fake - 0))
         # loss_D = torch.mean((pred_real - 1) * (pred_real - 1))
 
-        # print(loss_D)
-        # print(pred_real)
-        # print(pred_fake)
+        print(loss_D)
+        print(pred_real)
+        print(pred_fake)
         loss_D.backward()
         self.optimizer_D.step()  # update D_A and D_B's weights
 
