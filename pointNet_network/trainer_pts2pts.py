@@ -218,11 +218,11 @@ class Trainer_GAN:
         self.epoch = 0
         self.step = 0
         self.start_time = time.time()
+        # self.save_model()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
-            # if (self.epoch + 1) % self.opt.save_frequency == 0:
-            # if (self.step + 1) % self.opt.save_frequency == 0:
-            #     self.save_model()
+            if (self.epoch + 1) % self.opt.save_frequency == 0:
+                self.save_model()
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -255,8 +255,8 @@ class Trainer_GAN:
                 self.log_img(mode="train", inputs=inputs, outputs=outputs)
                 # self.val()
 
-            # if (self.step + 1) % self.opt.save_frequency == 0:
-            #     self.save_model()
+            if (self.step + 1) % self.opt.save_frequency == 0:
+                self.save_model()
 
             self.step += 1
 
