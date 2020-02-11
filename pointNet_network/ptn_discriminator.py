@@ -103,8 +103,8 @@ class PtnD(nn.Module):
         loss_D_fake = torch.sum(self.criterionGAN(pred_fake, False) * self.synv) / (torch.sum(self.synv) + self.eps)
 
         # Combined loss and calculate gradients
-        loss_D = (loss_D_real + loss_D_fake) * 0.5
-        # loss_D = torch.mean((pred_real - 1) * (pred_real - 1) + (pred_fake - 0) * (pred_fake - 0))
+        # loss_D = (loss_D_real + loss_D_fake) * 0.5
+        loss_D = torch.mean((pred_real - 1) * (pred_real - 1) + (pred_fake - 0) * (pred_fake - 0))
 
         print(loss_D)
         loss_D.backward()
