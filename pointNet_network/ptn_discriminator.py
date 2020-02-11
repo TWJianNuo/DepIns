@@ -25,7 +25,7 @@ class PtnD(nn.Module):
 
         self.fake_pool = PtnPool(opt.pool_size, batch_size=self.opt.batch_size)  # create image buffer to store previously generated images
         # define loss functions
-        self.criterionGAN = networks.GANLoss(opt.gan_mode, reduction='none').to(self.device)  # define GAN loss.
+        self.criterionGAN = networks.GANLoss('vanilla', reduction='none').to(self.device)  # define GAN loss.
         self.optimizer_D = torch.optim.Adam(itertools.chain(self.netD.parameters()), lr=opt.lrD, betas=(opt.beta1, 0.999))
 
         self.compute_sfnorm = dict()
@@ -36,6 +36,7 @@ class PtnD(nn.Module):
 
         self.mean = torch.Tensor([25, 0, 0]).unsqueeze(0).unsqueeze(2).expand([self.opt.batch_size,-1,10000]).cuda()
         self.std = torch.Tensor([25, 10, 5]).unsqueeze(0).unsqueeze(2).expand([self.opt.batch_size,-1,10000]).cuda()
+        self.pts_num = 10000
     def set_requires_grad(self, nets, requires_grad=False):
         """Set requies_grad=Fasle for all the networks to avoid unnecessary computations
         Parameters:
