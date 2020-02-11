@@ -104,7 +104,8 @@ class PtnD(nn.Module):
 
         # Combined loss and calculate gradients
         # loss_D = (loss_D_real + loss_D_fake) * 0.5
-        loss_D = torch.mean((pred_real - 1) * (pred_real - 1) + (pred_fake - 0) * (pred_fake - 0))
+        # loss_D = torch.mean((pred_real - 1) * (pred_real - 1) + (pred_fake - 0) * (pred_fake - 0))
+        loss_D = torch.mean((pred_real - 1) * (pred_real - 1))
 
         print(loss_D)
         print(pred_real)
