@@ -26,6 +26,7 @@ from IPython import embed
 
 import torchvision.transforms
 from pointNet_network.pointNet_model import PointNetCls
+from pointNet_network.pointNet_model import PointNetDenseCls
 
 from pointNet_network.ptn_discriminator import PtnD
 from mpl_toolkits.mplot3d import axes3d, Axes3D #<-- Note the capitalization!
@@ -66,6 +67,9 @@ def additional_opts_init(opts):
     opts.continue_train = False
     opts.save_by_iter = False
     opts.mode_sfnorm = True
+
+    opts.num_classes = 19
+    opts.feature_transform = False
     return opts
 
 class Trainer_GAN:
@@ -94,31 +98,10 @@ class Trainer_GAN:
         if self.opt.use_stereo:
             self.opt.frame_ids.append("s")
 
-        self.models["encoder"] = networks.ResnetEncoder(
-            self.opt.num_layers, self.opt.weights_init == "pretrained")
-        self.models["encoder"].to(self.device)
-        self.parameters_to_train += list(self.models["encoder"].parameters())
+        self.models["classifier"] = PointNetDenseCls(k=self.opt.num_classes, feature_transform=self.opt.feature_transform)
+        self.models["classifier"].to(self.device)
+        self.parameters_to_train += list(self.models["classifier"].parameters())
 
-        self.models["depth"] = networks.DepthDecoder(
-            self.models["encoder"].num_ch_enc, self.opt.scales)
-        self.models["depth"].to(self.device)
-        self.parameters_to_train += list(self.models["depth"].parameters())
-
-        # self.models['sfnD'] = PointNetCls(k = 1, feature_transform = False)
-        self.models['sfnD'] = PtnD(opt=self.opt, k = 1, feature_transform=False)
-        self.models['sfnD'].to(self.device)
-
-        if self.opt.predictive_mask:
-            assert self.opt.disable_automasking, \
-                "When using predictive_mask, please disable automasking with --disable_automasking"
-
-            # Our implementation of the predictive masking baseline has the the same architecture
-            # as our depth decoder. We predict a separate mask for each source frame.
-            self.models["predictive_mask"] = networks.DepthDecoder(
-                self.models["encoder"].num_ch_enc, self.opt.scales,
-                num_output_channels=(len(self.opt.frame_ids) - 1))
-            self.models["predictive_mask"].to(self.device)
-            self.parameters_to_train += list(self.models["predictive_mask"].parameters())
 
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(
@@ -163,28 +146,7 @@ class Trainer_GAN:
         for mode in ["train"]:
             self.writers[mode] = SummaryWriter(os.path.join(self.log_path, mode))
 
-        if not self.opt.no_ssim:
-            self.ssim = SSIM()
-            self.ssim.to(self.device)
-
-        self.backproject_depth = {}
-        self.project_3d = {}
-        for scale in self.opt.scales:
-            h = self.opt.height // (2 ** scale)
-            w = self.opt.width // (2 ** scale)
-
-            self.backproject_depth[scale] = BackprojectDepth(self.opt.batch_size, h, w)
-            self.backproject_depth[scale].to(self.device)
-
-            self.project_3d[scale] = Project3D(self.opt.batch_size, h, w)
-            self.project_3d[scale].to(self.device)
-
-        self.distillPtClound = DistillPtCloud(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size)
-        self.distillPtClound.to(self.device)
         self.STEREO_SCALE_FACTOR = 5.4
-
-        self.depth_metric_names = [
-            "de/abs_rel", "de/sq_rel", "de/rms", "de/log_rms", "da/a1", "da/a2", "da/a3"]
 
         print("Using split:\n  ", self.opt.split)
         print("There are {:d} training items and {:d} validation items\n".format(
@@ -192,14 +154,13 @@ class Trainer_GAN:
 
         self.save_opts()
 
-        self.toTensor = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
-
-        self.sfnCom = ComputeSurfaceNormal(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size, minDepth=self.opt.min_depth, maxDepth=self.opt.max_depth).cuda()
         if self.opt.doVisualization:
             import matlab
             import matlab.engine
             self.eng = matlab.engine.start_matlab()
 
+        self.sptc = SampleDepthMap2PointCloud(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size)
+        self.sptc.to(self.device)
     def set_train(self):
         """Convert all models to training mode
         """
@@ -220,9 +181,6 @@ class Trainer_GAN:
         self.start_time = time.time()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
-            # if (self.epoch + 1) % self.opt.save_frequency == 0:
-            # if (self.step + 1) % self.opt.save_frequency == 0:
-            #     self.save_model()
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -268,31 +226,9 @@ class Trainer_GAN:
             if key not in ['entry_tag']:
                 inputs[key] = ipt.to(self.device)
 
-        if self.opt.pose_model_type == "shared":
-            # If we are using a shared encoder for both depth and pose (as advocated
-            # in monodepthv1), then all images are fed separately through the depth encoder.
-            all_color_aug = torch.cat([inputs[("color_aug", i, 0)] for i in self.opt.frame_ids])
-            all_features = self.models["encoder"](all_color_aug)
-            all_features = [torch.split(f, self.opt.batch_size) for f in all_features]
+        outputs = dict()
 
-            features = {}
-            for i, k in enumerate(self.opt.frame_ids):
-                features[k] = [f[i] for f in all_features]
-
-            outputs = self.models["depth"](features[0])
-        else:
-            # Otherwise, we only feed the image with frame_id 0 through the depth encoder
-            features = self.models["encoder"](inputs["color_aug", 0, 0])
-            outputs = self.models["depth"](features)
-
-        if self.opt.predictive_mask:
-            outputs["predictive_mask"] = self.models["predictive_mask"](features)
-
-        if self.use_pose_net:
-            outputs.update(self.predict_poses(inputs, features))
-
-        self.generate_images_pred(inputs, outputs)
-        losses = self.compute_losses(inputs, outputs, istrain = istrain)
+        losses = self.compute_losses(inputs)
 
         return outputs, losses
 
@@ -376,65 +312,6 @@ class Trainer_GAN:
 
         self.set_train()
 
-    def generate_images_pred(self, inputs, outputs):
-        """Generate the warped (reprojected) color images for a minibatch.
-        Generated images are saved into the `outputs` dictionary.
-        """
-        for scale in self.opt.scales:
-            disp = outputs[("disp", scale)]
-            if self.opt.v1_multiscale:
-                source_scale = scale
-            else:
-                # Save org Depth
-                _, orgScale_depth = disp_to_depth(disp, self.opt.min_depth, self.opt.max_depth)
-                outputs[("orgScale_depth", 0, scale)] = orgScale_depth
-
-                depth = F.interpolate(
-                    orgScale_depth, [self.opt.height, self.opt.width], mode="bilinear", align_corners=False)
-                source_scale = 0
-
-                # disp = F.interpolate(
-                #     disp, [self.opt.height, self.opt.width], mode="bilinear", align_corners=False)
-                # source_scale = 0
-
-            # _, depth = disp_to_depth(disp, self.opt.min_depth, self.opt.max_depth)
-
-            outputs[("depth", 0, scale)] = depth
-
-            for i, frame_id in enumerate(self.opt.frame_ids[1:]):
-
-                if frame_id == "s":
-                    T = inputs["stereo_T"]
-                else:
-                    T = outputs[("cam_T_cam", 0, frame_id)]
-
-                # from the authors of https://arxiv.org/abs/1712.00175
-                if self.opt.pose_model_type == "posecnn":
-
-                    axisangle = outputs[("axisangle", 0, frame_id)]
-                    translation = outputs[("translation", 0, frame_id)]
-
-                    inv_depth = 1 / depth
-                    mean_inv_depth = inv_depth.mean(3, True).mean(2, True)
-
-                    T = transformation_from_parameters(
-                        axisangle[:, 0], translation[:, 0] * mean_inv_depth[:, 0], frame_id < 0)
-
-                cam_points = self.backproject_depth[source_scale](
-                    depth, inputs[("inv_K", source_scale)])
-                pix_coords = self.project_3d[source_scale](
-                    cam_points, inputs[("K", source_scale)], T)
-
-                outputs[("sample", frame_id, scale)] = pix_coords
-
-                outputs[("color", frame_id, scale)] = F.grid_sample(
-                    inputs[("color", frame_id, source_scale)],
-                    outputs[("sample", frame_id, scale)],
-                    padding_mode="border")
-
-                if not self.opt.disable_automasking:
-                    outputs[("color_identity", frame_id, scale)] = \
-                        inputs[("color", frame_id, source_scale)]
 
     def compute_reprojection_loss(self, pred, target):
         """Computes reprojection loss between a batch of predicted and target images
@@ -545,74 +422,15 @@ class Trainer_GAN:
         self.eng.eval('close all', nargout=0)
 
 
-    def compute_losses(self, inputs, outputs, istrain = True):
+    def compute_losses(self, inputs):
         """Compute the reprojection and smoothness losses for a minibatch
         """
         losses = {}
         total_loss = 0
         # If only pole area imposed with loss, eliminating bad effects from over-all photometric
         typeind = 5
-        semantics_mask = (inputs['real_semanLabel'] == typeind).float()
-        for scale in self.opt.scales:
-            loss = 0
-            reprojection_losses = []
+        ptc = self.sptc(predDepth = inputs[("syn_depth", 0)], invcamK = inputs[('invcamK', 0)], semanticLabel = inputs['syn_semanLabel'])
 
-            if self.opt.v1_multiscale:
-                source_scale = scale
-            else:
-                source_scale = 0
-
-            disp = outputs[("disp", scale)]
-            color = inputs[("color", 0, scale)]
-            target = inputs[("color", 0, source_scale)]
-
-            for frame_id in self.opt.frame_ids[1:]:
-                pred = outputs[("color", frame_id, scale)]
-                reprojection_losses.append(self.compute_reprojection_loss(pred, target))
-
-            reprojection_losses = torch.cat(reprojection_losses, 1)
-
-            if not self.opt.disable_automasking:
-                identity_reprojection_losses = []
-                for frame_id in self.opt.frame_ids[1:]:
-                    pred = inputs[("color", frame_id, source_scale)]
-                    identity_reprojection_losses.append(
-                        self.compute_reprojection_loss(pred, target))
-
-                identity_reprojection_losses = torch.cat(identity_reprojection_losses, 1)
-                identity_reprojection_loss = identity_reprojection_losses
-                reprojection_loss = reprojection_losses
-
-            if not self.opt.disable_automasking:
-                # add random numbers to break ties
-                identity_reprojection_loss += torch.randn(
-                    identity_reprojection_loss.shape).cuda() * 0.00001
-
-                combined = torch.cat((identity_reprojection_loss, reprojection_loss), dim=1)
-            else:
-                combined = reprojection_loss
-
-            if combined.shape[1] == 1:
-                to_optimise = combined
-            else:
-                to_optimise, idxs = torch.min(combined, dim=1, keepdim=True)
-
-            if not self.opt.disable_automasking:
-                outputs["identity_selection/{}".format(scale)] = (
-                    idxs > identity_reprojection_loss.shape[1] - 1).float()
-
-            loss += to_optimise.mean()
-            # loss += torch.sum(to_optimise * semantics_mask) / (torch.sum(semantics_mask) + 1)
-
-            mean_disp = disp.mean(2, True).mean(3, True)
-            norm_disp = disp / (mean_disp + 1e-7)
-            smooth_loss = get_smooth_loss(norm_disp, color)
-
-            loss += self.opt.disparity_smoothness * smooth_loss / (2 ** scale)
-            total_loss += loss
-            losses["loss/{}".format(scale)] = loss
-
-        total_loss /= self.num_scales
 
 
         if self.opt.doVisualization:
@@ -679,10 +497,10 @@ class Trainer_GAN:
         self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
         loss_D = self.models['sfnD'].optimize_parameters()
         losses['GAN/_{}'.format('D')] = loss_D
-        ganLoss = self.models['sfnD'].forward()
-        losses['GAN/_{}'.format('G')] = ganLoss
-        if self.step > self.opt.discriminator_pretrain_round:
-            total_loss = total_loss + self.opt.discrimScale * ganLoss
+        # ganLoss = self.models['sfnD'].forward()
+        # losses['GAN/_{}'.format('G')] = ganLoss
+        # if self.step > self.opt.discriminator_pretrain_round:
+        #     total_loss = total_loss + self.opt.discrimScale * ganLoss
 
         losses["loss"] = total_loss
         return losses
@@ -856,36 +674,7 @@ class Trainer_GAN:
     def load_model(self):
         """Load model(s) from disk
         """
-        self.opt.load_weights_folder = os.path.expanduser(self.opt.load_weights_folder)
-
-        assert os.path.isdir(self.opt.load_weights_folder), \
-            "Cannot find folder {}".format(self.opt.load_weights_folder)
-        print("loading model from folder {}".format(self.opt.load_weights_folder))
-
-        for n in self.opt.models_to_load:
-            print("Loading {} weights...".format(n))
-            path = os.path.join(self.opt.load_weights_folder, "{}.pth".format(n))
-            model_dict = self.models[n].state_dict()
-            pretrained_dict = torch.load(path)
-            pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-            model_dict.update(pretrained_dict)
-            self.models[n].load_state_dict(model_dict)
-
-        # loading adam state
-        optimizer_load_path = os.path.join(self.opt.load_weights_folder, "adam.pth")
-        if os.path.isfile(optimizer_load_path):
-            print("Loading Adam weights")
-            optimizer_dict = torch.load(optimizer_load_path)
-            self.model_optimizer.load_state_dict(optimizer_dict)
-
-
-            optimizer_load_path = os.path.join(self.opt.load_weights_folder, "sfn_adam.pth")
-            if os.path.isfile(optimizer_load_path):
-                optimizer_dict = torch.load(optimizer_load_path)
-                self.models['sfnD'].optimizer_D.load_state_dict(optimizer_dict)
-        else:
-            print("Cannot find Adam weights so Adam is randomly initialized")
-
+        print("Load module not implemented yet")
 
 from options import MonodepthOptions
 

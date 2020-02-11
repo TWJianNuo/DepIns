@@ -255,8 +255,8 @@ class Trainer_GAN:
                 self.log_img(mode="train", inputs=inputs, outputs=outputs)
                 # self.val()
 
-            if (self.step + 1) % self.opt.save_frequency == 0:
-                self.save_model()
+            # if (self.step + 1) % self.opt.save_frequency == 0:
+            #     self.save_model()
 
             self.step += 1
 
@@ -393,48 +393,7 @@ class Trainer_GAN:
                     orgScale_depth, [self.opt.height, self.opt.width], mode="bilinear", align_corners=False)
                 source_scale = 0
 
-                # disp = F.interpolate(
-                #     disp, [self.opt.height, self.opt.width], mode="bilinear", align_corners=False)
-                # source_scale = 0
-
-            # _, depth = disp_to_depth(disp, self.opt.min_depth, self.opt.max_depth)
-
             outputs[("depth", 0, scale)] = depth
-
-            for i, frame_id in enumerate(self.opt.frame_ids[1:]):
-
-                if frame_id == "s":
-                    T = inputs["stereo_T"]
-                else:
-                    T = outputs[("cam_T_cam", 0, frame_id)]
-
-                # from the authors of https://arxiv.org/abs/1712.00175
-                if self.opt.pose_model_type == "posecnn":
-
-                    axisangle = outputs[("axisangle", 0, frame_id)]
-                    translation = outputs[("translation", 0, frame_id)]
-
-                    inv_depth = 1 / depth
-                    mean_inv_depth = inv_depth.mean(3, True).mean(2, True)
-
-                    T = transformation_from_parameters(
-                        axisangle[:, 0], translation[:, 0] * mean_inv_depth[:, 0], frame_id < 0)
-
-                cam_points = self.backproject_depth[source_scale](
-                    depth, inputs[("inv_K", source_scale)])
-                pix_coords = self.project_3d[source_scale](
-                    cam_points, inputs[("K", source_scale)], T)
-
-                outputs[("sample", frame_id, scale)] = pix_coords
-
-                outputs[("color", frame_id, scale)] = F.grid_sample(
-                    inputs[("color", frame_id, source_scale)],
-                    outputs[("sample", frame_id, scale)],
-                    padding_mode="border")
-
-                if not self.opt.disable_automasking:
-                    outputs[("color_identity", frame_id, scale)] = \
-                        inputs[("color", frame_id, source_scale)]
 
     def compute_reprojection_loss(self, pred, target):
         """Computes reprojection loss between a batch of predicted and target images
@@ -550,85 +509,6 @@ class Trainer_GAN:
         """
         losses = {}
         total_loss = 0
-        # If only pole area imposed with loss, eliminating bad effects from over-all photometric
-        typeind = 5
-        semantics_mask = (inputs['real_semanLabel'] == typeind).float()
-        for scale in self.opt.scales:
-            loss = 0
-            reprojection_losses = []
-
-            if self.opt.v1_multiscale:
-                source_scale = scale
-            else:
-                source_scale = 0
-
-            disp = outputs[("disp", scale)]
-            color = inputs[("color", 0, scale)]
-            target = inputs[("color", 0, source_scale)]
-
-            for frame_id in self.opt.frame_ids[1:]:
-                pred = outputs[("color", frame_id, scale)]
-                reprojection_losses.append(self.compute_reprojection_loss(pred, target))
-
-            reprojection_losses = torch.cat(reprojection_losses, 1)
-
-            if not self.opt.disable_automasking:
-                identity_reprojection_losses = []
-                for frame_id in self.opt.frame_ids[1:]:
-                    pred = inputs[("color", frame_id, source_scale)]
-                    identity_reprojection_losses.append(
-                        self.compute_reprojection_loss(pred, target))
-
-                identity_reprojection_losses = torch.cat(identity_reprojection_losses, 1)
-                identity_reprojection_loss = identity_reprojection_losses
-                reprojection_loss = reprojection_losses
-
-            if not self.opt.disable_automasking:
-                # add random numbers to break ties
-                identity_reprojection_loss += torch.randn(
-                    identity_reprojection_loss.shape).cuda() * 0.00001
-
-                combined = torch.cat((identity_reprojection_loss, reprojection_loss), dim=1)
-            else:
-                combined = reprojection_loss
-
-            if combined.shape[1] == 1:
-                to_optimise = combined
-            else:
-                to_optimise, idxs = torch.min(combined, dim=1, keepdim=True)
-
-            if not self.opt.disable_automasking:
-                outputs["identity_selection/{}".format(scale)] = (
-                    idxs > identity_reprojection_loss.shape[1] - 1).float()
-
-            loss += to_optimise.mean()
-            # loss += torch.sum(to_optimise * semantics_mask) / (torch.sum(semantics_mask) + 1)
-
-            mean_disp = disp.mean(2, True).mean(3, True)
-            norm_disp = disp / (mean_disp + 1e-7)
-            smooth_loss = get_smooth_loss(norm_disp, color)
-
-            loss += self.opt.disparity_smoothness * smooth_loss / (2 ** scale)
-            total_loss += loss
-            losses["loss/{}".format(scale)] = loss
-
-        total_loss /= self.num_scales
-
-
-        if self.opt.doVisualization:
-            for i in range(self.opt.batch_size):
-                self.check_depthMap(inputs, outputs, drawIndex=i)
-            eval_losses = dict()
-            self.compute_depth_losses(inputs, outputs, eval_losses)
-            print("Batch %d Metric of prediction:" % self.step)
-            print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
-            print(("&{: 8.3f}  " * 7).format(*eval_losses.values()))
-
-            outputs[('depth', 0, 0)] = inputs[('syn_depth', 0)]
-            self.compute_depth_losses(inputs, outputs, eval_losses)
-            print("Batch %d Metric of Synthetic:" % self.step)
-            print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
-            print(("&{: 8.3f}  " * 7).format(*eval_losses.values()))
 
         ptCloud_syn, val_syn = self.distillPtClound(predDepth = inputs[("syn_depth", 0)], invcamK = inputs[('invcamK', 0)], semanticLabel = inputs['syn_semanLabel'], is_shrink = True)
         ptCloud_pred, val_pred = self.distillPtClound(predDepth = outputs[("depth", 0, 0)] * self.STEREO_SCALE_FACTOR, invcamK =inputs[('invcamK', 0)], semanticLabel = inputs['real_semanLabel'], is_shrink = False)
@@ -683,6 +563,8 @@ class Trainer_GAN:
         losses['GAN/_{}'.format('G')] = ganLoss
         if self.step > self.opt.discriminator_pretrain_round:
             total_loss = total_loss + self.opt.discrimScale * ganLoss
+        else:
+            total_loss = 0 * ganLoss
 
         losses["loss"] = total_loss
         return losses
@@ -744,8 +626,8 @@ class Trainer_GAN:
         #     self.eng = matlab.engine.start_matlab()
         for j in range(min(2, self.opt.batch_size)):  # write a maxmimum of four images
             input_rgb = inputs[('color', 0, 0)][j].data
-            reco_rgb = outputs[('color', 's', 0)][j].data
-            combined_up = torch.cat([input_rgb, reco_rgb], dim=2)
+            seman_rgb = self.toTensor(tensor2semantic(inputs['real_semanLabel'], ind = j)).cuda().data
+            combined_up = torch.cat([input_rgb, seman_rgb], dim=2)
 
             disp_rgb = self.toTensor(tensor2disp(outputs[('disp', 0)], vmax=0.1, ind=j)).cuda().data
             input_rgb_stereo = inputs[('color', 's', 0)][j].data
