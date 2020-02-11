@@ -621,6 +621,8 @@ class DistillPtCloud(nn.Module):
             self.bias_helper[i, 0:i] = 1
         self.bias_helper = nn.Parameter(self.bias_helper, requires_grad=False)
 
+        self.permute_index = torch.randperm(self.width * self.height)
+
     def forward(self, predDepth, invcamK, semanticLabel, is_shrink = False):
         pts3d = self.bck(predDepth = predDepth, invcamK = invcamK)
         # Visualization
@@ -657,13 +659,13 @@ class DistillPtCloud(nn.Module):
             selector = self.shrinkConv(selector.float()) > self.bar
 
         # Random shuffle
-        permute_index = torch.randperm(self.width * self.height)
+
 
         lind_lineared = self.lind.view(self.batch_size, 1, -1)
-        lind_lineared = lind_lineared[:,:,permute_index]
+        lind_lineared = lind_lineared[:,:,self.permute_index]
 
         selector_lineared = selector.view(self.batch_size, 1, -1)
-        selector_lineared = selector_lineared[:,:,permute_index]
+        selector_lineared = selector_lineared[:,:,self.permute_index]
 
         # Compute valid points within channel
         valid_number = torch.sum(selector_lineared, dim=[2])
