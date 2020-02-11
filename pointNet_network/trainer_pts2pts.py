@@ -238,9 +238,9 @@ class Trainer_GAN:
             outputs, losses = self.process_batch(inputs)
 
             # Optimize Unet
-            self.model_optimizer.zero_grad()
-            losses["loss"].backward()
-            self.model_optimizer.step()
+            # self.model_optimizer.zero_grad()
+            # losses["loss"].backward()
+            # self.model_optimizer.step()
 
             duration = time.time() - before_op_time
 
@@ -558,15 +558,16 @@ class Trainer_GAN:
 
         self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
         loss_D = self.models['sfnD'].optimize_parameters()
-        losses['GAN/_{}'.format('D')] = loss_D
-        ganLoss = self.models['sfnD'].forward()
-        losses['GAN/_{}'.format('G')] = ganLoss
-        if self.step > self.opt.discriminator_pretrain_round:
-            total_loss = total_loss + self.opt.discrimScale * ganLoss
-        else:
-            total_loss = 0 * ganLoss
-
-        losses["loss"] = total_loss
+        # losses['GAN/_{}'.format('D')] = loss_D
+        # ganLoss = self.models['sfnD'].forward()
+        # losses['GAN/_{}'.format('G')] = ganLoss
+        # if self.step > self.opt.discriminator_pretrain_round:
+        #     total_loss = total_loss + self.opt.discrimScale * ganLoss
+        # else:
+        #     total_loss = 0 * ganLoss
+        #
+        # losses["loss"] = total_loss
+        losses["loss"] = loss_D
         return losses
 
     def compute_depth_losses(self, inputs, outputs, losses):

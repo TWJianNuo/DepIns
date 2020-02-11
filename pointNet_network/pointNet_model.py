@@ -151,7 +151,8 @@ class PointNetCls(nn.Module):
     def discriminator_forward(self, x):
         x, trans, trans_feat = self.feat(x)
         x = F.relu(self.bn1(self.fc1(x)))
-        x = F.relu(self.bn2(self.dropout(self.fc2(x))))
+        # x = F.relu(self.bn2(self.dropout(self.fc2(x))))
+        x = F.relu(self.bn2(self.fc2(x)))
         x = self.fc3(x)
         # x = self.lrelu(x)
         return x
