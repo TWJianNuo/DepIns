@@ -370,7 +370,7 @@ class SFGAN_Base_Dataset(data.Dataset):
             semantic_label_copy[semantic_label_copy == k] = labels[k].trainId
 
         # visualize_semantic(semantic_label_copy)
-        semantic_label_copy = np.expand_dims(semantic_label_copy, axis=0)
+        # semantic_label_copy = np.expand_dims(semantic_label_copy, axis=0)
 
         return semantic_label_copy
 
@@ -396,7 +396,7 @@ class SFGAN_Base_Dataset(data.Dataset):
             B_semanLabel = np.copy(np.fliplr(B_semanLabel))
         inputs[('syn_rgb', 0)] = np.moveaxis(cv2.resize(B_rgb, (self.opts.width, self.opts.height), interpolation = cv2.INTER_LINEAR), [0,1,2], [1,2,0])
         inputs[('syn_depth', 0)] = np.expand_dims(cv2.resize(B_depth, (self.opts.width, self.opts.height), interpolation = cv2.INTER_LINEAR), axis=0)
-        inputs['syn_semanLabel'] = B_semanLabel
+        inputs['syn_semanLabel'] = np.expand_dims(B_semanLabel, axis = 0)
         for i in range(1, self.num_scales):
             inputs[('syn_depth', i)] = np.expand_dims(cv2.resize(B_depth, (int(self.opts.width / np.power(2,i)), int(self.opts.height / np.power(2,i))), interpolation = cv2.INTER_LINEAR), axis=0)
 
