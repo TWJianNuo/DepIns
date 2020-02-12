@@ -648,6 +648,16 @@ class Trainer_GAN:
                 combined, self.step)
 
 
+            syn_rgb = inputs[('syn_rgb', 0)][j].data
+            syn_seman = self.toTensor(tensor2semantic(inputs['syn_semanLabel'], ind = j)).cuda().data
+            syn_depth = self.toTensor(tensor2disp(1 / inputs[('syn_depth', 0)], percentile=95, ind=j)).cuda().data
+            combined_syn = torch.cat([syn_rgb, syn_seman, syn_depth], dim=1)
+            # tensor2rgb(combined_syn.unsqueeze(0), ind=0).show()
+            writer.add_image(
+                "syn_{}".format(j),
+                combined_syn, self.step)
+
+
             if outputs['pts_realv'][j] and outputs['pts_synv'][j]:
                 # Matplotlib visualization
                 dns_rate = 10
