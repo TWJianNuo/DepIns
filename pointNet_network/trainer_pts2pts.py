@@ -146,7 +146,7 @@ class Trainer_GAN:
 
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, syn_train_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, opts = opts, is_train=False, load_seman=True)
+            self.opt.frame_ids, 4, opts = opts, is_train=True, load_seman=True)
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, shuffle= not self.opt.noShuffle,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
