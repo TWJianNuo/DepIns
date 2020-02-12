@@ -648,7 +648,9 @@ class Trainer_GAN:
         n_bins = 30
         fig, axs = plt.subplots(1, 2, sharey=True, tight_layout=True)
         axs[0].hist(self.dp_real, bins=n_bins)
+        axs[0].set_title('pred_real')
         axs[1].hist(self.dp_fake, bins=n_bins)
+        axs[1].set_title('pred_fake')
         writer.add_figure("pred_stem", fig, self.step)
         plt.close(fig)
 
