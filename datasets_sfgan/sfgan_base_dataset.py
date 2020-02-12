@@ -179,7 +179,7 @@ class SFGAN_Base_Dataset(data.Dataset):
             else:
                 inputs[("color", i, -1)] = self.get_color(folder, frame_index + i, side, do_flip)
 
-        inputs.update(self.get_syn_data(index))
+        inputs.update(self.get_syn_data(index, do_flip))
 
         # adjusting intrinsics to match each scale in the pyramid
         for scale in range(self.num_scales):
@@ -377,8 +377,7 @@ class SFGAN_Base_Dataset(data.Dataset):
 
         return semantic_label_copy
 
-    def get_syn_data(self, index):
-        do_flip = self.is_train and random.random() > 0.5
+    def get_syn_data(self, index, do_flip):
         index = index % len(self.syn_filenames)
 
         inputs = {}
