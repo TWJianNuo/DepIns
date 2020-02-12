@@ -40,6 +40,10 @@ class PtnD(nn.Module):
         self.mean = torch.Tensor([25, 0, 0]).unsqueeze(0).unsqueeze(2).expand([self.opt.batch_size,-1,10000]).cuda()
         self.std = torch.Tensor([25, 10, 5]).unsqueeze(0).unsqueeze(2).expand([self.opt.batch_size,-1,10000]).cuda()
         self.pts_num = 10000
+        self.sig = nn.Sigmoid()
+
+        self.accu_loss = 0
+        self.accu_count = 0
     def set_requires_grad(self, nets, requires_grad=False):
         """Set requies_grad=Fasle for all the networks to avoid unnecessary computations
         Parameters:
@@ -110,16 +114,28 @@ class PtnD(nn.Module):
         loss_D.backward()
         self.optimizer_D.step()  # update D_A and D_B's weights
 
-        return loss_D
+        # self.accu_loss = self.accu_loss + loss_D
+        # self.accu_count = self.accu_count + 1
+        # print(self.accu_loss / self.accu_count)
+        # print(loss_D)
+
+        return loss_D, self.sig(pred_real), self.sig(pred_fake)
 
     def classification(self):
         real = self.real.detach()
         realv = self.realv.detach()
         pred_real = self.netD.discriminator_forward(real.detach())
-        loss_D_real = torch.sum(self.criterionGAN(pred_real, True) * realv) / (torch.sum(realv) + self.eps)
+        pred_real = self.sig(pred_real)
 
         # Fake
         pred_fake = self.netD.discriminator_forward(self.syn.detach())
-        loss_D_fake = torch.sum(self.criterionGAN(pred_fake, False) * self.synv) / (torch.sum(self.synv) + self.eps)
+        pred_fake = self.sig(pred_fake)
 
-        return loss_D_real, loss_D_fake
+        loss_D_real = torch.sum(self.criterionGAN(pred_real, True) * realv) / (torch.sum(realv) + self.eps)
+        loss_D_fake = torch.sum(self.criterionGAN(pred_fake, False) * self.synv) / (torch.sum(self.synv) + self.eps)
+        loss_D = (loss_D_real + loss_D_fake) * 0.5
+
+        self.accu_loss = self.accu_loss + loss_D
+        self.accu_count = self.accu_count + 1
+        print(self.accu_loss / self.accu_count)
+        return pred_real, pred_fake

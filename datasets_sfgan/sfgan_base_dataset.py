@@ -400,6 +400,11 @@ class SFGAN_Base_Dataset(data.Dataset):
         for i in range(1, self.num_scales):
             inputs[('syn_depth', i)] = np.expand_dims(cv2.resize(B_depth, (int(self.opts.width / np.power(2,i)), int(self.opts.height / np.power(2,i))), interpolation = cv2.INTER_LINEAR), axis=0)
 
+
+        folder, ind, dir = self.syn_filenames[index].split(' ')
+        inputs['syn_tag'] = str('Folder: ' + folder + '\nFrame_Index: ' + ind.zfill(10) + '\nIndex: ' +str(index).zfill(10) + '\nDo_flip: ' + str(do_flip))
+
+
         return inputs
 
     def get_pred_depth(self, folder, frame_index, side, do_flip):

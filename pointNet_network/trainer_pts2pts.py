@@ -200,6 +200,13 @@ class Trainer_GAN:
             import matlab.engine
             self.eng = matlab.engine.start_matlab()
 
+
+        # For visualization
+        self.cap = 1000
+        self.itcount = 0
+        self.dp_real = np.zeros([self.cap, 1])
+        self.dp_fake = np.zeros([self.cap, 1])
+
     def set_train(self):
         """Convert all models to training mode
         """
@@ -242,6 +249,13 @@ class Trainer_GAN:
             # losses["loss"].backward()
             # self.model_optimizer.step()
 
+            for i in range(self.opt.batch_size):
+                curind = np.mod(self.itcount, self.cap)
+                self.dp_real[curind] = outputs['pred_real'][i].cpu().detach().numpy()
+                self.dp_fake[curind] = outputs['pred_fake'][i].cpu().detach().numpy()
+                self.itcount = self.itcount + 1
+
+
             duration = time.time() - before_op_time
 
             if self.step % self.opt.print_freq == 0 or (self.step < 2000 and self.step % 5 == 0):
@@ -265,7 +279,7 @@ class Trainer_GAN:
         """Pass a minibatch through the network and generate images and losses
         """
         for key, ipt in inputs.items():
-            if key not in ['entry_tag']:
+            if key not in ['entry_tag', 'syn_tag']:
                 inputs[key] = ipt.to(self.device)
 
         if self.opt.pose_model_type == "shared":
@@ -558,7 +572,9 @@ class Trainer_GAN:
         # self.eng.eval('grid off', nargout=0)
 
         self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
-        loss_D = self.models['sfnD'].optimize_parameters()
+        loss_D, pred_real, pred_fake = self.models['sfnD'].optimize_parameters()
+        outputs['pred_real'] = pred_real
+        outputs['pred_fake'] = pred_fake
         # losses['GAN/_{}'.format('D')] = loss_D
         # ganLoss = self.models['sfnD'].forward()
         # losses['GAN/_{}'.format('G')] = ganLoss
@@ -626,6 +642,18 @@ class Trainer_GAN:
         writer = self.writers[mode]
         # if self.eng is None:
         #     self.eng = matlab.engine.start_matlab()
+
+
+        # Record stem
+        n_bins = 30
+        fig, axs = plt.subplots(1, 2, sharey=True, tight_layout=True)
+        axs[0].hist(self.dp_real, bins=n_bins)
+        axs[1].hist(self.dp_fake, bins=n_bins)
+        writer.add_figure("pred_stem", fig, self.step)
+        plt.close(fig)
+
+
+
         for j in range(min(2, self.opt.batch_size)):  # write a maxmimum of four images
             input_rgb = inputs[('color', 0, 0)][j].data
             seman_rgb = self.toTensor(tensor2semantic(inputs['real_semanLabel'], ind = j)).cuda().data
