@@ -106,22 +106,20 @@ class PtnD(nn.Module):
 
         # Combined loss and calculate gradients
         loss_D = (loss_D_real + loss_D_fake) * 0.5
-        # loss_D = torch.mean((pred_real - 1) * (pred_real - 1) + (pred_fake - 0) * (pred_fake - 0))
-        # loss_D = torch.mean((pred_real - 1) * (pred_real - 1))
-        # loss_D = torch.mean((pred_real - 20) * (pred_real - 20))
-        #
-        # print(loss_D)
-        # print(pred_real)
-        # print(pred_fake)
+
         loss_D.backward()
         self.optimizer_D.step()  # update D_A and D_B's weights
 
-
-        # a,_,_ = self.netD.feat(self.real.detach())
-        # a = F.relu(self.netD.bn1(self.netD.fc1(a)))
-        # b,_,_ = self.netD.feat(self.syn.detach())
-        # b = F.relu(self.netD.bn1(self.netD.fc1(b)))
-        # print(torch.mean(real, dim=[1,2]))
-        # print(torch.mean(self.syn, dim=[1, 2]))
-
         return loss_D
+
+    def classification(self):
+        real = self.real.detach()
+        realv = self.realv.detach()
+        pred_real = self.netD.discriminator_forward(real.detach())
+        loss_D_real = torch.sum(self.criterionGAN(pred_real, True) * realv) / (torch.sum(realv) + self.eps)
+
+        # Fake
+        pred_fake = self.netD.discriminator_forward(self.syn.detach())
+        loss_D_fake = torch.sum(self.criterionGAN(pred_fake, False) * self.synv) / (torch.sum(self.synv) + self.eps)
+
+        return loss_D_real, loss_D_fake
