@@ -254,7 +254,6 @@ def project_3dptsTo2dpts(pts3d, camKs, imgHeight = 320, imgWidth = 1024):
                 projected2d[:, 1, :] < imgHeight - 1) * (projecDepth[:, 0, :] > 0)
     selector = selector.unsqueeze(1)
 
-
     if format_indicator == 1:
         projected2d = projected2d.view(batchSize, 2, height, width)
         projecDepth = projecDepth.view(batchSize, 1, height, width)

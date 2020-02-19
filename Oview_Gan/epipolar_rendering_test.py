@@ -29,6 +29,8 @@ from pointNet_network.pointNet_model import PointNetCls
 
 from pointNet_network.ptn_discriminator import PtnD
 from mpl_toolkits.mplot3d import axes3d, Axes3D #<-- Note the capitalization!
+
+import copy
 def additional_opts_init(opts):
     opts.phase = 'train'
     opts.lr_policy = 'linear'
@@ -179,8 +181,11 @@ class Trainer_GAN:
             self.project_3d[scale] = Project3D(self.opt.batch_size, h, w)
             self.project_3d[scale].to(self.device)
 
-        self.distillPtClound = DistillPtCloud(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size)
-        self.distillPtClound.to(self.device)
+        self.proj2ow = Proj2Oview(height = self.opt.height, width = self.opt.width, batch_size = self.opt.batch_size)
+        self.proj2ow.to(self.device)
+
+        self.proj2ows = Proj2Oview(height = self.opt.height, width = self.opt.width, batch_size = 1)
+        self.proj2ows.to(self.device)
         self.STEREO_SCALE_FACTOR = 5.4
 
         self.depth_metric_names = [
@@ -199,6 +204,11 @@ class Trainer_GAN:
             import matlab
             import matlab.engine
             self.eng = matlab.engine.start_matlab()
+
+
+        # Generate Gaussian Noise
+        import torch.distributions as tdist
+        self.nseeder = tdist.Normal(loc = torch.tensor([0.0]), scale = torch.tensor([1.0]))
 
 
         # For visualization
@@ -225,11 +235,10 @@ class Trainer_GAN:
         self.epoch = 0
         self.step = 0
         self.start_time = time.time()
-        # self.save_model()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
-            if (self.epoch + 1) % self.opt.save_frequency == 0:
-                self.save_model()
+            # if (self.epoch + 1) % self.opt.save_frequency == 0:
+            #     self.save_model()
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -243,34 +252,7 @@ class Trainer_GAN:
             before_op_time = time.time()
 
             outputs, losses = self.process_batch(inputs)
-
-            # Optimize Unet
-            # self.model_optimizer.zero_grad()
-            # losses["loss"].backward()
-            # self.model_optimizer.step()
-
-            for i in range(self.opt.batch_size):
-                curind = np.mod(self.itcount, self.cap)
-                self.dp_real[curind] = outputs['pred_real'][i].cpu().detach().numpy()
-                self.dp_fake[curind] = outputs['pred_fake'][i].cpu().detach().numpy()
-                self.itcount = self.itcount + 1
-
-
-            duration = time.time() - before_op_time
-
-            if self.step % self.opt.print_freq == 0 or (self.step < 2000 and self.step % 5 == 0):
-                self.log_time(batch_idx, duration, losses["loss"].cpu().data)
-                self.log_data(mode="train", losses=losses)
-
-            if self.step % self.opt.log_frequency == 0:
-                if "depth_gt" in inputs:
-                    self.compute_depth_losses(inputs, outputs, losses)
-                # self.log_data(mode="train", losses=losses)
-                self.log_img(mode="train", inputs=inputs, outputs=outputs)
-                # self.val()
-
-            # if (self.step + 1) % self.opt.save_frequency == 0:
-            #     self.save_model()
+            print("{} finished".format(batch_idx))
 
             self.step += 1
 
@@ -502,9 +484,7 @@ class Trainer_GAN:
         self.eng.eval('view([-79 17])', nargout=0)
         self.eng.eval('camzoom(1.2)', nargout=0)
         self.eng.eval('grid off', nargout=0)
-        # eng.eval('set(gca,\'YTickLabel\',[]);', nargout=0)
-        # eng.eval('set(gca,\'XTickLabel\',[]);', nargout=0)
-        # eng.eval('set(gca,\'ZTickLabel\',[]);', nargout=0)
+
         self.eng.eval('set(gca, \'XColor\', \'none\', \'YColor\', \'none\', \'ZColor\', \'none\')', nargout=0)
 
         folder, frame_index, _, _, _, _ = inputs['entry_tag'][drawIndex].split('\n')
@@ -517,96 +497,123 @@ class Trainer_GAN:
         self.eng.eval(command, nargout=0)
         self.eng.eval('close all', nargout=0)
 
+    def get_synpath(self, inputs):
+        syn_ppath = list()
+        syn_ppath_pts3d_clean = list()
+        syn_ppath_pts3d_noisy_af = list()
+        syn_ppath_pts3d_noisy_bf = list()
+        syn_ppath_hmap_clean = list()
+        syn_ppath_hmap_af = list()
+        syn_ppath_hmap_bf = list()
+        syn_tag = inputs['syn_tag']
+        croot = '/media/shengjie/other/Depins/Depins/visualization/ppair_test'
 
+        for tag in syn_tag:
+            c1,c2,c3,c4 = tag.split('\n')
+            tpath = os.path.join(croot, '{}_{}'.format(c1.split(' ')[1], c2.split(' ')[1]))
+            os.makedirs(tpath, exist_ok=True)
+            syn_ppath.append(tpath)
+            syn_ppath_pts3d_clean.append(os.path.join(tpath, 'clean3d.png'))
+            syn_ppath_pts3d_noisy_af.append(os.path.join(tpath, 'noise3d_af'))
+            syn_ppath_pts3d_noisy_bf.append(os.path.join(tpath, 'noise3d_bf'))
+            syn_ppath_hmap_clean.append(os.path.join(tpath, 'hmap_clean.png'))
+            syn_ppath_hmap_af.append(os.path.join(tpath, 'hmap_clean_af.png'))
+            syn_ppath_hmap_bf.append(os.path.join(tpath, 'hmap_clean_bf.png'))
+        return syn_ppath, syn_ppath_pts3d_clean, syn_ppath_pts3d_noisy_af, syn_ppath_pts3d_noisy_bf, syn_ppath_hmap_clean, syn_ppath_hmap_af, syn_ppath_hmap_bf
+
+    def get_realpath(self, inputs):
+        real_ppath = list()
+        real_tag = inputs['entry_tag']
+        croot = os.path.join('/media/shengjie/other/Depins/Depins/visualization/oview_synCreal', 'real')
+        os.makedirs(croot, exist_ok=True)
+        for tag in real_tag:
+            c1,c2,c3,c4,c5,c6 = tag.split('\n')
+            tpath = os.path.join(croot, '{}_{}.png'.format(c1.split(' ')[1].split('/')[1], c2.split(' ')[1]))
+            real_ppath.append(tpath)
+        return real_ppath
+
+    def post_rannoise(self, depthmap, semanticmap):
+        visibletype = [5]  # pole
+        addmask = torch.zeros_like(semanticmap)
+        for vt in visibletype:
+            addmask = addmask + (semanticmap == vt)
+        addmask = addmask > 0
+
+        rndnum = torch.sum(addmask)
+        depthmap_noised = copy.deepcopy(depthmap)
+        depthmap_noised[addmask] = depthmap_noised[addmask] + depthmap_noised[addmask] * self.nseeder.sample([rndnum]).squeeze(1).cuda() * 0.1
+
+        return depthmap_noised, addmask
     def compute_losses(self, inputs, outputs, istrain = True):
         """Compute the reprojection and smoothness losses for a minibatch
         """
         losses = {}
-        total_loss = 0
 
-        ptCloud_syn, val_syn = self.distillPtClound(predDepth = inputs[("syn_depth", 0)], invcamK = inputs[('invcamK', 0)], semanticLabel = inputs['syn_semanLabel'], is_shrink = True)
-        ptCloud_pred, val_pred = self.distillPtClound(predDepth = outputs[("depth", 0, 0)] * self.STEREO_SCALE_FACTOR, invcamK =inputs[('invcamK', 0)], semanticLabel = inputs['real_semanLabel'], is_shrink = False)
+        syn_ppath, syn_ppath_pts3d_clean, syn_ppath_pts3d_noisy_af, syn_ppath_pts3d_noisy_bf, syn_ppath_hmap_clean, syn_ppath_hmap_af, syn_ppath_hmap_bf = self.get_synpath(inputs)
 
-        outputs['pts_real'] = ptCloud_pred
-        outputs['pts_realv'] = val_pred
-        outputs['pts_syn'] = ptCloud_syn
-        outputs['pts_synv'] = val_syn
+        # Render the original Map
+        rendered_gt = self.proj2ow.erpipolar_rendering(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
+                                                       intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
 
-        # Compute GAN Loss
+        # Render the noisy Map
+        depthmap_noised, addmask = self.post_rannoise(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'])
 
-        # Visualization
-        # import matlab
-        # import matlab.engine
-        # self.eng = matlab.engine.start_matlab()
-        # self.check_depthMap(inputs, outputs, drawIndex=0)
-        # draw_index = 0
-        # figrgb_pred = tensor2rgb(inputs[('color', 0, 0)], ind=draw_index)
-        # figrgb_syn = tensor2rgb(inputs[('syn_rgb', 0)], ind=draw_index)
-        # figSeman_pred = tensor2semantic(inputs['real_semanLabel'], ind=draw_index)
-        # figSeman_syn = tensor2semantic(inputs['syn_semanLabel'], ind=draw_index)
-        # fig = pil.fromarray(np.concatenate([np.concatenate([figrgb_pred, figrgb_syn], axis=1), np.concatenate([figSeman_pred, figSeman_syn], axis=1)], axis=0))
-        #
-        # import matlab
-        # import matlab.engine
-        # self.eng = matlab.engine.start_matlab()
-        # draw_x_pred = matlab.double(ptCloud_pred[draw_index, :, 0].detach().cpu().numpy().tolist())
-        # draw_y_pred = matlab.double(ptCloud_pred[draw_index, :, 1].detach().cpu().numpy().tolist())
-        # draw_z_pred = matlab.double(ptCloud_pred[draw_index, :, 2].detach().cpu().numpy().tolist())
-        #
-        # draw_x_syn = matlab.double(ptCloud_syn[draw_index, :, 0].detach().cpu().numpy().tolist())
-        # draw_y_syn = matlab.double(ptCloud_syn[draw_index, :, 1].detach().cpu().numpy().tolist())
-        # draw_z_syn = matlab.double(ptCloud_syn[draw_index, :, 2].detach().cpu().numpy().tolist())
-        # self.eng.eval('figure()', nargout=0)
-        # self.eng.scatter3(draw_x_pred, draw_y_pred, draw_z_pred, 5, 'r', 'filled', nargout=0)
-        # self.eng.eval('hold on', nargout=0)
-        # self.eng.scatter3(draw_x_syn, draw_y_syn, draw_z_syn, 5, 'g', 'filled', nargout=0)
-        # self.eng.eval('axis equal', nargout = 0)
-        # xlim = matlab.double([0, 50])
-        # ylim = matlab.double([-10, 10])
-        # zlim = matlab.double([-5, 5])
-        # self.eng.xlim(xlim, nargout=0)
-        # self.eng.ylim(ylim, nargout=0)
-        # self.eng.zlim(zlim, nargout=0)
-        # self.eng.eval('view([-79 17])', nargout=0)
-        # self.eng.eval('camzoom(1.2)', nargout=0)
-        # self.eng.eval('grid off', nargout=0)
+        for ii in range(self.opt.batch_size):
+            if torch.sum(addmask[ii]) < 300:
+                continue
+            depthmap_noised_v_org = copy.deepcopy(depthmap_noised[ii].unsqueeze(0)).cuda()
+            rendered_noised_bf = self.proj2ows.pdf_estimation(depthmap=depthmap_noised_v_org,
+                                                          semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
+                                                          intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0),
+                                                          extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0))
+            depthmap_noised_v = nn.Parameter(depthmap_noised[ii].unsqueeze(0), requires_grad=True).cuda()
+            adapter = optim.Adam([depthmap_noised_v], 1e-1)
+            run_epoch = 200
+            loss_recorder = list()
 
-        self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
-        loss_D, pred_real, pred_fake = self.models['sfnD'].optimize_parameters()
-        outputs['pred_real'] = pred_real
-        outputs['pred_fake'] = pred_fake
+            for i in range(run_epoch):
+                rendered_input = self.proj2ows.pdf_estimation(depthmap=depthmap_noised_v, semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
+                                                             intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0))
 
-        # import pickle
-        # pickle_sv = dict()
-        # pickle_sv['ptCloud_pred'] = ptCloud_pred
-        # pickle_sv['val_pred'] = val_pred
-        # pickle_sv['ptCloud_syn'] = ptCloud_syn
-        # pickle_sv['val_syn'] = val_syn
-        # with open('filename.pickle', 'wb') as handle:
-        #     pickle.dump(pickle_sv, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                loss = 0
+                for j in range(self.proj2ows.mscale):
+                    loss = loss + torch.mean((rendered_gt[str(j)][ii].unsqueeze(0) - rendered_input[str(j)])**2)
+                loss = loss / self.proj2ows.mscale
 
-        # with open('filename.pickle', 'rb') as handle:
-        #     pickle_ld = pickle.load(handle)
-        # ptCloud_pred = pickle_ld['ptCloud_pred']
-        # val_pred = pickle_ld['val_pred']
-        # ptCloud_syn = pickle_ld['ptCloud_syn']
-        # val_syn =pickle_ld['val_syn']
-        # self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
-        # self.models['sfnD'].eval()
-        # pred_real, pred_fake = self.models['sfnD'].classification()
-        # print(pred_real)
-        # print(pred_fake)
-        # losses['GAN/_{}'.format('D')] = loss_D
-        # ganLoss = self.models['sfnD'].forward()
-        # losses['GAN/_{}'.format('G')] = ganLoss
-        # if self.step > self.opt.discriminator_pretrain_round:
-        #     total_loss = total_loss + self.opt.discrimScale * ganLoss
-        # else:
-        #     total_loss = 0 * ganLoss
-        #
-        # losses["loss"] = total_loss
-        losses["loss"] = loss_D
+                adapter.zero_grad()
+                loss.backward()
+                adapter.step()
+
+                loss_recorder.append(loss.detach().cpu().numpy())
+
+            fig = plt.figure()
+            markers = plt.stem(np.array(loss_recorder))
+            plt.setp(markers, markersize=1)
+            plt.savefig(os.path.join(syn_ppath[ii], 'loss_stem.png'))
+            plt.close(fig)
+
+            _ = self.proj2ows.print(depthmap=depthmap_noised_v_org,
+                                                      semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
+                                                      intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_noisy_bf[ii]])
+            _ = self.proj2ows.print(depthmap=depthmap_noised_v,
+                                                      semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
+                                                      intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_noisy_af[ii]])
+            _ = self.proj2ows.print(depthmap=inputs[('syn_depth', 0)][ii].unsqueeze(0),
+                                                      semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
+                                                      intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_clean[ii]])
+
+            self.sv_pdf(rendered_noised_bf, syn_ppath_hmap_bf[ii], self.proj2ows.mscale, ind = 0)
+            self.sv_pdf(rendered_input, syn_ppath_hmap_af[ii], self.proj2ows.mscale, ind = 0)
+            self.sv_pdf(rendered_gt, syn_ppath_hmap_clean[ii], self.proj2ows.mscale, ind = ii)
         return losses
+
+    def sv_pdf(self, rendered_pdf, ppath, mscale, ind):
+        imgs = list()
+        for i in range(mscale):
+            imgs.append(np.array(tensor2disp(rendered_pdf[str(i)], vmax=0.5, ind=ind)))
+        imgs = np.concatenate(imgs, axis=0)
+        imgs = pil.fromarray(imgs)
+        imgs.save(ppath)
 
     def compute_depth_losses(self, inputs, outputs, losses):
         """Compute depth metrics, to allow monitoring during training

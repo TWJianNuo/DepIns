@@ -72,15 +72,6 @@ class PtnD(nn.Module):
         # print(torch.mean(self.real, dim=[1,2]))
         # print(torch.mean(self.syn, dim=[1, 2]))
 
-    # def init_weights(self, nets):
-    #     if not isinstance(nets, list):
-    #         nets = [nets]
-    #     for net in nets:
-    #         if net is not None:
-    #             for sin_modules in list(net.modules()):
-    #                 if type(sin_modules) == nn.Linear:
-    #                     sin_modules.weight = torch.nn.init.xavier_uniform_(sin_modules.weight)
-
 
     def forward(self):
         self.set_requires_grad(self.netD, requires_grad=False)
@@ -135,7 +126,7 @@ class PtnD(nn.Module):
         loss_D_fake = torch.sum(self.criterionGAN(pred_fake, False) * self.synv) / (torch.sum(self.synv) + self.eps)
         loss_D = (loss_D_real + loss_D_fake) * 0.5
 
-        self.accu_loss = self.accu_loss + loss_D
-        self.accu_count = self.accu_count + 1
-        print(self.accu_loss / self.accu_count)
+        # self.accu_loss = self.accu_loss + loss_D
+        # self.accu_count = self.accu_count + 1
+        # print(self.accu_loss / self.accu_count)
         return pred_real, pred_fake

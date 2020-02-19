@@ -179,8 +179,8 @@ class Trainer_GAN:
             self.project_3d[scale] = Project3D(self.opt.batch_size, h, w)
             self.project_3d[scale].to(self.device)
 
-        self.distillPtClound = DistillPtCloud(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size)
-        self.distillPtClound.to(self.device)
+        self.proj2ow = Proj2Oview(height = self.opt.height, width = self.opt.width, batch_size = self.opt.batch_size)
+        self.proj2ow.to(self.device)
         self.STEREO_SCALE_FACTOR = 5.4
 
         self.depth_metric_names = [
@@ -199,7 +199,6 @@ class Trainer_GAN:
             import matlab
             import matlab.engine
             self.eng = matlab.engine.start_matlab()
-
 
         # For visualization
         self.cap = 1000
@@ -225,11 +224,10 @@ class Trainer_GAN:
         self.epoch = 0
         self.step = 0
         self.start_time = time.time()
-        # self.save_model()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
-            if (self.epoch + 1) % self.opt.save_frequency == 0:
-                self.save_model()
+            # if (self.epoch + 1) % self.opt.save_frequency == 0:
+            #     self.save_model()
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -243,34 +241,32 @@ class Trainer_GAN:
             before_op_time = time.time()
 
             outputs, losses = self.process_batch(inputs)
-
+            print("{} finished".format(batch_idx))
             # Optimize Unet
             # self.model_optimizer.zero_grad()
             # losses["loss"].backward()
             # self.model_optimizer.step()
 
-            for i in range(self.opt.batch_size):
-                curind = np.mod(self.itcount, self.cap)
-                self.dp_real[curind] = outputs['pred_real'][i].cpu().detach().numpy()
-                self.dp_fake[curind] = outputs['pred_fake'][i].cpu().detach().numpy()
-                self.itcount = self.itcount + 1
+            # for i in range(self.opt.batch_size):
+            #     curind = np.mod(self.itcount, self.cap)
+            #     self.dp_real[curind] = outputs['pred_real'][i].cpu().detach().numpy()
+            #     self.dp_fake[curind] = outputs['pred_fake'][i].cpu().detach().numpy()
+            #     self.itcount = self.itcount + 1
+            #
+            #
+            # duration = time.time() - before_op_time
+            #
+            # if self.step % self.opt.print_freq == 0 or (self.step < 2000 and self.step % 5 == 0):
+            #     self.log_time(batch_idx, duration, losses["loss"].cpu().data)
+            #     self.log_data(mode="train", losses=losses)
+            #
+            # if self.step % self.opt.log_frequency == 0:
+            #     if "depth_gt" in inputs:
+            #         self.compute_depth_losses(inputs, outputs, losses)
+            #     self.log_data(mode="train", losses=losses)
+            #     self.log_img(mode="train", inputs=inputs, outputs=outputs)
+            #     self.val()
 
-
-            duration = time.time() - before_op_time
-
-            if self.step % self.opt.print_freq == 0 or (self.step < 2000 and self.step % 5 == 0):
-                self.log_time(batch_idx, duration, losses["loss"].cpu().data)
-                self.log_data(mode="train", losses=losses)
-
-            if self.step % self.opt.log_frequency == 0:
-                if "depth_gt" in inputs:
-                    self.compute_depth_losses(inputs, outputs, losses)
-                # self.log_data(mode="train", losses=losses)
-                self.log_img(mode="train", inputs=inputs, outputs=outputs)
-                # self.val()
-
-            # if (self.step + 1) % self.opt.save_frequency == 0:
-            #     self.save_model()
 
             self.step += 1
 
@@ -502,9 +498,7 @@ class Trainer_GAN:
         self.eng.eval('view([-79 17])', nargout=0)
         self.eng.eval('camzoom(1.2)', nargout=0)
         self.eng.eval('grid off', nargout=0)
-        # eng.eval('set(gca,\'YTickLabel\',[]);', nargout=0)
-        # eng.eval('set(gca,\'XTickLabel\',[]);', nargout=0)
-        # eng.eval('set(gca,\'ZTickLabel\',[]);', nargout=0)
+
         self.eng.eval('set(gca, \'XColor\', \'none\', \'YColor\', \'none\', \'ZColor\', \'none\')', nargout=0)
 
         folder, frame_index, _, _, _, _ = inputs['entry_tag'][drawIndex].split('\n')
@@ -517,6 +511,27 @@ class Trainer_GAN:
         self.eng.eval(command, nargout=0)
         self.eng.eval('close all', nargout=0)
 
+    def get_synpath(self, inputs):
+        syn_ppath = list()
+        syn_tag = inputs['syn_tag']
+        croot = os.path.join('/media/shengjie/other/Depins/Depins/visualization/oview_synCreal', 'syn')
+        os.makedirs(croot, exist_ok=True)
+        for tag in syn_tag:
+            c1,c2,c3,c4 = tag.split('\n')
+            tpath = os.path.join(croot, '{}_{}.png'.format(c1.split(' ')[1], c2.split(' ')[1]))
+            syn_ppath.append(tpath)
+        return syn_ppath
+
+    def get_realpath(self, inputs):
+        real_ppath = list()
+        real_tag = inputs['entry_tag']
+        croot = os.path.join('/media/shengjie/other/Depins/Depins/visualization/oview_synCreal', 'real')
+        os.makedirs(croot, exist_ok=True)
+        for tag in real_tag:
+            c1,c2,c3,c4,c5,c6 = tag.split('\n')
+            tpath = os.path.join(croot, '{}_{}.png'.format(c1.split(' ')[1].split('/')[1], c2.split(' ')[1]))
+            real_ppath.append(tpath)
+        return real_ppath
 
     def compute_losses(self, inputs, outputs, istrain = True):
         """Compute the reprojection and smoothness losses for a minibatch
@@ -524,89 +539,14 @@ class Trainer_GAN:
         losses = {}
         total_loss = 0
 
-        ptCloud_syn, val_syn = self.distillPtClound(predDepth = inputs[("syn_depth", 0)], invcamK = inputs[('invcamK', 0)], semanticLabel = inputs['syn_semanLabel'], is_shrink = True)
-        ptCloud_pred, val_pred = self.distillPtClound(predDepth = outputs[("depth", 0, 0)] * self.STEREO_SCALE_FACTOR, invcamK =inputs[('invcamK', 0)], semanticLabel = inputs['real_semanLabel'], is_shrink = False)
-
-        outputs['pts_real'] = ptCloud_pred
-        outputs['pts_realv'] = val_pred
-        outputs['pts_syn'] = ptCloud_syn
-        outputs['pts_synv'] = val_syn
-
-        # Compute GAN Loss
-
-        # Visualization
-        # import matlab
-        # import matlab.engine
-        # self.eng = matlab.engine.start_matlab()
-        # self.check_depthMap(inputs, outputs, drawIndex=0)
-        # draw_index = 0
-        # figrgb_pred = tensor2rgb(inputs[('color', 0, 0)], ind=draw_index)
-        # figrgb_syn = tensor2rgb(inputs[('syn_rgb', 0)], ind=draw_index)
-        # figSeman_pred = tensor2semantic(inputs['real_semanLabel'], ind=draw_index)
-        # figSeman_syn = tensor2semantic(inputs['syn_semanLabel'], ind=draw_index)
-        # fig = pil.fromarray(np.concatenate([np.concatenate([figrgb_pred, figrgb_syn], axis=1), np.concatenate([figSeman_pred, figSeman_syn], axis=1)], axis=0))
-        #
-        # import matlab
-        # import matlab.engine
-        # self.eng = matlab.engine.start_matlab()
-        # draw_x_pred = matlab.double(ptCloud_pred[draw_index, :, 0].detach().cpu().numpy().tolist())
-        # draw_y_pred = matlab.double(ptCloud_pred[draw_index, :, 1].detach().cpu().numpy().tolist())
-        # draw_z_pred = matlab.double(ptCloud_pred[draw_index, :, 2].detach().cpu().numpy().tolist())
-        #
-        # draw_x_syn = matlab.double(ptCloud_syn[draw_index, :, 0].detach().cpu().numpy().tolist())
-        # draw_y_syn = matlab.double(ptCloud_syn[draw_index, :, 1].detach().cpu().numpy().tolist())
-        # draw_z_syn = matlab.double(ptCloud_syn[draw_index, :, 2].detach().cpu().numpy().tolist())
-        # self.eng.eval('figure()', nargout=0)
-        # self.eng.scatter3(draw_x_pred, draw_y_pred, draw_z_pred, 5, 'r', 'filled', nargout=0)
-        # self.eng.eval('hold on', nargout=0)
-        # self.eng.scatter3(draw_x_syn, draw_y_syn, draw_z_syn, 5, 'g', 'filled', nargout=0)
-        # self.eng.eval('axis equal', nargout = 0)
-        # xlim = matlab.double([0, 50])
-        # ylim = matlab.double([-10, 10])
-        # zlim = matlab.double([-5, 5])
-        # self.eng.xlim(xlim, nargout=0)
-        # self.eng.ylim(ylim, nargout=0)
-        # self.eng.zlim(zlim, nargout=0)
-        # self.eng.eval('view([-79 17])', nargout=0)
-        # self.eng.eval('camzoom(1.2)', nargout=0)
-        # self.eng.eval('grid off', nargout=0)
-
-        self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
-        loss_D, pred_real, pred_fake = self.models['sfnD'].optimize_parameters()
-        outputs['pred_real'] = pred_real
-        outputs['pred_fake'] = pred_fake
-
-        # import pickle
-        # pickle_sv = dict()
-        # pickle_sv['ptCloud_pred'] = ptCloud_pred
-        # pickle_sv['val_pred'] = val_pred
-        # pickle_sv['ptCloud_syn'] = ptCloud_syn
-        # pickle_sv['val_syn'] = val_syn
-        # with open('filename.pickle', 'wb') as handle:
-        #     pickle.dump(pickle_sv, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        # with open('filename.pickle', 'rb') as handle:
-        #     pickle_ld = pickle.load(handle)
-        # ptCloud_pred = pickle_ld['ptCloud_pred']
-        # val_pred = pickle_ld['val_pred']
-        # ptCloud_syn = pickle_ld['ptCloud_syn']
-        # val_syn =pickle_ld['val_syn']
-        # self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
-        # self.models['sfnD'].eval()
-        # pred_real, pred_fake = self.models['sfnD'].classification()
-        # print(pred_real)
-        # print(pred_fake)
-        # losses['GAN/_{}'.format('D')] = loss_D
-        # ganLoss = self.models['sfnD'].forward()
-        # losses['GAN/_{}'.format('G')] = ganLoss
-        # if self.step > self.opt.discriminator_pretrain_round:
-        #     total_loss = total_loss + self.opt.discrimScale * ganLoss
-        # else:
-        #     total_loss = 0 * ganLoss
-        #
-        # losses["loss"] = total_loss
-        losses["loss"] = loss_D
+        syn_ppath = self.get_synpath(inputs)
+        real_ppath = self.get_realpath(inputs)
+        self.proj2ow.print(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, semanticmap=inputs['real_semanLabel'],
+                           intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)], ppath=real_ppath)
+        self.proj2ow.print(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
+                           intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)], ppath=syn_ppath)
         return losses
+
 
     def compute_depth_losses(self, inputs, outputs, losses):
         """Compute depth metrics, to allow monitoring during training

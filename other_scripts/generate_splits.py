@@ -533,9 +533,13 @@ def create_sfnorm_pair_with_pole_shuffle(opts):
     min_num = 100
     poleId = 5
     pole_ind_rec = list()
+    maxDepth = 40
     for batch_idx, inputs in enumerate(train_loader):
         num_syn = torch.sum(inputs['syn_semanLabel'] == poleId)
         num_real = torch.sum(inputs['real_semanLabel'] == poleId)
+
+
+
 
         if num_syn > min_num and num_real > min_num:
             pole_ind_rec.append(batch_idx)
