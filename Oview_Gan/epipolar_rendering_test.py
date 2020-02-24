@@ -234,9 +234,11 @@ class Trainer_GAN:
         """
         self.epoch = 0
         self.step = 0
-        self.start_time = time.time()
-        for self.epoch in range(self.opt.num_epochs):
+        with torch.no_grad():
             self.run_epoch()
+        # self.start_time = time.time()
+        # for self.epoch in range(self.opt.num_epochs):
+        #     self.run_epoch()
             # if (self.epoch + 1) % self.opt.save_frequency == 0:
             #     self.save_model()
 
@@ -247,16 +249,17 @@ class Trainer_GAN:
         print("Training")
         self.set_train()
 
+        st_time = time.time()
         for batch_idx, inputs in enumerate(self.train_loader):
 
-            before_op_time = time.time()
-
             outputs, losses = self.process_batch(inputs)
-            print("{} finished".format(batch_idx))
-
+            tot_time = time.time() - st_time
             self.step += 1
+            print("Rest %f hours" % ((self.train_loader.__len__() - self.step) * (tot_time / self.step) / 60 / 60))
 
-        self.model_lr_scheduler.step()
+
+
+        # self.model_lr_scheduler.step()
     def process_batch(self, inputs, istrain = True):
         """Pass a minibatch through the network and generate images and losses
         """
@@ -499,38 +502,32 @@ class Trainer_GAN:
 
     def get_synpath(self, inputs):
         syn_ppath = list()
-        syn_ppath_pts3d_clean = list()
-        syn_ppath_pts3d_noisy_af = list()
-        syn_ppath_pts3d_noisy_bf = list()
-        syn_ppath_hmap_clean = list()
-        syn_ppath_hmap_af = list()
-        syn_ppath_hmap_bf = list()
+        syn_ppath_view = list()
         syn_tag = inputs['syn_tag']
-        croot = '/media/shengjie/other/Depins/Depins/visualization/ppair_test'
+        croot = os.path.join(self.opt.oRenderFolder, 'syn')
+        croot_view = os.path.join(self.opt.oRenderFolder, 'syn_view')
 
         for tag in syn_tag:
             c1,c2,c3,c4 = tag.split('\n')
             tpath = os.path.join(croot, '{}_{}'.format(c1.split(' ')[1], c2.split(' ')[1]))
-            os.makedirs(tpath, exist_ok=True)
             syn_ppath.append(tpath)
-            syn_ppath_pts3d_clean.append(os.path.join(tpath, 'clean3d.png'))
-            syn_ppath_pts3d_noisy_af.append(os.path.join(tpath, 'noise3d_af'))
-            syn_ppath_pts3d_noisy_bf.append(os.path.join(tpath, 'noise3d_bf'))
-            syn_ppath_hmap_clean.append(os.path.join(tpath, 'hmap_clean.png'))
-            syn_ppath_hmap_af.append(os.path.join(tpath, 'hmap_clean_af.png'))
-            syn_ppath_hmap_bf.append(os.path.join(tpath, 'hmap_clean_bf.png'))
-        return syn_ppath, syn_ppath_pts3d_clean, syn_ppath_pts3d_noisy_af, syn_ppath_pts3d_noisy_bf, syn_ppath_hmap_clean, syn_ppath_hmap_af, syn_ppath_hmap_bf
+            tpath = os.path.join(croot_view, '{}_{}'.format(c1.split(' ')[1], c2.split(' ')[1]))
+            syn_ppath_view.append(tpath)
+        return syn_ppath, syn_ppath_view
 
     def get_realpath(self, inputs):
         real_ppath = list()
+        real_ppath_view = list()
         real_tag = inputs['entry_tag']
-        croot = os.path.join('/media/shengjie/other/Depins/Depins/visualization/oview_synCreal', 'real')
-        os.makedirs(croot, exist_ok=True)
+        croot = os.path.join(self.opt.oRenderFolder, 'real')
+        croot_view = os.path.join(self.opt.oRenderFolder, 'real_view')
         for tag in real_tag:
             c1,c2,c3,c4,c5,c6 = tag.split('\n')
-            tpath = os.path.join(croot, '{}_{}.png'.format(c1.split(' ')[1].split('/')[1], c2.split(' ')[1]))
+            tpath = os.path.join(croot, '{}_{}'.format(c1.split(' ')[1].split('/')[1], c2.split(' ')[1]))
             real_ppath.append(tpath)
-        return real_ppath
+            tpath = os.path.join(croot_view, '{}_{}'.format(c1.split(' ')[1].split('/')[1], c2.split(' ')[1]))
+            real_ppath_view.append(tpath)
+        return real_ppath, real_ppath_view
 
     def post_rannoise(self, depthmap, semanticmap):
         visibletype = [5]  # pole
@@ -544,67 +541,110 @@ class Trainer_GAN:
         depthmap_noised[addmask] = depthmap_noised[addmask] + depthmap_noised[addmask] * self.nseeder.sample([rndnum]).squeeze(1).cuda() * 0.1
 
         return depthmap_noised, addmask
+
+    def write_rendered(self, rendered_syn, rendered_real, syn_ppath, syn_ppath_view, real_ppath, real_ppath_view):
+        rendered_synt = torch.from_numpy(rendered_syn)
+        rendered_realt = torch.from_numpy(rendered_real)
+        vmax = 0.15915132 * 0.7
+        for i in range(self.opt.batch_size):
+            os.makedirs(syn_ppath[i], exist_ok=True)
+            os.makedirs(real_ppath[i], exist_ok=True)
+            os.makedirs(syn_ppath_view[i], exist_ok=True)
+            os.makedirs(real_ppath_view[i], exist_ok=True)
+            for j in range(20):
+                synpath = os.path.join(syn_ppath_view[i], str(j) + '.png')
+                realpath = os.path.join(real_ppath_view[i], str(j) + '.png')
+                img_synv = rendered_synt[i,j,:,:].view(1,1,self.opt.height,self.opt.width)
+                tensor2disp(img_synv, ind=0, vmax=vmax).save(synpath)
+                img_realv = rendered_realt[i,j,:,:].view(1,1,self.opt.height,self.opt.width)
+                tensor2disp(img_realv, ind=0, vmax=vmax).save(realpath)
+
+                synpath = os.path.join(syn_ppath[i], str(j) + '.png')
+                realpath = os.path.join(real_ppath[i], str(j) + '.png')
+                img_syn = self.compress2PNG(rendered_syn[i,j])
+                pil.fromarray(img_syn).save(synpath)
+                img_real = self.compress2PNG(rendered_real[i,j])
+                pil.fromarray(img_real).save(realpath)
+
+    def compress2PNG(self, img):
+        # sr = 256 * 256 * 256 / img.max() / 1000
+        sr = 1054486
+        imgs = img * sr
+        h = (imgs / (256 * 256)).astype(np.uint8)
+        e = ((imgs - h * 256 * 256) / 256).astype(np.uint8)
+        l = (imgs - h * 256 * 256 - e * 256).astype(np.uint8)
+
+        # img_recovered = h.astype(np.float32) * 256 * 256 + e.astype(np.float32) * 256 + l.astype(np.float32)
+        # img_recovered = img_recovered / sr
+
+        return np.stack([h,e,l], axis = 2)
+
     def compute_losses(self, inputs, outputs, istrain = True):
         """Compute the reprojection and smoothness losses for a minibatch
         """
         losses = {}
 
-        syn_ppath, syn_ppath_pts3d_clean, syn_ppath_pts3d_noisy_af, syn_ppath_pts3d_noisy_bf, syn_ppath_hmap_clean, syn_ppath_hmap_af, syn_ppath_hmap_bf = self.get_synpath(inputs)
+        syn_ppath, syn_ppath_view = self.get_synpath(inputs)
+        real_ppath, real_ppath_view = self.get_realpath(inputs)
 
         # Render the original Map
-        rendered_gt = self.proj2ow.erpipolar_rendering(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
+
+        rendered_syn = self.proj2ow.erpipolar_rendering(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
+                                                       intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
+        rendered_real = self.proj2ow.erpipolar_rendering(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, semanticmap=inputs['real_semanLabel'],
                                                        intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
 
+        self.write_rendered(rendered_syn, rendered_real, syn_ppath, syn_ppath_view, real_ppath, real_ppath_view)
         # Render the noisy Map
-        depthmap_noised, addmask = self.post_rannoise(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'])
-
-        for ii in range(self.opt.batch_size):
-            if torch.sum(addmask[ii]) < 300:
-                continue
-            depthmap_noised_v_org = copy.deepcopy(depthmap_noised[ii].unsqueeze(0)).cuda()
-            rendered_noised_bf = self.proj2ows.pdf_estimation(depthmap=depthmap_noised_v_org,
-                                                          semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
-                                                          intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0),
-                                                          extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0))
-            depthmap_noised_v = nn.Parameter(depthmap_noised[ii].unsqueeze(0), requires_grad=True).cuda()
-            adapter = optim.Adam([depthmap_noised_v], 1e-1)
-            run_epoch = 200
-            loss_recorder = list()
-
-            for i in range(run_epoch):
-                rendered_input = self.proj2ows.pdf_estimation(depthmap=depthmap_noised_v, semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
-                                                             intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0))
-
-                loss = 0
-                for j in range(self.proj2ows.mscale):
-                    loss = loss + torch.mean((rendered_gt[str(j)][ii].unsqueeze(0) - rendered_input[str(j)])**2)
-                loss = loss / self.proj2ows.mscale
-
-                adapter.zero_grad()
-                loss.backward()
-                adapter.step()
-
-                loss_recorder.append(loss.detach().cpu().numpy())
-
-            fig = plt.figure()
-            markers = plt.stem(np.array(loss_recorder))
-            plt.setp(markers, markersize=1)
-            plt.savefig(os.path.join(syn_ppath[ii], 'loss_stem.png'))
-            plt.close(fig)
-
-            _ = self.proj2ows.print(depthmap=depthmap_noised_v_org,
-                                                      semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
-                                                      intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_noisy_bf[ii]])
-            _ = self.proj2ows.print(depthmap=depthmap_noised_v,
-                                                      semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
-                                                      intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_noisy_af[ii]])
-            _ = self.proj2ows.print(depthmap=inputs[('syn_depth', 0)][ii].unsqueeze(0),
-                                                      semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
-                                                      intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_clean[ii]])
-
-            self.sv_pdf(rendered_noised_bf, syn_ppath_hmap_bf[ii], self.proj2ows.mscale, ind = 0)
-            self.sv_pdf(rendered_input, syn_ppath_hmap_af[ii], self.proj2ows.mscale, ind = 0)
-            self.sv_pdf(rendered_gt, syn_ppath_hmap_clean[ii], self.proj2ows.mscale, ind = ii)
+        # depthmap_noised, addmask = self.post_rannoise(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'])
+        #
+        # for ii in range(self.opt.batch_size):
+        #     if torch.sum(addmask[ii]) < 300:
+        #         continue
+        #     depthmap_noised_v_org = copy.deepcopy(depthmap_noised[ii].unsqueeze(0)).cuda()
+        #     rendered_noised_bf = self.proj2ows.pdf_estimation(depthmap=depthmap_noised_v_org,
+        #                                                   semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
+        #                                                   intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0),
+        #                                                   extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0))
+        #     depthmap_noised_v = nn.Parameter(depthmap_noised[ii].unsqueeze(0), requires_grad=True).cuda()
+        #     adapter = optim.Adam([depthmap_noised_v], 1e-1)
+        #     run_epoch = 200
+        #     loss_recorder = list()
+        #
+        #     for i in range(run_epoch):
+        #         rendered_input = self.proj2ows.pdf_estimation(depthmap=depthmap_noised_v, semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
+        #                                                      intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0))
+        #
+        #         loss = 0
+        #         for j in range(self.proj2ows.mscale):
+        #             loss = loss + torch.mean((rendered_gt[str(j)][ii].unsqueeze(0) - rendered_input[str(j)])**2)
+        #         loss = loss / self.proj2ows.mscale
+        #
+        #         adapter.zero_grad()
+        #         loss.backward()
+        #         adapter.step()
+        #
+        #         loss_recorder.append(loss.detach().cpu().numpy())
+        #
+        #     fig = plt.figure()
+        #     markers = plt.stem(np.array(loss_recorder))
+        #     plt.setp(markers, markersize=1)
+        #     plt.savefig(os.path.join(syn_ppath[ii], 'loss_stem.png'))
+        #     plt.close(fig)
+        #
+        #     _ = self.proj2ows.print(depthmap=depthmap_noised_v_org,
+        #                                               semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
+        #                                               intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_noisy_bf[ii]])
+        #     _ = self.proj2ows.print(depthmap=depthmap_noised_v,
+        #                                               semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
+        #                                               intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_noisy_af[ii]])
+        #     _ = self.proj2ows.print(depthmap=inputs[('syn_depth', 0)][ii].unsqueeze(0),
+        #                                               semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
+        #                                               intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_clean[ii]])
+        #
+        #     self.sv_pdf(rendered_noised_bf, syn_ppath_hmap_bf[ii], self.proj2ows.mscale, ind = 0)
+        #     self.sv_pdf(rendered_input, syn_ppath_hmap_af[ii], self.proj2ows.mscale, ind = 0)
+        #     self.sv_pdf(rendered_gt, syn_ppath_hmap_clean[ii], self.proj2ows.mscale, ind = ii)
         return losses
 
     def sv_pdf(self, rendered_pdf, ppath, mscale, ind):

@@ -130,6 +130,9 @@ class MonodepthOptions:
         self.parser.add_argument("--discriminator_pretrain_round",
                                  default=0,
                                  type=int)
+        self.parser.add_argument("--oRenderFolder",
+                                 type=str
+                                 )
 
 
 
