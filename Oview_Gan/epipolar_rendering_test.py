@@ -542,29 +542,32 @@ class Trainer_GAN:
 
         return depthmap_noised, addmask
 
-    def write_rendered(self, rendered_syn, rendered_real, syn_ppath, syn_ppath_view, real_ppath, real_ppath_view):
+    def write_rendered(self, rendered_syn, rendered_real, addmask_syn, addmask_real, syn_ppath, syn_ppath_view, real_ppath, real_ppath_view):
         rendered_synt = torch.from_numpy(rendered_syn)
         rendered_realt = torch.from_numpy(rendered_real)
         vmax = 0.15915132 * 0.7
         for i in range(self.opt.batch_size):
-            os.makedirs(syn_ppath[i], exist_ok=True)
-            os.makedirs(real_ppath[i], exist_ok=True)
-            os.makedirs(syn_ppath_view[i], exist_ok=True)
-            os.makedirs(real_ppath_view[i], exist_ok=True)
-            for j in range(20):
-                synpath = os.path.join(syn_ppath_view[i], str(j) + '.png')
-                realpath = os.path.join(real_ppath_view[i], str(j) + '.png')
-                img_synv = rendered_synt[i,j,:,:].view(1,1,self.opt.height,self.opt.width)
-                tensor2disp(img_synv, ind=0, vmax=vmax).save(synpath)
-                img_realv = rendered_realt[i,j,:,:].view(1,1,self.opt.height,self.opt.width)
-                tensor2disp(img_realv, ind=0, vmax=vmax).save(realpath)
+            if torch.sum(addmask_syn[0]) > 100:
+                os.makedirs(syn_ppath[i], exist_ok=True)
+                os.makedirs(syn_ppath_view[i], exist_ok=True)
+                for j in range(20):
+                    synpath = os.path.join(syn_ppath_view[i], str(j) + '.png')
+                    img_synv = rendered_synt[i,j,:,:].view(1,1,self.opt.height,self.opt.width)
+                    tensor2disp(img_synv, ind=0, vmax=vmax).save(synpath)
+                    synpath = os.path.join(syn_ppath[i], str(j) + '.png')
+                    img_syn = self.compress2PNG(rendered_syn[i,j])
+                    pil.fromarray(img_syn).save(synpath)
 
-                synpath = os.path.join(syn_ppath[i], str(j) + '.png')
-                realpath = os.path.join(real_ppath[i], str(j) + '.png')
-                img_syn = self.compress2PNG(rendered_syn[i,j])
-                pil.fromarray(img_syn).save(synpath)
-                img_real = self.compress2PNG(rendered_real[i,j])
-                pil.fromarray(img_real).save(realpath)
+            if torch.sum(addmask_real[0]) > 100:
+                os.makedirs(real_ppath[i], exist_ok=True)
+                os.makedirs(real_ppath_view[i], exist_ok=True)
+                for j in range(20):
+                    realpath = os.path.join(real_ppath_view[i], str(j) + '.png')
+                    img_realv = rendered_realt[i,j,:,:].view(1,1,self.opt.height,self.opt.width)
+                    tensor2disp(img_realv, ind=0, vmax=vmax).save(realpath)
+                    realpath = os.path.join(real_ppath[i], str(j) + '.png')
+                    img_real = self.compress2PNG(rendered_real[i,j])
+                    pil.fromarray(img_real).save(realpath)
 
     def compress2PNG(self, img):
         # sr = 256 * 256 * 256 / img.max() / 1000
@@ -588,13 +591,12 @@ class Trainer_GAN:
         real_ppath, real_ppath_view = self.get_realpath(inputs)
 
         # Render the original Map
-
-        rendered_syn = self.proj2ow.erpipolar_rendering(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
+        rendered_syn, addmask_syn = self.proj2ow.erpipolar_rendering(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
                                                        intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
-        rendered_real = self.proj2ow.erpipolar_rendering(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, semanticmap=inputs['real_semanLabel'],
+        rendered_real, addmask_real = self.proj2ow.erpipolar_rendering(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, semanticmap=inputs['real_semanLabel'],
                                                        intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
 
-        self.write_rendered(rendered_syn, rendered_real, syn_ppath, syn_ppath_view, real_ppath, real_ppath_view)
+        self.write_rendered(rendered_syn, rendered_real, addmask_syn, addmask_real, syn_ppath, syn_ppath_view, real_ppath, real_ppath_view)
         # Render the noisy Map
         # depthmap_noised, addmask = self.post_rannoise(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'])
         #

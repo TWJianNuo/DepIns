@@ -970,7 +970,7 @@ class Proj2Oview(nn.Module):
 
         rimg = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector.detach().cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
         # self.show_rendered_eppl(rimg)
-        return rimg
+        return rimg, addmask
 
 
     # def adjust_eppl(self, rimg):
