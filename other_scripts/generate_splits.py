@@ -538,9 +538,6 @@ def create_sfnorm_pair_with_pole_shuffle(opts):
         num_syn = torch.sum(inputs['syn_semanLabel'] == poleId)
         num_real = torch.sum(inputs['real_semanLabel'] == poleId)
 
-
-
-
         if num_syn > min_num and num_real > min_num:
             pole_ind_rec.append(batch_idx)
 

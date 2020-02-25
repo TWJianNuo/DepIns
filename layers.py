@@ -968,19 +968,143 @@ class Proj2Oview(nn.Module):
         r_sigma, inv_r_sigma, rotM = self.eppl2CovM(epipoLine)
         # self.vslGauss(projected2d, depthmap, epipoLine, intrinsic, extrinsic, nextrinsic, r_sigma, inv_r_sigma)
 
-        rimg = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector.detach().cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+        rimg, grad2d = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector.detach().cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
         # self.show_rendered_eppl(rimg)
         return rimg, addmask
 
+    def gradcheck2d(self, inv_r_sigma, projected2d, selector):
+        pts2d = projected2d.permute([0,1,3,4,2]).detach().cpu().numpy()
+        mask = selector.detach().cpu().numpy()
+        _, grad2d_theoretical, counter = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=pts2d, mask = selector.detach().cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
 
-    # def adjust_eppl(self, rimg):
-    #     bz = 0
-    #     c = 8
-    #     h = 20
-    #     w = 100
-    #
-    #     vimg = rimg[bz, c, :, :]
-    #     plt.imshow(vimg)
+        # Check x gradient
+        testid = 2
+        poses = np.argwhere(mask[:,:,0,:,:] == 1)
+        c = poses[testid,0]
+        sz = poses[testid,1]
+        m = poses[testid,2]
+        n = poses[testid,3]
+
+        eeps = 1e-3
+        pts2dplus = copy.deepcopy(pts2d)
+        pts2dplus[c, sz, m, n, 0] = pts2dplus[c, sz, m, n, 0] + eeps
+        pts2dminus = copy.deepcopy(pts2d)
+        pts2dminus[c, sz, m, n, 0] = pts2dminus[c, sz, m, n, 0] - eeps
+
+        rimgplus, _, counterplus = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=pts2dplus, mask = selector.detach().cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+        rimgminus, _, counterminus = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=pts2dminus, mask = selector.detach().cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+
+
+
+        inv_sigmaM = inv_r_sigma.detach().cpu().numpy()
+        pts2d = pts2d
+        mask = selector.detach().cpu().numpy()
+        kws = self.kws
+        sr = self.sr
+        bs = self.batch_size
+        samplesz = self.sampleNum * 2
+        height = self.height
+        width = self.width
+
+
+        srhalf = int((sr - 1) / 2)
+        s1 = 0
+        s2 = 0
+        ctx = int(np.round_(pts2d[c, sz, m, n, 0]))
+        cty = int(np.round_(pts2d[c, sz, m, n, 1]))
+        for i in range(ctx - srhalf, ctx + srhalf + 1):
+            for j in range(cty - srhalf, cty + srhalf + 1):
+                if i >= 0 and i < width and j >= 0 and j < height:
+                    s1 = s1 + rimgplus[c, sz, j, i]
+                    s2 = s2 + rimgminus[c, sz, j, i]
+        print((s1 - s2) / 2 /eeps / grad2d_theoretical[c, sz, 0, m, n])
+
+
+
+        eps = 1e-6
+        srhalf = int((sr - 1) / 2)
+        ctx = int(np.round_(pts2d[c, sz, m, n, 0]))
+        cty = int(np.round_(pts2d[c, sz, m, n, 1]))
+        expvtot = 0
+        gradxtot = 0
+        cccc = 0
+        for i in range(ctx - srhalf, ctx + srhalf + 1):
+            for j in range(cty - srhalf, cty + srhalf + 1):
+                if i >= 0 and i < width and j >= 0 and j < height:
+                    cccc = cccc + 1
+                    fi = float(i)
+                    fj = float(j)
+                    cx = (pts2d[c, sz, m, n, 0] - fi) / kws
+                    cy = (pts2d[c, sz, m, n, 1] - fj) / kws
+                    expx = inv_sigmaM[c, sz, m, n, 0, 0] * cx * cx + inv_sigmaM[c, sz, m, n, 1, 0] * cx * cy + \
+                           inv_sigmaM[c, sz, m, n, 0, 1] * cx * cy + inv_sigmaM[c, sz, m, n, 1, 1] * cy * cy
+                    expv = np.exp(-expx / 2) / 2 / np.pi / (counter[c, sz, j, i] + eps)
+
+                    tmpk = expv / (-2)
+                    tmpx = tmpk * (2 * inv_sigmaM[c, sz, m, n, 0, 0] * cx + inv_sigmaM[c, sz, m, n, 1, 0] * cy +
+                                   inv_sigmaM[c, sz, m, n, 0, 1] * cy)
+                    gradx = tmpx / kws
+
+                    tmpy = tmpk * (2 * inv_sigmaM[c, sz, m, n, 1, 1] * cy + inv_sigmaM[c, sz, m, n, 1, 0] * cx +
+                                   inv_sigmaM[c, sz, m, n, 0, 1] * cx)
+                    grady = tmpy / kws
+
+                    expvtot = expvtot + expv
+                    gradxtot = gradxtot + grady
+
+                    # cx1 = (pts2d[c, sz, m, n, 0] + eeps - fi) / kws
+                    # expx1 = inv_sigmaM[c, sz, m, n, 0, 0] * cx1 * cx1 + inv_sigmaM[c, sz, m, n, 1, 0] * cx1 * cy + \
+                    #        inv_sigmaM[c, sz, m, n, 0, 1] * cx1 * cy + inv_sigmaM[c, sz, m, n, 1, 1] * cy * cy
+                    # expv1 = np.exp(-expx1 / 2) / 2 / np.pi
+                    #
+                    # cx2 = (pts2d[c, sz, m, n, 0] - eeps - fi) / kws
+                    # expx2 = inv_sigmaM[c, sz, m, n, 0, 0] * cx2 * cx2 + inv_sigmaM[c, sz, m, n, 1, 0] * cx2 * cy + \
+                    #        inv_sigmaM[c, sz, m, n, 0, 1] * cx2 * cy + inv_sigmaM[c, sz, m, n, 1, 1] * cy * cy
+                    # expv2 = np.exp(-expx2 / 2) / 2 / np.pi
+                    #
+                    # gradx_num = (expv1 - expv2) / 2 / eeps
+                    #
+                    # cy1 = (pts2d[c, sz, m, n, 1] + eeps - fj) / kws
+                    # expx1 = inv_sigmaM[c, sz, m, n, 0, 0] * cx * cx + inv_sigmaM[c, sz, m, n, 1, 0] * cx * cy1 + \
+                    #        inv_sigmaM[c, sz, m, n, 0, 1] * cx * cy1 + inv_sigmaM[c, sz, m, n, 1, 1] * cy1 * cy1
+                    # expv1 = np.exp(-expx1 / 2) / 2 / np.pi
+                    #
+                    # cy2 = (pts2d[c, sz, m, n, 1] - eeps - fj) / kws
+                    # expx2 = inv_sigmaM[c, sz, m, n, 0, 0] * cx * cx + inv_sigmaM[c, sz, m, n, 1, 0] * cx * cy2 + \
+                    #        inv_sigmaM[c, sz, m, n, 0, 1] * cx * cy2 + inv_sigmaM[c, sz, m, n, 1, 1] * cy2 * cy2
+                    # expv2 = np.exp(-expx2 / 2) / 2 / np.pi
+                    #
+                    # grady_num = (expv1 - expv2) / 2 / eeps
+
+        expvtot1 = 0
+        expvtot2 = 0
+        s1 = 0
+        s2 = 0
+        for i in range(ctx - srhalf, ctx + srhalf + 1):
+            for j in range(cty - srhalf, cty + srhalf + 1):
+                if i >= 0 and i < width and j >= 0 and j < height:
+                    fi = float(i)
+                    fj = float(j)
+                    cx = (pts2d[c, sz, m, n, 0] + eeps - fi) / kws
+                    cy = (pts2d[c, sz, m, n, 1] - fj) / kws
+                    expx = inv_sigmaM[c, sz, m, n, 0, 0] * cx * cx + inv_sigmaM[c, sz, m, n, 1, 0] * cx * cy + \
+                           inv_sigmaM[c, sz, m, n, 0, 1] * cx * cy + inv_sigmaM[c, sz, m, n, 1, 1] * cy * cy
+                    expv1 = np.exp(-expx / 2) / 2 / np.pi / (counter[c, sz, j, i] + eps)
+                    expvtot1 = expvtot1 + expv1
+
+                    fi = float(i)
+                    fj = float(j)
+                    cx = (pts2d[c, sz, m, n, 0] - eeps - fi) / kws
+                    cy = (pts2d[c, sz, m, n, 1] - fj) / kws
+                    expx = inv_sigmaM[c, sz, m, n, 0, 0] * cx * cx + inv_sigmaM[c, sz, m, n, 1, 0] * cx * cy + \
+                           inv_sigmaM[c, sz, m, n, 0, 1] * cx * cy + inv_sigmaM[c, sz, m, n, 1, 1] * cy * cy
+                    expv2 = np.exp(-expx / 2) / 2 / np.pi / (counter[c, sz, j, i] + eps)
+                    expvtot2 = expvtot2 + expv2
+
+                    s1 = s1 + rimgplus[c, sz, j, i]
+                    s2 = s2 + rimgminus[c, sz, j, i]
+        numgrad = (expvtot1 - expvtot2) / 2 / eeps
+        (s1 - s2) / 2 / eeps
 
 
     def show_rendered_eppl(self, rimg):
