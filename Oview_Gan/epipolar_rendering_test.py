@@ -593,60 +593,12 @@ class Trainer_GAN:
         # Render the original Map
         rendered_syn, addmask_syn = self.proj2ow.erpipolar_rendering(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
                                                        intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
-        rendered_real, addmask_real = self.proj2ow.erpipolar_rendering(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, semanticmap=inputs['real_semanLabel'],
-                                                       intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
+        # rendered_real, addmask_real = self.proj2ow.erpipolar_rendering(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, semanticmap=inputs['real_semanLabel'],
+        #                                                intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
+        # rendered_syn, addmask_syn = self.proj2ow.erpipolar_rendering_test(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
+        #                                                intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
 
-        self.write_rendered(rendered_syn, rendered_real, addmask_syn, addmask_real, syn_ppath, syn_ppath_view, real_ppath, real_ppath_view)
-        # Render the noisy Map
-        # depthmap_noised, addmask = self.post_rannoise(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'])
-        #
-        # for ii in range(self.opt.batch_size):
-        #     if torch.sum(addmask[ii]) < 300:
-        #         continue
-        #     depthmap_noised_v_org = copy.deepcopy(depthmap_noised[ii].unsqueeze(0)).cuda()
-        #     rendered_noised_bf = self.proj2ows.pdf_estimation(depthmap=depthmap_noised_v_org,
-        #                                                   semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
-        #                                                   intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0),
-        #                                                   extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0))
-        #     depthmap_noised_v = nn.Parameter(depthmap_noised[ii].unsqueeze(0), requires_grad=True).cuda()
-        #     adapter = optim.Adam([depthmap_noised_v], 1e-1)
-        #     run_epoch = 200
-        #     loss_recorder = list()
-        #
-        #     for i in range(run_epoch):
-        #         rendered_input = self.proj2ows.pdf_estimation(depthmap=depthmap_noised_v, semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
-        #                                                      intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0))
-        #
-        #         loss = 0
-        #         for j in range(self.proj2ows.mscale):
-        #             loss = loss + torch.mean((rendered_gt[str(j)][ii].unsqueeze(0) - rendered_input[str(j)])**2)
-        #         loss = loss / self.proj2ows.mscale
-        #
-        #         adapter.zero_grad()
-        #         loss.backward()
-        #         adapter.step()
-        #
-        #         loss_recorder.append(loss.detach().cpu().numpy())
-        #
-        #     fig = plt.figure()
-        #     markers = plt.stem(np.array(loss_recorder))
-        #     plt.setp(markers, markersize=1)
-        #     plt.savefig(os.path.join(syn_ppath[ii], 'loss_stem.png'))
-        #     plt.close(fig)
-        #
-        #     _ = self.proj2ows.print(depthmap=depthmap_noised_v_org,
-        #                                               semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
-        #                                               intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_noisy_bf[ii]])
-        #     _ = self.proj2ows.print(depthmap=depthmap_noised_v,
-        #                                               semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
-        #                                               intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_noisy_af[ii]])
-        #     _ = self.proj2ows.print(depthmap=inputs[('syn_depth', 0)][ii].unsqueeze(0),
-        #                                               semanticmap=inputs['syn_semanLabel'][ii].unsqueeze(0),
-        #                                               intrinsic=inputs[('realIn', 0)][ii].unsqueeze(0), extrinsic=inputs[('realEx', 0)][ii].unsqueeze(0), ppath=[syn_ppath_pts3d_clean[ii]])
-        #
-        #     self.sv_pdf(rendered_noised_bf, syn_ppath_hmap_bf[ii], self.proj2ows.mscale, ind = 0)
-        #     self.sv_pdf(rendered_input, syn_ppath_hmap_af[ii], self.proj2ows.mscale, ind = 0)
-        #     self.sv_pdf(rendered_gt, syn_ppath_hmap_clean[ii], self.proj2ows.mscale, ind = ii)
+        # self.write_rendered(rendered_syn, rendered_real, addmask_syn, addmask_real, syn_ppath, syn_ppath_view, real_ppath, real_ppath_view)
         return losses
 
     def sv_pdf(self, rendered_pdf, ppath, mscale, ind):

@@ -97,3 +97,42 @@ def eppl_pix2dgrad2depth(grad2d, Pcombinednp, depthmapnp, bs, samplesz, height, 
                     # depthmapnp_grad[c, 1, yy, xx] = depthmapnp_grad[c, 1, yy, xx] + gradPyDep
                     depthmapnp_grad[c, 0, yy, xx] = depthmapnp_grad[c, 0, yy, xx] + gradPxDep * grad2d[c, sz, 0, yy, xx] + gradPyDep * grad2d[c, sz, 1, yy, xx]
     return depthmapnp_grad
+
+
+@jit(nopython=True, parallel=True)
+def eppl_pix2dgrad2depth_l2(grad2d, Pcombinednp, depthmapnp, rimg_gt, rimg_ns, bs, samplesz, height, width):
+    # eps = 1e-6
+    # depthmapnp_grad = np.zeros((bs, 2, height, width),  dtype=np.float32)
+    depthmapnp_grad = np.zeros((bs, 1, height, width), dtype=np.float32)
+    for c in range(bs):
+        for sz in range(samplesz):
+            m11 = Pcombinednp[c, sz, 0, 0]
+            m12 = Pcombinednp[c, sz, 0, 1]
+            m13 = Pcombinednp[c, sz, 0, 2]
+            m14 = Pcombinednp[c, sz, 0, 3]
+
+            m21 = Pcombinednp[c, sz, 1, 0]
+            m22 = Pcombinednp[c, sz, 1, 1]
+            m23 = Pcombinednp[c, sz, 1, 2]
+            m24 = Pcombinednp[c, sz, 1, 3]
+
+            m31 = Pcombinednp[c, sz, 2, 0]
+            m32 = Pcombinednp[c, sz, 2, 1]
+            m33 = Pcombinednp[c, sz, 2, 2]
+            m34 = Pcombinednp[c, sz, 2, 3]
+            for yy in range(height):
+                for xx in range(width):
+                    D = depthmapnp[c, 0, yy, xx]
+                    y = float(yy)
+                    x = float(xx)
+                    gradPxDep = (m11 * x + m12 * y + m13) / (m31 * x * D + m32 * y * D + m33 * D + m34) \
+                                -(m11 * x * D + m12 * y * D + m13 * D + m14) / ((m31 * x * D + m32 * y * D + m33 * D + m34)**2) * (m31 * x + m32 * y + m33)
+                    gradPyDep = (m21 * x + m22 * y + m23) / (m31 * x * D + m32 * y * D + m33 * D + m34) \
+                                -(m21 * x * D + m22 * y * D + m23 * D + m24) / ((m31 * x * D + m32 * y * D + m33 * D + m34)**2) * (m31 * x + m32 * y + m33)
+
+                    # depthmapnp_grad[c, 0, yy, xx] = depthmapnp_grad[c, 0, yy, xx] + gradPxDep * grad2d[c, sz, 0, yy, xx]
+                    # depthmapnp_grad[c, 1, yy, xx] = depthmapnp_grad[c, 1, yy, xx] + gradPyDep * grad2d[c, sz, 1, yy, xx]
+                    # depthmapnp_grad[c, 0, yy, xx] = depthmapnp_grad[c, 0, yy, xx] + gradPxDep
+                    # depthmapnp_grad[c, 1, yy, xx] = depthmapnp_grad[c, 1, yy, xx] + gradPyDep
+                    depthmapnp_grad[c, 0, yy, xx] = depthmapnp_grad[c, 0, yy, xx] + (2 * (rimg_ns[c, sz, yy, xx] - rimg_gt[c, sz, yy, xx])) * (gradPxDep * grad2d[c, sz, 0, yy, xx] + gradPyDep * grad2d[c, sz, 1, yy, xx])
+    return depthmapnp_grad
