@@ -975,6 +975,33 @@ class Proj2Oview(nn.Module):
         return rimg, addmask
 
 
+    def erpipolar_rendering_test(self, depthmap, semanticmap, intrinsic, extrinsic):
+        # Compute Mask
+        addmask = self.post_mask(depthmap = depthmap, semanticmap = semanticmap)
+
+        invcamK = torch.inverse(intrinsic @ extrinsic)
+        pts3d = self.bck(predDepth=depthmap, invcamK=invcamK)
+
+        # Generate Camera Track
+        camtrail, campos, viewbias, camdir = self.get_camtrail(extrinsic, intrinsic)
+        # self.vsl_camtrail(pts3d, camtrail, campos, viewbias, camdir)
+        nextrinsic = self.cvtCamtrail2Extrsic(camtrail, campos, viewbias, camdir, extrinsic)
+        projected2d, projecteddepth, selector = self.proj2de(pts3d=pts3d, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask = addmask)
+
+        # pvpts = self.check_nextrinsic(campos, viewbias, intrinsic, nextrinsic)
+        # self.visualize2d_e(projected2d, projecteddepth, pvpts)
+
+        epipoLine, Pcombined = self.get_eppl(intrinsic=intrinsic, extrinsic = extrinsic, nextrinsic=nextrinsic)
+        r_sigma, inv_r_sigma, rotM = self.eppl2CovM(epipoLine)
+        # self.vslGauss(projected2d, depthmap, epipoLine, intrinsic, extrinsic, nextrinsic, r_sigma, inv_r_sigma)
+
+        rimg, grad2d, _ = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector.detach().cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+
+        # self.show_rendered_eppl(rimg)
+        depthmapnp_grad = eppl_pix2dgrad2depth(grad2d = grad2d, Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap.cpu().numpy(), bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+        return rimg, addmask
+
+
     def get_reprojected_pts2d(self, Pcombinednp, depthval, c, xx, yy, samplesz):
         pts25d = np.stack([np.ones(samplesz) * xx, np.ones(samplesz) * yy, np.ones(samplesz) * depthval, np.ones(samplesz)], axis = 1)
         pts25d = np.expand_dims(pts25d, axis = 2)
@@ -1041,81 +1068,6 @@ class Proj2Oview(nn.Module):
             else:
                 print(depthmapnp_grad[c, 0, yy, xx] / ((s1 - s2) / 2 /delta))
 
-    def gradcheckDepth(self, grad2d, depthmapnp_grad, Pcombined, depthmap):
-        delta = 1e-3
-
-        grad2d = grad2d
-        Pcombinednp = Pcombined.cpu().numpy()
-        depthmapnp = depthmap.cpu().numpy()
-        bs = self.batch_size
-        samplesz = self.sampleNum * 2
-        height = self.height
-        width = self.width
-
-        c = 0
-        sz = 0
-        yy = 0
-        xx = 0
-
-        depthval = depthmapnp[c, 0, yy, xx]
-        projected2d = self.get_reprojected_pts2d(Pcombinednp, depthval, c, xx, yy, samplesz)
-
-        projected2dPos = self.get_reprojected_pts2d(Pcombinednp, depthval + delta, c, xx, yy, samplesz)
-        projected2dNeg = self.get_reprojected_pts2d(Pcombinednp, depthval - delta, c, xx, yy, samplesz)
-
-        numerical_grd = (np.sum(projected2dPos[:,0,:]) - np.sum(projected2dNeg[:,0,:])) / 2 / delta
-        theoretical_grad = depthmapnp_grad[c, 0, yy,xx]
-
-        numerical_grd = (np.sum(projected2dPos[:,1,:]) - np.sum(projected2dNeg[:,1,:])) / 2 / delta
-        theoretical_grad = depthmapnp_grad[c, 1, yy,xx]
-
-
-    def gradcheck2d(self, inv_r_sigma, projected2d, selector):
-        pts2d = projected2d.permute([0,1,3,4,2]).detach().cpu().numpy()
-        mask = selector.detach().cpu().numpy()
-        _, grad2d_theoretical, counter = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=pts2d, mask = selector.detach().cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
-
-        # Check x gradient
-        testid = 10
-        poses = np.argwhere(mask[:,:,0,:,:] == 1)
-        c = poses[testid,0]
-        sz = poses[testid,1]
-        m = poses[testid,2]
-        n = poses[testid,3]
-
-        eeps = 1e-3
-        pts2dplus = copy.deepcopy(pts2d)
-        pts2dplus[c, sz, m, n, 0] = pts2dplus[c, sz, m, n, 0] + eeps
-        pts2dminus = copy.deepcopy(pts2d)
-        pts2dminus[c, sz, m, n, 0] = pts2dminus[c, sz, m, n, 0] - eeps
-
-        rimgplus, _, counterplus = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=pts2dplus, mask = selector.detach().cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
-        rimgminus, _, counterminus = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=pts2dminus, mask = selector.detach().cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
-
-
-        inv_sigmaM = inv_r_sigma.detach().cpu().numpy()
-        pts2d = pts2d
-        mask = selector.detach().cpu().numpy()
-        kws = self.kws
-        sr = self.sr
-        bs = self.batch_size
-        samplesz = self.sampleNum * 2
-        height = self.height
-        width = self.width
-
-
-        srhalf = int((sr - 1) / 2)
-        s1 = 0
-        s2 = 0
-        ctx = int(np.round_(pts2d[c, sz, m, n, 0]))
-        cty = int(np.round_(pts2d[c, sz, m, n, 1]))
-        for i in range(ctx - srhalf, ctx + srhalf + 1):
-            for j in range(cty - srhalf, cty + srhalf + 1):
-                if i >= 0 and i < width and j >= 0 and j < height:
-                    s1 = s1 + rimgplus[c, sz, j, i]
-                    s2 = s2 + rimgminus[c, sz, j, i]
-        print((s1 - s2) / 2 /eeps / grad2d_theoretical[c, sz, 0, m, n])
-
     def show_rendered_eppl(self, rimg):
         vmax = rimg.max() * 0.3
         rimg_t = torch.from_numpy(rimg).unsqueeze(2)
@@ -1123,7 +1075,6 @@ class Proj2Oview(nn.Module):
         imgt = list()
         for i in range(10):
             imgt.append(np.array(tensor2disp(rimg_t[bz], vmax=vmax, ind=i)))
-            # conct = np.concatenate([np.array(tensor2disp(rimg_t[bz], vmax=vmax, ind=0)), np.array(tensor2disp(rimg_t[bz], vmax=vmax, ind=3)), np.array(tensor2disp(rimg_t[bz], vmax=vmax, ind=9))], axis=0)
         pil.fromarray(np.concatenate(imgt, axis=0)).show()
 
     def get_eppl(self, intrinsic, extrinsic, nextrinsic):
