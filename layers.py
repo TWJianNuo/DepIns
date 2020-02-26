@@ -17,7 +17,7 @@ from scipy.spatial.transform import Rotation as R
 import math
 
 import copy
-from Oview_Gan import eppl_render, eppl_render_l2, eppl_render_l1
+from Oview_Gan import eppl_render, eppl_render_l2, eppl_render_l1, eppl_render_l1_sfgrad
 
 def disp_to_depth(disp, min_depth, max_depth):
     """Convert network's sigmoid output into depth prediction
@@ -803,7 +803,11 @@ class Proj2Oview(nn.Module):
         d = 20
         xl = 0 - ws
         xr = self.width + ws
-        lw = torch.linspace(start=0.1, end=0.9, steps=self.sampleNum).cuda()
+
+        st = np.log(0.05)
+        ed = np.log(0.9)
+        lw = torch.linspace(start=st, end=ed, steps=self.sampleNum).cuda()
+        lw = torch.exp(lw)
         lw = lw.view(1,self.sampleNum,1,1).expand(self.batch_size, -1, 4, 1)
 
         projM = intrinsic @ extrinsic
@@ -1062,7 +1066,16 @@ class Proj2Oview(nn.Module):
             pts3d_ns = self.bck(predDepth=depthmap_ns, invcamK=invcamK)
             projected2d_ns, projecteddepth_ns, selector_ns = self.proj2de(pts3d=pts3d_ns, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask = addmask)
             # rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l2(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d_ns.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector_ns.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap_ns.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
-            rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l1(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d_ns.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector_ns.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap_ns.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+            # rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l1(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d_ns.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector_ns.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap_ns.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+            rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l1_sfgrad(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(),
+                                                                    pts2d=projected2d_ns.permute(
+                                                                        [0, 1, 3, 4, 2]).detach().cpu().numpy(),
+                                                                    mask=selector_ns.detach().cpu().numpy(),
+                                                                    Pcombinednp=Pcombined.cpu().numpy(),
+                                                                    depthmapnp=depthmap_ns.cpu().numpy(),
+                                                                    rimg_gt=rimg_gt, kws=self.kws, sr=self.sr,
+                                                                    bs=self.batch_size, samplesz=self.sampleNum * 2,
+                                                                    height=self.height, width=self.width)
             depthmap_ns = depthmap_ns - torch.from_numpy(depthmapnp_grad).cuda() * torch.Tensor([self.lr])[0].cuda()
             # lossrec.append(torch.sum(torch.abs(depthmap_ns - depthmap) * addmask.float()))
             val = torch.sum(torch.abs(depthmap_ns - depthmap) * addmask.float()).cpu().numpy()
@@ -1072,6 +1085,8 @@ class Proj2Oview(nn.Module):
                 fig_ns = self.show_rendered_eppl(rimg_ns)
                 figcombined = pil.fromarray(np.concatenate([np.array(fig_gt), np.array(fig_ns)], axis=1))
                 figcombinedT = torch.Tensor(np.array(figcombined)).permute([2,0,1]).float() / 255
+                if os.path.isdir('/media/shengjie/other/Depins/Depins/visualization/oview_iterate'):
+                    figcombined.save('/media/shengjie/other/Depins/Depins/visualization/oview_iterate/' + str(i) + '.png')
                 writer.add_image('imresult', figcombinedT, i)
         return
 
@@ -1080,7 +1095,8 @@ class Proj2Oview(nn.Module):
         rimg_t = torch.from_numpy(rimg).unsqueeze(2)
         bz = 0
         imgt = list()
-        for i in list(np.linspace(0,self.sampleNum,3).astype(np.int)):
+        for i in list(np.linspace(0,self.sampleNum -1 ,4).astype(np.int)):
+        # for i in list(np.linspace(0,self.sampleNum -1 ,self.sampleNum).astype(np.int)):
             imgt.append(np.array(tensor2disp(rimg_t[bz], vmax=vmax, ind=i)))
         return pil.fromarray(np.concatenate(imgt, axis=0))
 
@@ -1098,14 +1114,15 @@ class Proj2Oview(nn.Module):
         # Compute GT Mask
         pts3d = self.bck(predDepth=depthmap, invcamK=invcamK)
         projected2d, projecteddepth, selector = self.proj2de(pts3d=pts3d, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask = addmask)
-        # rimg_gt, grad2d, _, depthmapnp_grad = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap.cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
-        rimg_gt, grad2d, _, depthmapnp_grad = eppl_render_l2(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+        rimg_gt, grad2d, _, depthmapnp_grad = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap.cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+        # rimg_gt, grad2d, _, depthmapnp_grad = eppl_render_l2(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
 
         # depthmap_ns = depthmap + torch.randn(depthmap.shape, device=torch.device("cuda")) * 1e-2
         depthmap_ns = depthmap + torch.randn(depthmap.shape, device=torch.device("cuda")) * 1e-1
         pts3d_ns = self.bck(predDepth=depthmap_ns, invcamK=invcamK)
         projected2d_ns, projecteddepth_ns, selector_ns = self.proj2de(pts3d=pts3d_ns, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask = addmask)
-        rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l2(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d_ns.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector_ns.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap_ns.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+        rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l1(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d_ns.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector_ns.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap_ns.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+        # rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l2(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d_ns.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector_ns.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap_ns.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
         # rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d_ns.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector_ns.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap_ns.cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
 
         return
@@ -1117,7 +1134,7 @@ class Proj2Oview(nn.Module):
         width = self.width
 
         mask = selector_ns.detach().cpu().numpy()
-        testid = 4000
+        testid = 5000
         poses = np.argwhere(mask[:, :, 0, :, :] == 1)
         c = poses[testid, 0]
         sz = poses[testid, 1]
@@ -1154,12 +1171,12 @@ class Proj2Oview(nn.Module):
                 for i in range(ctx - srhalf, ctx + srhalf + 1):
                     for j in range(cty - srhalf, cty + srhalf + 1):
                         if i >= 0 and i < width and j >= 0 and j < height:
-                            # s3 = s3 + (rimgPlus[c, sz, j, i] - rimg_gt[c, sz, j, i]) ** 2
-                            # s4 = s4 + (rimgMinus[c, sz, j, i] - rimg_gt[c, sz, j, i]) ** 2
+                            s1 = s1 + np.abs(rimgPlus[c, sz, j, i] - rimg_gt[c, sz, j, i])
+                            s2 = s2 + np.abs(rimgMinus[c, sz, j, i] - rimg_gt[c, sz, j, i])
                             # s1 = s1 + rimgPlus[c, sz, j, i]
                             # s2 = s2 + rimgMinus[c, sz, j, i]
-                            s1 = s1 + (rimgPlus[c, sz, j, i] - rimg_gt[c, sz, j, i]) ** 2
-                            s2 = s2 + (rimgMinus[c, sz, j, i] - rimg_gt[c, sz, j, i]) ** 2
+                            # s1 = s1 + (rimgPlus[c, sz, j, i] - rimg_gt[c, sz, j, i]) ** 2
+                            # s2 = s2 + (rimgMinus[c, sz, j, i] - rimg_gt[c, sz, j, i]) ** 2
                             # s1 = s1 + rimgPlus[c, sz, j, i] * rimgPlus[c, sz, j, i]
                             # s2 = s2 + rimgMinus[c, sz, j, i] * rimgMinus[c, sz, j, i]
                             # s1 = s1 + np.log(10 + rimgPlus[c, sz, j, i])
@@ -1167,7 +1184,7 @@ class Proj2Oview(nn.Module):
             # depthmapnp_grad[c, 0, yy, xx] / ((s1 - s2) / 2 /delta)
             # ((s1 - s2) / 2 / delta)
             if tt == 0:
-                ratio = 1e-4 / np.abs((s1 - s2)) * ratio
+                ratio = 1e-3 / np.abs((s1 - s2)) * ratio
             else:
                 print(depthmapnp_grad[c, 0, yy, xx] / ((s1 - s2) / 2 /delta))
 
