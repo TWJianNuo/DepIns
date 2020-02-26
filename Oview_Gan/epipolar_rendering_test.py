@@ -587,8 +587,8 @@ class Trainer_GAN:
         """
         losses = {}
 
-        syn_ppath, syn_ppath_view = self.get_synpath(inputs)
-        real_ppath, real_ppath_view = self.get_realpath(inputs)
+        # syn_ppath, syn_ppath_view = self.get_synpath(inputs)
+        # real_ppath, real_ppath_view = self.get_realpath(inputs)
 
         # Render the original Map
         rendered_syn, addmask_syn = self.proj2ow.erpipolar_rendering_test_iterate(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
