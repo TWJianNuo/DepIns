@@ -133,7 +133,14 @@ class MonodepthOptions:
         self.parser.add_argument("--oRenderFolder",
                                  type=str
                                  )
-
+        self.parser.add_argument("--eppsm",
+                                 type=int,
+                                 help="epp sample num",
+                                 default=10)
+        self.parser.add_argument("--epplr",
+                                 type=float,
+                                 help="sample num",
+                                 default=1e-4)
 
 
         # OPTIMIZATION options

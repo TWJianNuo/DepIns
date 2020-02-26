@@ -181,11 +181,11 @@ class Trainer_GAN:
             self.project_3d[scale] = Project3D(self.opt.batch_size, h, w)
             self.project_3d[scale].to(self.device)
 
-        self.proj2ow = Proj2Oview(height = self.opt.height, width = self.opt.width, batch_size = self.opt.batch_size)
+        self.proj2ow = Proj2Oview(height = self.opt.height, width = self.opt.width, batch_size = self.opt.batch_size, lr = self.opt.epplr, sampleNum = self.opt.eppsm)
         self.proj2ow.to(self.device)
 
-        self.proj2ows = Proj2Oview(height = self.opt.height, width = self.opt.width, batch_size = 1)
-        self.proj2ows.to(self.device)
+        # self.proj2ows = Proj2Oview(height = self.opt.height, width = self.opt.width, batch_size = 1)
+        # self.proj2ows.to(self.device)
         self.STEREO_SCALE_FACTOR = 5.4
 
         self.depth_metric_names = [
