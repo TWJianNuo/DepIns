@@ -591,15 +591,17 @@ class Trainer_GAN:
         real_ppath, real_ppath_view = self.get_realpath(inputs)
 
         # Render the original Map
-        rendered_syn, addmask_syn = self.proj2ow.erpipolar_rendering(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
-                                                       intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
+        rendered_syn, addmask_syn = self.proj2ow.erpipolar_rendering_test_iterate(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
+                                                       intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)], writer = self.writers['train'])
+        # rendered_syn, addmask_syn = self.proj2ow.erpipolar_rendering_test(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
+        #                                                intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
         # rendered_real, addmask_real = self.proj2ow.erpipolar_rendering(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, semanticmap=inputs['real_semanLabel'],
         #                                                intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
         # rendered_syn, addmask_syn = self.proj2ow.erpipolar_rendering_test(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
         #                                                intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
 
         # self.write_rendered(rendered_syn, rendered_real, addmask_syn, addmask_real, syn_ppath, syn_ppath_view, real_ppath, real_ppath_view)
-        return losses
+        return
 
     def sv_pdf(self, rendered_pdf, ppath, mscale, ind):
         imgs = list()

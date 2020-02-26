@@ -1,1 +1,1 @@
-from .epp_render_c import eppl_render, eppl_pix2dgrad2depth, eppl_pix2dgrad2depth_l2
+from .epp_render_c import eppl_render, eppl_render_l2
