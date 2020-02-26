@@ -1066,16 +1066,16 @@ class Proj2Oview(nn.Module):
             pts3d_ns = self.bck(predDepth=depthmap_ns, invcamK=invcamK)
             projected2d_ns, projecteddepth_ns, selector_ns = self.proj2de(pts3d=pts3d_ns, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask = addmask)
             # rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l2(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d_ns.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector_ns.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap_ns.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
-            # rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l1(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d_ns.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector_ns.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap_ns.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
-            rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l1_sfgrad(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(),
-                                                                    pts2d=projected2d_ns.permute(
-                                                                        [0, 1, 3, 4, 2]).detach().cpu().numpy(),
-                                                                    mask=selector_ns.detach().cpu().numpy(),
-                                                                    Pcombinednp=Pcombined.cpu().numpy(),
-                                                                    depthmapnp=depthmap_ns.cpu().numpy(),
-                                                                    rimg_gt=rimg_gt, kws=self.kws, sr=self.sr,
-                                                                    bs=self.batch_size, samplesz=self.sampleNum * 2,
-                                                                    height=self.height, width=self.width)
+            rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l1(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d_ns.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector_ns.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap_ns.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
+            # rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l1_sfgrad(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(),
+            #                                                         pts2d=projected2d_ns.permute(
+            #                                                             [0, 1, 3, 4, 2]).detach().cpu().numpy(),
+            #                                                         mask=selector_ns.detach().cpu().numpy(),
+            #                                                         Pcombinednp=Pcombined.cpu().numpy(),
+            #                                                         depthmapnp=depthmap_ns.cpu().numpy(),
+            #                                                         rimg_gt=rimg_gt, kws=self.kws, sr=self.sr,
+            #                                                         bs=self.batch_size, samplesz=self.sampleNum * 2,
+            #                                                         height=self.height, width=self.width)
             depthmap_ns = depthmap_ns - torch.from_numpy(depthmapnp_grad).cuda() * torch.Tensor([self.lr])[0].cuda()
             # lossrec.append(torch.sum(torch.abs(depthmap_ns - depthmap) * addmask.float()))
             val = torch.sum(torch.abs(depthmap_ns - depthmap) * addmask.float()).cpu().numpy()
