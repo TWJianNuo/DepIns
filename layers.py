@@ -1051,7 +1051,9 @@ class Proj2Oview(nn.Module):
         projected2d, projecteddepth, selector = self.proj2de(pts3d=pts3d, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask = addmask)
         rimg_gt, grad2d, _, depthmapnp_grad = eppl_render(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap.cpu().numpy(), kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
 
-        depthmap_ns = depthmap + torch.randn(depthmap.shape, device=torch.device("cuda")) * 1e-2
+        fig_gt = self.show_rendered_eppl(rimg_gt)
+
+        depthmap_ns = depthmap + torch.randn(depthmap.shape, device=torch.device("cuda")) * 1
         # lr = 1e-4
         # lr = 1e-5
         # lr = 1e-6
@@ -1066,8 +1068,21 @@ class Proj2Oview(nn.Module):
             val = torch.sum(torch.abs(depthmap_ns - depthmap) * addmask.float()).cpu().numpy()
             writer.add_scalar("Abs Diff", val, i)
             print(val)
+            if np.mod(i, 50) == 0:
+                fig_ns = self.show_rendered_eppl(rimg_ns)
+                figcombined = pil.fromarray(np.concatenate([np.array(fig_gt), np.array(fig_ns)], axis=1))
+                figcombinedT = torch.Tensor(np.array(figcombined)).permute([2,0,1]).float() / 255
+                writer.add_image('imresult', figcombinedT, i)
         return
 
+    def show_rendered_eppl(self, rimg):
+        vmax = rimg.max() * 0.5
+        rimg_t = torch.from_numpy(rimg).unsqueeze(2)
+        bz = 0
+        imgt = list()
+        for i in list(np.linspace(0,self.sampleNum,3).astype(np.int)):
+            imgt.append(np.array(tensor2disp(rimg_t[bz], vmax=vmax, ind=i)))
+        return pil.fromarray(np.concatenate(imgt, axis=0))
 
     def erpipolar_rendering_test(self, depthmap, semanticmap, intrinsic, extrinsic):
         # Compute Mask
@@ -1166,15 +1181,6 @@ class Proj2Oview(nn.Module):
         projected2d[:, 1, :] = projected2d[:, 1, :] / projected[:, 2, :]
 
         return projected2d
-
-    def show_rendered_eppl(self, rimg):
-        vmax = rimg.max() * 0.3
-        rimg_t = torch.from_numpy(rimg).unsqueeze(2)
-        bz = 0
-        imgt = list()
-        for i in range(10):
-            imgt.append(np.array(tensor2disp(rimg_t[bz], vmax=vmax, ind=i)))
-        pil.fromarray(np.concatenate(imgt, axis=0)).show()
 
     def get_eppl(self, intrinsic, extrinsic, nextrinsic):
         intrinsic_44, added_extrinsic = self.org_intrinsic(intrinsic)
