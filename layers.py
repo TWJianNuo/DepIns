@@ -792,7 +792,8 @@ class Proj2Oview(nn.Module):
         self.sr = 7
 
         self.eps = 1e-6
-        self.sampleNum = 10
+        # self.sampleNum = 10
+        self.sampleNum = 20
 
     def get_camtrail(self, extrinsic, intrinsic):
         ws = 3
@@ -1050,7 +1051,8 @@ class Proj2Oview(nn.Module):
 
         depthmap_ns = depthmap + torch.randn(depthmap.shape, device=torch.device("cuda")) * 1e-2
         # lr = 1e-4
-        lr = 1e-5
+        # lr = 1e-5
+        lr = 1e-6
         # lossrec = list()
         for i in range(200000000):
             pts3d_ns = self.bck(predDepth=depthmap_ns, invcamK=invcamK)
