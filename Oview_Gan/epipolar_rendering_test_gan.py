@@ -96,38 +96,15 @@ class Trainer_GAN:
         if self.opt.use_stereo:
             self.opt.frame_ids.append("s")
 
-        self.models["encoder"] = networks.ResnetEncoder(
+        self.models["encoder"] = networks.ResnetDiscriminator(
             self.opt.num_layers, self.opt.weights_init == "pretrained")
+
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
 
-        self.models["depth"] = networks.DepthDecoder(
-            self.models["encoder"].num_ch_enc, self.opt.scales)
-        self.models["depth"].to(self.device)
-        self.parameters_to_train += list(self.models["depth"].parameters())
-
-        # self.models['sfnD'] = PointNetCls(k = 1, feature_transform = False)
-        self.models['sfnD'] = PtnD(opt=self.opt, k = 1, feature_transform=False)
-        self.models['sfnD'].to(self.device)
-
-        if self.opt.predictive_mask:
-            assert self.opt.disable_automasking, \
-                "When using predictive_mask, please disable automasking with --disable_automasking"
-
-            # Our implementation of the predictive masking baseline has the the same architecture
-            # as our depth decoder. We predict a separate mask for each source frame.
-            self.models["predictive_mask"] = networks.DepthDecoder(
-                self.models["encoder"].num_ch_enc, self.opt.scales,
-                num_output_channels=(len(self.opt.frame_ids) - 1))
-            self.models["predictive_mask"].to(self.device)
-            self.parameters_to_train += list(self.models["predictive_mask"].parameters())
-
-        self.parameters_to_train
+        self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(
             self.model_optimizer, self.opt.scheduler_step_size, 0.1)
-
-        if self.opt.load_weights_folder is not None:
-            self.load_model()
 
         print("Training model named:\n  ", self.opt.model_name)
         print("Models and tensorboard events files are saved to:\n  ", self.opt.log_dir)
@@ -165,27 +142,9 @@ class Trainer_GAN:
         for mode in ["train"]:
             self.writers[mode] = SummaryWriter(os.path.join(self.log_path, mode))
 
-        if not self.opt.no_ssim:
-            self.ssim = SSIM()
-            self.ssim.to(self.device)
-
-        self.backproject_depth = {}
-        self.project_3d = {}
-        for scale in self.opt.scales:
-            h = self.opt.height // (2 ** scale)
-            w = self.opt.width // (2 ** scale)
-
-            self.backproject_depth[scale] = BackprojectDepth(self.opt.batch_size, h, w)
-            self.backproject_depth[scale].to(self.device)
-
-            self.project_3d[scale] = Project3D(self.opt.batch_size, h, w)
-            self.project_3d[scale].to(self.device)
-
         self.proj2ow = Proj2Oview(height = self.opt.height, width = self.opt.width, batch_size = self.opt.batch_size, lr = self.opt.epplr, sampleNum = self.opt.eppsm)
         self.proj2ow.to(self.device)
 
-        # self.proj2ows = Proj2Oview(height = self.opt.height, width = self.opt.width, batch_size = 1)
-        # self.proj2ows.to(self.device)
         self.STEREO_SCALE_FACTOR = 5.4
 
         self.depth_metric_names = [
@@ -199,23 +158,10 @@ class Trainer_GAN:
 
         self.toTensor = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
 
-        self.sfnCom = ComputeSurfaceNormal(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size, minDepth=self.opt.min_depth, maxDepth=self.opt.max_depth).cuda()
         if self.opt.doVisualization:
             import matlab
             import matlab.engine
             self.eng = matlab.engine.start_matlab()
-
-
-        # Generate Gaussian Noise
-        import torch.distributions as tdist
-        self.nseeder = tdist.Normal(loc = torch.tensor([0.0]), scale = torch.tensor([1.0]))
-
-
-        # For visualization
-        self.cap = 1000
-        self.itcount = 0
-        self.dp_real = np.zeros([self.cap, 1])
-        self.dp_fake = np.zeros([self.cap, 1])
 
     def set_train(self):
         """Convert all models to training mode
@@ -234,8 +180,8 @@ class Trainer_GAN:
         """
         self.epoch = 0
         self.step = 0
-        with torch.no_grad():
-            self.run_epoch()
+
+        self.run_epoch()
         # self.start_time = time.time()
         # for self.epoch in range(self.opt.num_epochs):
         #     self.run_epoch()
@@ -257,8 +203,6 @@ class Trainer_GAN:
             self.step += 1
             print("Rest %f hours" % ((self.train_loader.__len__() - self.step) * (tot_time / self.step) / 60 / 60))
 
-
-
         # self.model_lr_scheduler.step()
     def process_batch(self, inputs, istrain = True):
         """Pass a minibatch through the network and generate images and losses
@@ -267,30 +211,7 @@ class Trainer_GAN:
             if key not in ['entry_tag', 'syn_tag']:
                 inputs[key] = ipt.to(self.device)
 
-        if self.opt.pose_model_type == "shared":
-            # If we are using a shared encoder for both depth and pose (as advocated
-            # in monodepthv1), then all images are fed separately through the depth encoder.
-            all_color_aug = torch.cat([inputs[("color_aug", i, 0)] for i in self.opt.frame_ids])
-            all_features = self.models["encoder"](all_color_aug)
-            all_features = [torch.split(f, self.opt.batch_size) for f in all_features]
-
-            features = {}
-            for i, k in enumerate(self.opt.frame_ids):
-                features[k] = [f[i] for f in all_features]
-
-            outputs = self.models["depth"](features[0])
-        else:
-            # Otherwise, we only feed the image with frame_id 0 through the depth encoder
-            features = self.models["encoder"](inputs["color_aug", 0, 0])
-            outputs = self.models["depth"](features)
-
-        if self.opt.predictive_mask:
-            outputs["predictive_mask"] = self.models["predictive_mask"](features)
-
-        if self.use_pose_net:
-            outputs.update(self.predict_poses(inputs, features))
-
-        self.generate_images_pred(inputs, outputs)
+        outputs = dict()
         losses = self.compute_losses(inputs, outputs, istrain = istrain)
 
         return outputs, losses
@@ -582,25 +503,77 @@ class Trainer_GAN:
 
         return np.stack([h,e,l], axis = 2)
 
+
+    def vsl_rimg(self, rimg):
+        vmax = rimg.max() * 0.5
+        imgt = list()
+        for i in list(np.linspace(0,self.proj2ow.sampleNum -1, 4).astype(np.int)):
+            imgt.append(np.array(tensor2disp(rimg, vmax=vmax.cpu().numpy(), ind=i)))
+        return pil.fromarray(np.concatenate(imgt, axis=0))
+
+    def set_requires_grad(self, params, requires_grad=False):
+        for param in params:
+            param.requires_grad = requires_grad
+
     def compute_losses(self, inputs, outputs, istrain = True):
         """Compute the reprojection and smoothness losses for a minibatch
         """
-        losses = {}
-
-        # syn_ppath, syn_ppath_view = self.get_synpath(inputs)
-        # real_ppath, real_ppath_view = self.get_realpath(inputs)
-
         # Render the original Map
-        rendered_syn, addmask_syn = self.proj2ow.erpipolar_rendering_test_iterate(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
-                                                       intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)], writer = self.writers['train'])
-        # rendered_syn, addmask_syn = self.proj2ow.erpipolar_rendering_test(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
-        #                                                intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
-        # rendered_real, addmask_real = self.proj2ow.erpipolar_rendering(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, semanticmap=inputs['real_semanLabel'],
-        #                                                intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
-        # rendered_syn, addmask_syn = self.proj2ow.erpipolar_rendering_test(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
-        #                                                intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
+        rendered_gt, addmask_gt, _ = self.proj2ow.erpipolar_rendering(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
+                                                       intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
+        img_gt = torch.from_numpy(rendered_gt[0,:,:,:]).unsqueeze(1).cuda()
 
-        # self.write_rendered(rendered_syn, rendered_real, addmask_syn, addmask_real, syn_ppath, syn_ppath_view, real_ppath, real_ppath_view)
+        rendered_ns, _, _ = self.proj2ow.erpipolar_rendering(depthmap=inputs[('syn_depth', 0)] + torch.randn(inputs[('syn_depth', 0)].shape, device=torch.device("cuda")), semanticmap=inputs['syn_semanLabel'],
+                                                       intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)], addmask_gt=addmask_gt)
+        img_ns = torch.from_numpy(rendered_ns[0,:,:,:]).unsqueeze(1).cuda()
+
+        # Vsl rendered imgs
+        # vsl_render = np.concatenate([np.array(self.vsl_rimg(img_gt)), np.array(self.vsl_rimg(img_ns))], axis=1)
+
+        # Format dataset
+        img_ns_params = nn.Parameter(img_ns, requires_grad=True)
+        imgs_pool = torch.cat([img_gt, img_ns_params], dim=0)
+        labels_pool = torch.cat([torch.ones([self.proj2ow.sampleNum * 2]), torch.zeros([self.proj2ow.sampleNum * 2])], dim=0)
+
+        # Init optimizer
+        self.discriminator_optimizer = optim.Adam(self.models["encoder"].parameters(), self.opt.learning_rate)
+        self.nsrimg_optimizer = optim.Adam([img_ns_params], self.opt.epplr)
+
+        minibs = 2
+        dsrates = 5
+        bcwLoss = torch.nn.BCEWithLogitsLoss()
+        for i in range(10000):
+            # Train Discriminator
+            sm_index = torch.LongTensor(minibs).random_(0, self.proj2ow.sampleNum * 2 * 2)
+            input_img = imgs_pool[sm_index, :, :, :]
+            input_label = labels_pool[sm_index].view(minibs,1,1,1).expand(-1,-1,int(self.opt.height / (2**dsrates)),int(self.opt.width / (2**dsrates))).cuda()
+            self.set_requires_grad(self.models["encoder"].parameters(), True)
+            self.set_requires_grad([img_ns_params], False)
+            pred = self.models['encoder'](input_img)[-1]
+            lossD = bcwLoss(pred, input_label)
+            self.discriminator_optimizer.zero_grad()
+            lossD.backward()
+            self.discriminator_optimizer.step()
+
+            # Optimize For depth
+            sm_index = torch.LongTensor(minibs).random_(0, self.proj2ow.sampleNum * 2)
+            input_img = img_ns_params[sm_index, :, :, :]
+            self.set_requires_grad(self.models["encoder"].parameters(), False)
+            self.set_requires_grad([img_ns_params], True)
+            pred = self.models['encoder'](input_img)[-1]
+            lossG = bcwLoss(pred, torch.ones([minibs,1,int(self.opt.height / (2**dsrates)),int(self.opt.width / (2**dsrates))]).cuda())
+            self.nsrimg_optimizer.zero_grad()
+            lossG.backward()
+            self.nsrimg_optimizer.step()
+
+            # Record
+            vsl_render = np.concatenate([np.array(self.vsl_rimg(img_gt)), np.array(self.vsl_rimg(img_ns))], axis=1)
+            vsl_renderT = torch.from_numpy(vsl_render).permute([2,0,1]).unsqueeze(1) / 255
+
+            # Add to tensorboardx
+            self.writer['train'].add_scalar("lossD", lossD, i)
+            self.writer['train'].add_scalar("lossG", lossG, i)
+            self.writer['train'].add_image('imresult', vsl_renderT, i)
         return
 
     def sv_pdf(self, rendered_pdf, ppath, mscale, ind):
@@ -801,38 +774,11 @@ class Trainer_GAN:
         save_path = os.path.join(save_folder, "{}.pth".format("ptn_adam"))
         torch.save(self.models['sfnD'].optimizer_D.state_dict(), save_path)
         print("Model %s saved" % self.opt.model_name)
+
     def load_model(self):
         """Load model(s) from disk
         """
-        self.opt.load_weights_folder = os.path.expanduser(self.opt.load_weights_folder)
-
-        assert os.path.isdir(self.opt.load_weights_folder), \
-            "Cannot find folder {}".format(self.opt.load_weights_folder)
-        print("loading model from folder {}".format(self.opt.load_weights_folder))
-
-        for n in self.opt.models_to_load:
-            print("Loading {} weights...".format(n))
-            path = os.path.join(self.opt.load_weights_folder, "{}.pth".format(n))
-            model_dict = self.models[n].state_dict()
-            pretrained_dict = torch.load(path)
-            pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-            model_dict.update(pretrained_dict)
-            self.models[n].load_state_dict(model_dict)
-
-        # loading adam state
-        optimizer_load_path = os.path.join(self.opt.load_weights_folder, "adam.pth")
-        if os.path.isfile(optimizer_load_path):
-            print("Loading Adam weights")
-            optimizer_dict = torch.load(optimizer_load_path)
-            self.model_optimizer.load_state_dict(optimizer_dict)
-
-
-            optimizer_load_path = os.path.join(self.opt.load_weights_folder, "sfn_adam.pth")
-            if os.path.isfile(optimizer_load_path):
-                optimizer_dict = torch.load(optimizer_load_path)
-                self.models['sfnD'].optimizer_D.load_state_dict(optimizer_dict)
-        else:
-            print("Cannot find Adam weights so Adam is randomly initialized")
+        print("Not implemented yet.")
 
 
 from options import MonodepthOptions

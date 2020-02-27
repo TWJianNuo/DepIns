@@ -955,9 +955,12 @@ class Proj2Oview(nn.Module):
                 self.eng.scatter(draw_pvpts[0], draw_pvpts[1], 1, 'r', nargout=0)
 
 
-    def erpipolar_rendering(self, depthmap, semanticmap, intrinsic, extrinsic):
+    def erpipolar_rendering(self, depthmap, semanticmap, intrinsic, extrinsic, addmask_gt = None):
         # Compute Mask
-        addmask = self.post_mask(depthmap = depthmap, semanticmap = semanticmap)
+        if addmask_gt is None:
+            addmask = self.post_mask(depthmap = depthmap, semanticmap = semanticmap)
+        else:
+            addmask = addmask_gt
 
         invcamK = torch.inverse(intrinsic @ extrinsic)
         pts3d = self.bck(predDepth=depthmap, invcamK=invcamK)
@@ -979,7 +982,7 @@ class Proj2Oview(nn.Module):
 
         # self.show_rendered_eppl(rimg)
         # depthmapnp_grad = eppl_pix2dgrad2depth(grad2d = grad2d, Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap.cpu().numpy(), bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
-        return rimg, addmask
+        return rimg, addmask, depthmapnp_grad
 
     def gradcheckGeneral(self, grad2d, depthmapnp_grad, Pcombined, depthmap, invcamK, intrinsic, nextrinsic, addmask, selector, projected2d, inv_r_sigma):
         ratio = 1

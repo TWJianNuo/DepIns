@@ -333,7 +333,7 @@ def eppl_render_l1_sfgrad(inv_sigmaM, pts2d, mask, Pcombinednp, depthmapnp, rimg
                         for i in range(ctx - srhalf, ctx + srhalf + 1):
                             for j in range(cty - srhalf, cty + srhalf + 1):
                                 if i >= 0 and i < width and j >= 0 and j < height:
-                                    if np.abs(rimg_gt[c, sz, j, i]) > eps:
+                                    if np.abs(rimg_gt[c, sz, j, i]) > 1e-10:
                                         fi = float(i)
                                         fj = float(j)
                                         cx = (pts2d[c, sz, m, n, 0] - fi) / kws
