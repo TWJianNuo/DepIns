@@ -82,7 +82,6 @@ def eppl_render(inv_sigmaM, pts2d, mask, Pcombinednp, depthmapnp, kws, sr, bs, s
 
                                     depthmapnp_grad[c, 0, m, n] = depthmapnp_grad[c, 0, m, n] + \
                                                                   tmpk / kws * ((2 * inv_sigmaM[c,sz,m,n,0,0] * cx + inv_sigmaM[c,sz,m,n,1,0] * cy + inv_sigmaM[c,sz,m,n,0,1] * cy) * gradPxDep + (2 * inv_sigmaM[c,sz,m,n,1,1] * cy + inv_sigmaM[c,sz,m,n,1,0] * cx + inv_sigmaM[c,sz,m,n,0,1] * cx) * gradPyDep)
-
     return rimg, grad2d, counter, depthmapnp_grad
 
 

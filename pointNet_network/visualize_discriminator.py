@@ -29,9 +29,6 @@ from pointNet_network.pointNet_model import PointNetCls
 
 from pointNet_network.ptn_discriminator import PtnD
 from mpl_toolkits.mplot3d import axes3d, Axes3D #<-- Note the capitalization!
-
-import copy
-from eppl_render.eppl_render import EpplRender
 def additional_opts_init(opts):
     opts.phase = 'train'
     opts.lr_policy = 'linear'
@@ -78,8 +75,8 @@ class Trainer_GAN:
         self.log_path = os.path.join(self.opt.log_dir, self.opt.model_name)
 
         # checking height and width are multiples of 32
-        # assert self.opt.height % 32 == 0, "'height' must be a multiple of 32"
-        # assert self.opt.width % 32 == 0, "'width' must be a multiple of 32"
+        assert self.opt.height % 32 == 0, "'height' must be a multiple of 32"
+        assert self.opt.width % 32 == 0, "'width' must be a multiple of 32"
 
         self.models = {}
         self.parameters_to_train = []
@@ -97,15 +94,38 @@ class Trainer_GAN:
         if self.opt.use_stereo:
             self.opt.frame_ids.append("s")
 
-        self.models["encoder"] = networks.ResnetDiscriminator(
+        self.models["encoder"] = networks.ResnetEncoder(
             self.opt.num_layers, self.opt.weights_init == "pretrained")
-
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
+
+        self.models["depth"] = networks.DepthDecoder(
+            self.models["encoder"].num_ch_enc, self.opt.scales)
+        self.models["depth"].to(self.device)
+        self.parameters_to_train += list(self.models["depth"].parameters())
+
+        # self.models['sfnD'] = PointNetCls(k = 1, feature_transform = False)
+        self.models['sfnD'] = PtnD(opt=self.opt, k = 1, feature_transform=False)
+        self.models['sfnD'].to(self.device)
+
+        if self.opt.predictive_mask:
+            assert self.opt.disable_automasking, \
+                "When using predictive_mask, please disable automasking with --disable_automasking"
+
+            # Our implementation of the predictive masking baseline has the the same architecture
+            # as our depth decoder. We predict a separate mask for each source frame.
+            self.models["predictive_mask"] = networks.DepthDecoder(
+                self.models["encoder"].num_ch_enc, self.opt.scales,
+                num_output_channels=(len(self.opt.frame_ids) - 1))
+            self.models["predictive_mask"].to(self.device)
+            self.parameters_to_train += list(self.models["predictive_mask"].parameters())
 
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(
             self.model_optimizer, self.opt.scheduler_step_size, 0.1)
+
+        if self.opt.load_weights_folder is not None:
+            self.load_model()
 
         print("Training model named:\n  ", self.opt.model_name)
         print("Models and tensorboard events files are saved to:\n  ", self.opt.log_dir)
@@ -126,10 +146,10 @@ class Trainer_GAN:
 
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, syn_train_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, opts = opts, is_train=False, load_seman=True)
+            self.opt.frame_ids, 4, opts = opts, is_train=True, load_seman=True)
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, shuffle= not self.opt.noShuffle,
-            num_workers=self.opt.num_workers, pin_memory=True, drop_last=False)
+            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         val_dataset = self.dataset(
             self.opt.data_path, val_filenames, syn_val_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, opts = opts, is_train=False, load_seman=True)
@@ -143,9 +163,24 @@ class Trainer_GAN:
         for mode in ["train"]:
             self.writers[mode] = SummaryWriter(os.path.join(self.log_path, mode))
 
-        self.proj2ow = EpplRender(height = self.opt.height, width = self.opt.width, batch_size = self.opt.batch_size, lr = self.opt.epplr, sampleNum = self.opt.eppsm)
-        self.proj2ow.to(self.device)
+        if not self.opt.no_ssim:
+            self.ssim = SSIM()
+            self.ssim.to(self.device)
 
+        self.backproject_depth = {}
+        self.project_3d = {}
+        for scale in self.opt.scales:
+            h = self.opt.height // (2 ** scale)
+            w = self.opt.width // (2 ** scale)
+
+            self.backproject_depth[scale] = BackprojectDepth(self.opt.batch_size, h, w)
+            self.backproject_depth[scale].to(self.device)
+
+            self.project_3d[scale] = Project3D(self.opt.batch_size, h, w)
+            self.project_3d[scale].to(self.device)
+
+        self.distillPtClound = DistillPtCloud(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size)
+        self.distillPtClound.to(self.device)
         self.STEREO_SCALE_FACTOR = 5.4
 
         self.depth_metric_names = [
@@ -159,14 +194,17 @@ class Trainer_GAN:
 
         self.toTensor = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
 
+        self.sfnCom = ComputeSurfaceNormal(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size, minDepth=self.opt.min_depth, maxDepth=self.opt.max_depth).cuda()
         if self.opt.doVisualization:
             import matlab
             import matlab.engine
             self.eng = matlab.engine.start_matlab()
 
-        self.n_gnt = nn.Parameter(torch.Tensor([10]), requires_grad=True).cuda()
-        self.sig = nn.Sigmoid()
-
+        # For visualization
+        self.cap = 1000
+        self.itcount = 0
+        self.dp_real = np.zeros([self.cap, 1])
+        self.dp_fake = np.zeros([self.cap, 1])
     def set_train(self):
         """Convert all models to training mode
         """
@@ -184,22 +222,40 @@ class Trainer_GAN:
         """
         self.epoch = 0
         self.step = 0
+        self.start_time = time.time()
 
-        self.run_epoch()
+        with torch.no_grad():
+            self.run_epoch()
 
     def run_epoch(self):
         """Run a single epoch of training and validation
         """
-        print("Training")
-        self.set_train()
 
-        st_time = time.time()
+        print("Evaluate and visualize")
+        self.set_eval()
+        self.models['sfnD'].train()
         for batch_idx, inputs in enumerate(self.train_loader):
             outputs, losses = self.process_batch(inputs)
-            # tot_time = time.time() - st_time
-            # self.step += 1
-            # print("Rest %f hours" % ((self.train_loader.__len__() - self.step) * (tot_time / self.step) / 60 / 60))
-        # self.model_lr_scheduler.step()
+
+            for i in range(self.opt.batch_size):
+                curind = np.mod(self.itcount, self.cap)
+                self.dp_real[curind] = outputs['pred_real'][i].cpu().detach().numpy()
+                self.dp_fake[curind] = outputs['pred_fake'][i].cpu().detach().numpy()
+                self.itcount = self.itcount + 1
+
+            self.log_img(mode="train", inputs=inputs, outputs=outputs)
+            self.step += 1
+            print(self.step)
+
+        n_bins = 30
+        fig, axs = plt.subplots(1, 2, sharey=True, tight_layout=True)
+        axs[0].hist(self.dp_real, bins=n_bins)
+        axs[0].set_title('pred_real')
+        axs[1].hist(self.dp_fake, bins=n_bins)
+        axs[1].set_title('pred_fake')
+        plt.savefig('/media/shengjie/other/Depins/Depins/visualization/pole_discriminator_selection/predspan.png')
+        plt.close(fig)
+
     def process_batch(self, inputs, istrain = True):
         """Pass a minibatch through the network and generate images and losses
         """
@@ -207,92 +263,31 @@ class Trainer_GAN:
             if key not in ['entry_tag', 'syn_tag']:
                 inputs[key] = ipt.to(self.device)
 
-        outputs = dict()
-        rendered_gt, addmask_gt, _ = self.proj2ow.forward(depthmap=inputs[('syn_depth', 0)], semanticmap=inputs['syn_semanLabel'],
-                                                       intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)])
-        img_gt = torch.from_numpy(rendered_gt[0,:,:,:]).unsqueeze(1).cuda()
+        if self.opt.pose_model_type == "shared":
+            # If we are using a shared encoder for both depth and pose (as advocated
+            # in monodepthv1), then all images are fed separately through the depth encoder.
+            all_color_aug = torch.cat([inputs[("color_aug", i, 0)] for i in self.opt.frame_ids])
+            all_features = self.models["encoder"](all_color_aug)
+            all_features = [torch.split(f, self.opt.batch_size) for f in all_features]
 
-        outputs['ns_depth'] = inputs[('syn_depth', 0)] + torch.randn(inputs[('syn_depth', 0)].shape, device=torch.device("cuda")) * self.sig(self.n_gnt)
-        rendered_ns, _, _ = self.proj2ow.erpipolar_rendering(depthmap=outputs['ns_depth'], semanticmap=inputs['syn_semanLabel'],
-                                                       intrinsic=inputs[('realIn', 0)], extrinsic=inputs[('realEx', 0)], addmask_gt=addmask_gt)
-        img_ns = torch.from_numpy(rendered_ns[0,:,:,:]).unsqueeze(1).cuda()
+            features = {}
+            for i, k in enumerate(self.opt.frame_ids):
+                features[k] = [f[i] for f in all_features]
 
-        # Vsl rendered imgs
-        # vsl_render = np.concatenate([np.array(self.vsl_rimg(img_gt)), np.array(self.vsl_rimg(img_ns))], axis=1)
+            outputs = self.models["depth"](features[0])
+        else:
+            # Otherwise, we only feed the image with frame_id 0 through the depth encoder
+            features = self.models["encoder"](inputs["color_aug", 0, 0])
+            outputs = self.models["depth"](features)
 
-        # Format dataset
-        img_ns_params = nn.Parameter(img_ns, requires_grad=True)
-        imgs_pool = torch.cat([img_gt, img_ns_params], dim=0)
-        labels_pool = torch.cat([torch.ones([self.proj2ow.sampleNum * 2]), torch.zeros([self.proj2ow.sampleNum * 2])], dim=0)
+        if self.opt.predictive_mask:
+            outputs["predictive_mask"] = self.models["predictive_mask"](features)
 
-        # Init optimizer
-        self.discriminator_optimizer = optim.Adam(self.models["encoder"].parameters(), self.opt.learning_rate)
-        self.nsrimg_optimizer = optim.Adam([img_ns_params], self.opt.epplr)
+        if self.use_pose_net:
+            outputs.update(self.predict_poses(inputs, features))
 
-        minibs = 2
-        dsrates = 5
-        bcwLoss = torch.nn.BCEWithLogitsLoss()
-        for i in range(100000):
-            # Train Discriminator
-            self.set_requires_grad(self.models["encoder"].parameters(), True)
-            self.set_requires_grad([img_ns_params], False)
-            sm_index = torch.LongTensor(minibs).random_(0, self.proj2ow.sampleNum * 2 * 2)
-            input_img = imgs_pool[sm_index, :, :, :]
-            input_label = labels_pool[sm_index].view(minibs,1,1,1).expand(-1,-1,int(self.opt.height / (2**dsrates)),int(self.opt.width / (2**dsrates))).cuda()
-            pred = self.models['encoder'](input_img + torch.randn(input_img.shape, device=torch.device("cuda")))[-1]
-            lossD = bcwLoss(pred, input_label)
-            self.discriminator_optimizer.zero_grad()
-            lossD.backward()
-            self.discriminator_optimizer.step()
-            self.writers['train'].add_scalar("lossD", lossD, i)
-            # print(lossD)
-            # print(torch.sum(img_ns_params))
-
-            # Optimize For depth
-
-            self.set_requires_grad(self.models["encoder"].parameters(), False)
-            self.set_requires_grad([img_ns_params], True)
-            sm_index = torch.LongTensor(minibs).random_(0, self.proj2ow.sampleNum * 2)
-            input_img = img_ns_params[sm_index, :, :, :]
-            pred = self.models['encoder'](input_img + torch.randn(input_img.shape, device=torch.device("cuda")))[-1]
-            lossG = bcwLoss(pred, torch.ones([minibs,1,int(self.opt.height / (2**dsrates)),int(self.opt.width / (2**dsrates))]).cuda())
-            self.nsrimg_optimizer.zero_grad()
-            lossG.backward()
-            self.nsrimg_optimizer.step()
-
-            # tensor2disp(input_img, ind=1, vmax=input_img.max().detach().cpu().numpy() * 0.5).show()
-            np.array(self.vsl_rimg(img_ns_params))
-            vsl_render = np.concatenate([np.array(self.vsl_rimg(img_gt)), np.array(self.vsl_rimg(img_ns_params))], axis=1)
-            # vsl_renderT = torch.from_numpy(vsl_render).permute([2,0,1]).float() / 255
-
-            # Add to tensorboardx
-            if np.mod(i, 50) == 0:
-                # self.writers['train'].add_image('imresult', vsl_renderT, i)
-                if os.path.isdir('/media/shengjie/other/Depins/Depins/visualization/OviewGan'):
-                    pil.fromarray(vsl_render).save(os.path.join('/media/shengjie/other/Depins/Depins/visualization/OviewGan', str(i) + '.png'))
-
-            with torch.no_grad():
-                sm_index = torch.LongTensor(minibs).random_(0, self.proj2ow.sampleNum * 2)
-                input_img = img_ns_params[sm_index, :, :, :]
-                pred = self.models['encoder'](input_img)[-1]
-                lossCheat = bcwLoss(pred, torch.ones(
-                    [minibs, 1, int(self.opt.height / (2 ** dsrates)), int(self.opt.width / (2 ** dsrates))]).cuda())
-                self.writers['train'].add_scalar("lossCheat", lossCheat, i)
-
-                sm_index = torch.LongTensor(minibs).random_(0, self.proj2ow.sampleNum * 2)
-                input_img = img_gt[sm_index, :, :, :]
-                pred = self.models['encoder'](input_img)[-1]
-                lossTrue = bcwLoss(pred, torch.ones(
-                    [minibs, 1, int(self.opt.height / (2 ** dsrates)), int(self.opt.width / (2 ** dsrates))]).cuda())
-                self.writers['train'].add_scalar("lossTrue", lossTrue, i)
-
-                sm_index = torch.LongTensor(minibs).random_(0, self.proj2ow.sampleNum * 2)
-                input_img = img_ns_params[sm_index, :, :, :]
-                pred = self.models['encoder'](input_img)[-1]
-                lossFalse = bcwLoss(pred, torch.zeros(
-                    [minibs, 1, int(self.opt.height / (2 ** dsrates)), int(self.opt.width / (2 ** dsrates))]).cuda())
-                self.writers['train'].add_scalar("lossFalse", lossFalse, i)
-            print(i)
+        self.generate_images_pred(inputs, outputs)
+        losses = self.compute_losses(inputs, outputs, istrain = istrain)
 
         return outputs, losses
 
@@ -488,7 +483,9 @@ class Trainer_GAN:
         self.eng.eval('view([-79 17])', nargout=0)
         self.eng.eval('camzoom(1.2)', nargout=0)
         self.eng.eval('grid off', nargout=0)
-
+        # eng.eval('set(gca,\'YTickLabel\',[]);', nargout=0)
+        # eng.eval('set(gca,\'XTickLabel\',[]);', nargout=0)
+        # eng.eval('set(gca,\'ZTickLabel\',[]);', nargout=0)
         self.eng.eval('set(gca, \'XColor\', \'none\', \'YColor\', \'none\', \'ZColor\', \'none\')', nargout=0)
 
         folder, frame_index, _, _, _, _ = inputs['entry_tag'][drawIndex].split('\n')
@@ -501,113 +498,31 @@ class Trainer_GAN:
         self.eng.eval(command, nargout=0)
         self.eng.eval('close all', nargout=0)
 
-    def get_synpath(self, inputs):
-        syn_ppath = list()
-        syn_ppath_view = list()
-        syn_tag = inputs['syn_tag']
-        croot = os.path.join(self.opt.oRenderFolder, 'syn')
-        croot_view = os.path.join(self.opt.oRenderFolder, 'syn_view')
-
-        for tag in syn_tag:
-            c1,c2,c3,c4 = tag.split('\n')
-            tpath = os.path.join(croot, '{}_{}'.format(c1.split(' ')[1], c2.split(' ')[1]))
-            syn_ppath.append(tpath)
-            tpath = os.path.join(croot_view, '{}_{}'.format(c1.split(' ')[1], c2.split(' ')[1]))
-            syn_ppath_view.append(tpath)
-        return syn_ppath, syn_ppath_view
-
-    def get_realpath(self, inputs):
-        real_ppath = list()
-        real_ppath_view = list()
-        real_tag = inputs['entry_tag']
-        croot = os.path.join(self.opt.oRenderFolder, 'real')
-        croot_view = os.path.join(self.opt.oRenderFolder, 'real_view')
-        for tag in real_tag:
-            c1,c2,c3,c4,c5,c6 = tag.split('\n')
-            tpath = os.path.join(croot, '{}_{}'.format(c1.split(' ')[1].split('/')[1], c2.split(' ')[1]))
-            real_ppath.append(tpath)
-            tpath = os.path.join(croot_view, '{}_{}'.format(c1.split(' ')[1].split('/')[1], c2.split(' ')[1]))
-            real_ppath_view.append(tpath)
-        return real_ppath, real_ppath_view
-
-    def post_rannoise(self, depthmap, semanticmap):
-        visibletype = [5]  # pole
-        addmask = torch.zeros_like(semanticmap)
-        for vt in visibletype:
-            addmask = addmask + (semanticmap == vt)
-        addmask = addmask > 0
-
-        rndnum = torch.sum(addmask)
-        depthmap_noised = copy.deepcopy(depthmap)
-        depthmap_noised[addmask] = depthmap_noised[addmask] + depthmap_noised[addmask] * self.nseeder.sample([rndnum]).squeeze(1).cuda() * 0.1
-
-        return depthmap_noised, addmask
-
-    def write_rendered(self, rendered_syn, rendered_real, addmask_syn, addmask_real, syn_ppath, syn_ppath_view, real_ppath, real_ppath_view):
-        rendered_synt = torch.from_numpy(rendered_syn)
-        rendered_realt = torch.from_numpy(rendered_real)
-        vmax = 0.15915132 * 0.7
-        for i in range(self.opt.batch_size):
-            if torch.sum(addmask_syn[0]) > 100:
-                os.makedirs(syn_ppath[i], exist_ok=True)
-                os.makedirs(syn_ppath_view[i], exist_ok=True)
-                for j in range(20):
-                    synpath = os.path.join(syn_ppath_view[i], str(j) + '.png')
-                    img_synv = rendered_synt[i,j,:,:].view(1,1,self.opt.height,self.opt.width)
-                    tensor2disp(img_synv, ind=0, vmax=vmax).save(synpath)
-                    synpath = os.path.join(syn_ppath[i], str(j) + '.png')
-                    img_syn = self.compress2PNG(rendered_syn[i,j])
-                    pil.fromarray(img_syn).save(synpath)
-
-            if torch.sum(addmask_real[0]) > 100:
-                os.makedirs(real_ppath[i], exist_ok=True)
-                os.makedirs(real_ppath_view[i], exist_ok=True)
-                for j in range(20):
-                    realpath = os.path.join(real_ppath_view[i], str(j) + '.png')
-                    img_realv = rendered_realt[i,j,:,:].view(1,1,self.opt.height,self.opt.width)
-                    tensor2disp(img_realv, ind=0, vmax=vmax).save(realpath)
-                    realpath = os.path.join(real_ppath[i], str(j) + '.png')
-                    img_real = self.compress2PNG(rendered_real[i,j])
-                    pil.fromarray(img_real).save(realpath)
-
-    def compress2PNG(self, img):
-        # sr = 256 * 256 * 256 / img.max() / 1000
-        sr = 1054486
-        imgs = img * sr
-        h = (imgs / (256 * 256)).astype(np.uint8)
-        e = ((imgs - h * 256 * 256) / 256).astype(np.uint8)
-        l = (imgs - h * 256 * 256 - e * 256).astype(np.uint8)
-
-        # img_recovered = h.astype(np.float32) * 256 * 256 + e.astype(np.float32) * 256 + l.astype(np.float32)
-        # img_recovered = img_recovered / sr
-
-        return np.stack([h,e,l], axis = 2)
-
-
-    def vsl_rimg(self, rimg):
-        # vmax = rimg.max().values() * 0.5
-        vmax = 1.1591175 * 0.2
-        imgt = list()
-        for i in list(np.linspace(0,self.proj2ow.sampleNum -1, 4).astype(np.int)):
-            imgt.append(np.array(tensor2disp(rimg, vmax=vmax, ind=i)))
-        return pil.fromarray(np.concatenate(imgt, axis=0))
-
-    def set_requires_grad(self, params, requires_grad=False):
-        for param in params:
-            param.requires_grad = requires_grad
 
     def compute_losses(self, inputs, outputs, istrain = True):
         """Compute the reprojection and smoothness losses for a minibatch
         """
-        return
+        losses = {}
+        total_loss = 0
 
-    def sv_pdf(self, rendered_pdf, ppath, mscale, ind):
-        imgs = list()
-        for i in range(mscale):
-            imgs.append(np.array(tensor2disp(rendered_pdf[str(i)], vmax=0.5, ind=ind)))
-        imgs = np.concatenate(imgs, axis=0)
-        imgs = pil.fromarray(imgs)
-        imgs.save(ppath)
+        ptCloud_syn, val_syn = self.distillPtClound(predDepth = inputs[("syn_depth", 0)], invcamK = inputs[('invcamK', 0)], semanticLabel = inputs['syn_semanLabel'], is_shrink = True)
+        ptCloud_pred, val_pred = self.distillPtClound(predDepth = outputs[("depth", 0, 0)] * self.STEREO_SCALE_FACTOR, invcamK =inputs[('invcamK', 0)], semanticLabel = inputs['real_semanLabel'], is_shrink = False)
+        # ptCloud_pred = ptCloud_pred + torch.Tensor([25, 0, 0]).unsqueeze(0).unsqueeze(2).expand([self.opt.batch_size,-1,10000]).cuda()
+
+        outputs['pts_real'] = ptCloud_pred
+        outputs['pts_realv'] = val_pred
+        outputs['pts_syn'] = ptCloud_syn
+        outputs['pts_synv'] = val_syn
+
+
+
+        # Compute GAN Loss
+        self.models['sfnD'].set_input(real=ptCloud_pred, realv=val_pred, syn=ptCloud_syn, synv=val_syn)
+        pred_real, pred_fake = self.models['sfnD'].classification()
+        losses["loss"] = torch.mean((pred_real + pred_fake))
+        outputs['pred_real'] = pred_real
+        outputs['pred_fake'] = pred_fake
+        return losses
 
     def compute_depth_losses(self, inputs, outputs, losses):
         """Compute depth metrics, to allow monitoring during training
@@ -664,104 +579,56 @@ class Trainer_GAN:
         writer = self.writers[mode]
         # if self.eng is None:
         #     self.eng = matlab.engine.start_matlab()
-
-
-        # Record stem
-        n_bins = 30
-        fig, axs = plt.subplots(1, 2, sharey=True, tight_layout=True)
-        axs[0].hist(self.dp_real, bins=n_bins)
-        axs[0].set_title('pred_real')
-        axs[1].hist(self.dp_fake, bins=n_bins)
-        axs[1].set_title('pred_fake')
-        writer.add_figure("pred_stem", fig, self.step)
-        plt.close(fig)
-
-
-
+        vis_root = '/media/shengjie/other/Depins/Depins/visualization/pole_discriminator_selection'
+        real_root = os.path.join(vis_root, 'real')
+        syn_root = os.path.join(vis_root, 'syn')
+        os.makedirs(real_root, exist_ok=True)
+        os.makedirs(syn_root, exist_ok=True)
         for j in range(min(2, self.opt.batch_size)):  # write a maxmimum of four images
-            input_rgb = inputs[('color', 0, 0)][j].data
-            seman_rgb = self.toTensor(tensor2semantic(inputs['real_semanLabel'], ind = j)).cuda().data
-            combined_up = torch.cat([input_rgb, seman_rgb], dim=2)
+            dns_rate = 10
+            # fig = plt.figure('visible', 'off')
+            fig, _ = plt.subplots()
+            ax = Axes3D(fig)
+            ax.view_init(elev=7., azim=-135)
+            ax.dist = 1.7
+            ax.scatter(outputs['pts_real'][j, 0, ::dns_rate].detach().cpu().numpy(),
+                       outputs['pts_real'][j, 1, ::dns_rate].detach().cpu().numpy(),
+                       outputs['pts_real'][j, 2, ::dns_rate].detach().cpu().numpy(), s=1, c='b')
+            set_axes_equal(ax)
+            ax.set_xlim(left=0, right=50)
+            ax.set_ylim(bottom=-10, top=10)
+            ax.set_zlim(bottom=-3, top=5)
+            ax.view_init(elev=17, azim=-79)
+            ax.dist = 10
 
-            disp_rgb = self.toTensor(tensor2disp(outputs[('disp', 0)], vmax=0.1, ind=j)).cuda().data
-            input_rgb_stereo = inputs[('color', 's', 0)][j].data
-            combined_mid = torch.cat([disp_rgb, input_rgb_stereo], dim=2)
-
-            sfn_real = self.sfnCom.visualization_forward(outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, invcamK=inputs[('invcamK', 0)])
-            sfn_real = self.toTensor(tensor2rgb((sfn_real + 1) / 2, ind = j)).cuda().data
-            sfn_syn = self.sfnCom.visualization_forward(inputs[('syn_depth', 0)], invcamK=inputs[('invcamK', 0)])
-            sfn_syn = self.toTensor(tensor2rgb((sfn_syn + 1) / 2, ind=j)).cuda().data
-            combined_bot = torch.cat([sfn_real, sfn_syn], dim=2)
-
-            combined = torch.cat([combined_up, combined_mid, combined_bot], dim=1)
-
-            writer.add_image(
-                "color_{}".format(j),
-                combined, self.step)
-
-
-            syn_rgb = inputs[('syn_rgb', 0)][j].data
-            syn_seman = self.toTensor(tensor2semantic(inputs['syn_semanLabel'], ind = j)).cuda().data
-            syn_depth = self.toTensor(tensor2disp(1 / inputs[('syn_depth', 0)], percentile=95, ind=j)).cuda().data
-            combined_syn = torch.cat([syn_rgb, syn_seman, syn_depth], dim=1)
-            # tensor2rgb(combined_syn.unsqueeze(0), ind=0).show()
-            writer.add_image(
-                "syn_{}".format(j),
-                combined_syn, self.step)
+            fig_name = inputs['entry_tag'][j].split('\n')[0].split('/')[1] + '_' + inputs['entry_tag'][j].split('\n')[1].split(' ')[1].zfill(10) + '.png'
+            if outputs['pred_real'][j] > 0.5:
+                plt.savefig(os.path.join(real_root, fig_name))
+            else:
+                plt.savefig(os.path.join(syn_root, fig_name))
+            plt.close(fig)
 
 
-            if outputs['pts_realv'][j] and outputs['pts_synv'][j]:
-                # Matplotlib visualization
-                dns_rate = 10
-                # fig = plt.figure('visible', 'off')
-                fig, _ = plt.subplots()
-                ax = Axes3D(fig)
-                ax.view_init(elev=7., azim=-135)
-                ax.dist = 1.7
-                ax.scatter(outputs['pts_real'][j, 0, ::dns_rate].detach().cpu().numpy(),
-                           outputs['pts_real'][j, 1, ::dns_rate].detach().cpu().numpy(),
-                           outputs['pts_real'][j, 2, ::dns_rate].detach().cpu().numpy(), s=1, c='b')
-                ax.scatter(outputs['pts_syn'][j, 0, ::dns_rate].detach().cpu().numpy(),
-                           outputs['pts_syn'][j, 1, ::dns_rate].detach().cpu().numpy(),
-                           outputs['pts_syn'][j, 2, ::dns_rate].detach().cpu().numpy(), s=1, c='r')
-                set_axes_equal(ax)
-                ax.set_xlim(left=0, right=50)
-                ax.set_ylim(bottom=-10, top=10)
-                ax.set_zlim(bottom=-3, top=5)
-                ax.view_init(elev=17, azim=-79)
-                ax.dist = 10
-                writer.add_figure("plot3d_{}".format(j), fig, self.step)
-                plt.close(fig)
-                # self.eng.xlim(xlim, nargout=0)
-                # self.eng.ylim(ylim, nargout=0)
-                # self.eng.zlim(zlim, nargout=0)
+            fig, _ = plt.subplots()
+            ax = Axes3D(fig)
+            ax.view_init(elev=7., azim=-135)
+            ax.dist = 1.7
+            ax.scatter(outputs['pts_syn'][j, 0, ::dns_rate].detach().cpu().numpy(),
+                       outputs['pts_syn'][j, 1, ::dns_rate].detach().cpu().numpy(),
+                       outputs['pts_syn'][j, 2, ::dns_rate].detach().cpu().numpy(), s=1, c='r')
+            ax.set_xlim(left=0, right=50)
+            ax.set_ylim(bottom=-10, top=10)
+            ax.set_zlim(bottom=-3, top=5)
+            ax.view_init(elev=17, azim=-79)
+            ax.dist = 10
+            fig_name = inputs['syn_tag'][j].split('\n')[0].split(' ')[1] + '_' + inputs['syn_tag'][j].split('\n')[1].split(' ')[1].zfill(10) + '.png'
+            if outputs['pred_fake'][j] > 0.5:
+                plt.savefig(os.path.join(real_root, fig_name))
+            else:
+                plt.savefig(os.path.join(syn_root, fig_name))
+            plt.close(fig)
 
 
-                # Matlab visualization
-                # dns_rate = 10
-                # draw_x_pred = matlab.double(outputs['pts_real'][j, 0, ::dns_rate].detach().cpu().numpy().tolist())
-                # draw_y_pred = matlab.double(outputs['pts_real'][j, 1, ::dns_rate].detach().cpu().numpy().tolist())
-                # draw_z_pred = matlab.double(outputs['pts_real'][j, 2, ::dns_rate].detach().cpu().numpy().tolist())
-                #
-                # draw_x_syn = matlab.double(outputs['pts_syn'][j, 0, ::dns_rate].detach().cpu().numpy().tolist())
-                # draw_y_syn = matlab.double(outputs['pts_syn'][j, 1, ::dns_rate].detach().cpu().numpy().tolist())
-                # draw_z_syn = matlab.double(outputs['pts_syn'][j, 2, ::dns_rate].detach().cpu().numpy().tolist())
-                # self.eng.eval('figure()', nargout=0)
-                # self.eng.scatter3(draw_x_pred, draw_y_pred, draw_z_pred, 5, 'r', 'filled', nargout=0)
-                # self.eng.eval('hold on', nargout=0)
-                # self.eng.scatter3(draw_x_syn, draw_y_syn, draw_z_syn, 5, 'g', 'filled', nargout=0)
-                # self.eng.eval('axis equal', nargout = 0)
-                # xlim = matlab.double([0, 50])
-                # ylim = matlab.double([-10, 10])
-                # zlim = matlab.double([-5, 5])
-                # self.eng.xlim(xlim, nargout=0)
-                # self.eng.ylim(ylim, nargout=0)
-                # self.eng.zlim(zlim, nargout=0)
-                # self.eng.eval('view([-79 17])', nargout=0)
-                # self.eng.eval('camzoom(1.2)', nargout=0)
-                # F = self.eng.getframe()
-                # pil.fromarray(np.array(F['cdata']).astype(np.uint8))
-                # self.eng.eval('close all', nargout = 0)
 
     def save_opts(self):
         """Save options to disk so we know what we ran this experiment with
@@ -799,11 +666,38 @@ class Trainer_GAN:
         save_path = os.path.join(save_folder, "{}.pth".format("ptn_adam"))
         torch.save(self.models['sfnD'].optimizer_D.state_dict(), save_path)
         print("Model %s saved" % self.opt.model_name)
-
     def load_model(self):
         """Load model(s) from disk
         """
-        print("Not implemented yet.")
+        self.opt.load_weights_folder = os.path.expanduser(self.opt.load_weights_folder)
+
+        assert os.path.isdir(self.opt.load_weights_folder), \
+            "Cannot find folder {}".format(self.opt.load_weights_folder)
+        print("loading model from folder {}".format(self.opt.load_weights_folder))
+
+        for n in self.opt.models_to_load:
+            print("Loading {} weights...".format(n))
+            path = os.path.join(self.opt.load_weights_folder, "{}.pth".format(n))
+            model_dict = self.models[n].state_dict()
+            pretrained_dict = torch.load(path)
+            pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+            model_dict.update(pretrained_dict)
+            self.models[n].load_state_dict(model_dict)
+
+        # loading adam state
+        optimizer_load_path = os.path.join(self.opt.load_weights_folder, "adam.pth")
+        if os.path.isfile(optimizer_load_path):
+            print("Loading Adam weights")
+            optimizer_dict = torch.load(optimizer_load_path)
+            self.model_optimizer.load_state_dict(optimizer_dict)
+
+
+            optimizer_load_path = os.path.join(self.opt.load_weights_folder, "sfn_adam.pth")
+            if os.path.isfile(optimizer_load_path):
+                optimizer_dict = torch.load(optimizer_load_path)
+                self.models['sfnD'].optimizer_D.load_state_dict(optimizer_dict)
+        else:
+            print("Cannot find Adam weights so Adam is randomly initialized")
 
 
 from options import MonodepthOptions
