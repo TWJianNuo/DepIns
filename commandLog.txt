@@ -1,1 +1,589 @@
---model_name mono+stereo_model --frame_ids 0 -1 1 --use_stereo --png --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --batch_size 4 --num_workers 4 --log_frequency 1 --predins --detect_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/predicted_detect_label --width 1024 --height 320 --load_weights_folder /media/shengjie/other/sceneUnderstanding/Depins/trained_models/mono+stereo_1024x320 --models_to_load encoder+depth+pose_encoder+pose
+--model_name given_depth_selmov_pred_objMov_ins --frame_ids 0 -1 1 --use_stereo --png --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --batch_size 4 --num_workers 4 --log_frequency 1 --predins --detect_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/predicted_detect_label --width 1024 --height 320 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/given_depth_selmov_pred_objMov_ins/models/weights_1 --models_to_load encoder depth pose_encoder pose insDecoder movDecoder --split kitti_seman_mapped2depth --serial_batches --loadSeman --loadPose --loadPredDepth --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_depth_prediction --num_epochs 1 --doVisualization --noAug
+
+
+--load_weights_folder /media/shengjie/other/Depins/Depins/trained_models/mono+stereo_1024x320 --split quadruplets --width 1024 --height 320 --batch_size 16 --num_workers 16 --png --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --post_process --save_dir /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_depth_prediction
+
+
+CUDA_VISIBLE_DEVICES=1 python generate_depth_prediction.py --load_weights_folder /research/cvl-zhusheng/DepIns/trained_models/mono+stereo_1024x320 --split quadruplets --width 1024 --height 320 --batch_size 16 --num_workers 16 --png --data_path /scratch1/kitti_data --post_process --save_dir /scratch1/zhusheng/monodepth2_depth_prediction
+
+scp /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/predicted_detect_label.tar zhusheng@cvl4.cse.msu.edu:/scratch1/zhusheng
+
+tar -xvf predicted_detect_label.tar
+
+
+
+--------------- 01/20/2020 ------------------
+
+
+CUDA_VISIBLE_DEVICES=0 python train_ins_module.py --model_name given_depth_selmov_pred_objMov_ins --frame_ids 0 -1 1 --use_stereo --png --data_path /scratch1/kitti_data --batch_size 8 --num_workers 8 --log_frequency 1 --predins --detect_path /scratch1/zhusheng/predicted_detect_label --width 1024 --height 320 --load_weights_folder /research/cvl-zhusheng/DepIns/trained_models/mono+stereo_1024x320 --models_to_load encoder depth pose_encoder pose --split eigen_zhou --loadPose --loadPredDepth --predDepthPath /scratch1/zhusheng/monodepth2_depth_prediction --num_epochs 20
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp
+
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/given_depth_selmov_pred_objMov_ins /media/shengjie/other/Depins/Depins/tmp
+scp /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/given_depth_selmov_pred_objMov_ins
+
+--save_path /media/shengjie/other/Depins/Sparse-Depth-Completion-Depins/Download/ --data_path /media/shengjie/other/sceneUnderstanding/Sparse-Depth-Completion/depth_selection/val_selection_cropped
+
+
+--model_name given_depth_selmov_pred_objMov_ins --frame_ids 0 -1 1 --use_stereo --png --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --batch_size 4 --num_workers 4 --log_frequency 1 --predins --detect_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/predicted_detect_label --width 1024 --height 320 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/given_depth_selmov_pred_objMov_ins/models/weights_1 --models_to_load encoder depth pose_encoder pose insDecoder movDecoder --split trivial --serial_batches --loadSeman --loadPose --loadPredDepth --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_depth_prediction --num_epochs 1 --doVisualization --noAug
+
+--model_name given_depth_selmov_pred_objMov_ins --frame_ids 0 --use_stereo --png --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --batch_size 4 --num_workers 4 --log_frequency 1 --predins --detect_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/predicted_detect_label --width 1024 --height 320 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/given_depth_selmov_pred_objMov_ins/models/weights_1 --models_to_load encoder depth pose_encoder pose insDecoder movDecoder --split visualization3d --serial_batches --loadSeman --loadPose --loadPredDepth --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction --num_epochs 1 --doVisualization --noAug
+
+scp zhusheng@cvl4.cse.msu.edu:/scratch1/zhusheng/monodepth2_depth_prediction.tar /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data
+
+--dataroot ./datasets/maps --name maps_cyclegan --model cycle_gan --batch_size 2 --serial_batches
+
+CUDA_VISIBLE_DEVICES=0 python train.py --dataroot /scratch1/zhusheng/maps --name maps_cyclegan --model cycle_gan
+
+--------------- 01/2/2020 ------------------
+
+
+--data_path /media/shengjie/other/Depins/pytorch-CycleGAN-and-pix2pix/datasets/maps --split cycleGan_maps --width 286 --height 286 --crop_width 256 --crop_height 256 --serial_batches --batch_size 2 --model_name cycleGan_maps --learning_rate 0.0002 --log_dir /media/shengjie/other/Depins/Depins/tmp
+
+--data_path /media/shengjie/other/Depins/pytorch-CycleGAN-and-pix2pix/datasets/maps --split cycleGan_maps --width 286 --height 286 --crop_width 256 --crop_height 256 --serial_batches --batch_size 2 --model_name cycleGan_maps --learning_rate 0.0002 --log_dir /media/shengjie/other/Depins/Depins/tmp
+
+CUDA_VISIBLE_DEVICES=0 python train_cycleGan.py --data_path /scratch1/zhusheng/maps --split cycleGan_maps --width 286 --height 286 --crop_width 256 --crop_height 256 --serial_batches --batch_size 2 --model_name cycleGan_maps --learning_rate 0.0002 --log_dir /research/cvl-zhusheng/DepIns/tmp
+
+python train_cycleGan.py --data_path /media/shengjie/other/Depins/pytorch-CycleGAN-and-pix2pix/datasets/maps --split cycleGan_maps --width 286 --height 286 --crop_width 256 --crop_height 256 --serial_batches --batch_size 2 --model_name cycleGan_maps --learning_rate 0.0002 --log_dir /media/shengjie/other/Depins/Depins/tmp
+
+
+--------------- 01/27/2020 ------------------------
+
+scp zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/pytorch-CycleGAN-and-pix2pix/checkpoints/maps_cyclegan/latest*.pth /media/shengjie/other/Depins/Depins/tmp/cycleGan_maps_org/model
+
+
+--model_name given_depth_selmov_pred_objMov_ins --frame_ids 0 --use_stereo --png --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --batch_size 4 --num_workers 4 --log_frequency 1 --predins --detect_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/predicted_detect_label --width 1024 --height 320 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/given_depth_selmov_pred_objMov_ins/models/weights_1 --models_to_load encoder depth pose_encoder pose insDecoder movDecoder --split visualization3d --serial_batches --loadSeman --loadPose --loadPredDepth --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction --num_epochs 1 --doVisualization --noAug
+
+
+--data_path /media/shengjie/other/Depins/pytorch-CycleGAN-and-pix2pix/datasets/maps --split cycleGan_maps --width 256 --height 256 --crop_width 256 --crop_height 256 --serial_batches --batch_size 1 --model_name cycleGan_maps --learning_rate 0.0002 --log_dir /media/shengjie/other/Depins/Depins/tmp
+
+--data_path /media/shengjie/other/Depins/pytorch-CycleGAN-and-pix2pix/datasets/maps --split cycleGan_maps_visualize --width 256 --height 256 --crop_width 256 --crop_height 256 --serial_batches --batch_size 1 --model_name cycleGan_maps --learning_rate 0.0002 --log_dir /media/shengjie/other/Depins/Depins/tmp --serial_batches --num_workers 1
+
+
+
+
+scp /media/shengjie/other/Data/virtual_kitti_organized.tar zhusheng@cvl4.cse.msu.edu:/scratch1/zhusheng/
+
+tar -xvf virtual_kitti_organized.tar
+
+scp /media/shengjie/other/Data/kitti_style_real2virtual.tar zhusheng@cvl4.cse.msu.edu:/scratch1/zhusheng/
+
+tar -xvf kitti_style_real2virtual.tar
+
+--data_path /media/shengjie/other/Data/kitti_style_real2virtual --split kitti_real2syn --width 884 --height 268 --crop_width 848 --crop_height 256 --serial_batches --batch_size 1 --model_name cycleGan_kitti_real2syn --learning_rate 0.0002 --log_dir /media/shengjie/other/Depins/Depins/tmp
+
+
+CUDA_VISIBLE_DEVICES=0 python train_cycleGan.py --data_path /scratch1/zhusheng/kitti_style_real2virtual --split kitti_real2syn --width 884 --height 268 --crop_width 848 --crop_height 256 --serial_batches --batch_size 1 --model_name cycleGan_kitti_real2syn --learning_rate 0.0002 --log_dir /research/cvl-zhusheng/DepIns/tmp
+
+
+--dataA_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --dataB_path /media/shengjie/other/Data/virtual_kitti_organized --predDepth_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction --split sfnorm --width 848 --height 256 --serial_batches --batch_size 1 --model_name cycleGan_sfnorm --learning_rate 0.0002 --log_dir /media/shengjie/other/Depins/Depins/tmp
+
+--data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --save_dir /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth
+
+
+python export_gt_depth.py --data_path /scratch1/kitti_data --save_dir /scratch1/zhusheng/projected_groundtruth
+
+tar -czvf projected_groundtruth.tar projected_groundtruth
+
+--dataA_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --dataB_path /media/shengjie/other/Data/virtual_kitti_organized --predDepth_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction --split sfnorm --width 848 --height 256 --serial_batches --batch_size 1 --model_name cycleGan_sfnorm --learning_rate 0.0002 --log_dir /media/shengjie/other/Depins/Depins/tmp --gtDepth_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth
+
+scp zhusheng@cvl4.cse.msu.edu:/scratch1/zhusheng/projected_groundtruth.tar /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth.tar /media/shengjie/other
+
+
+scp /media/shengjie/other/Data/virtual_kitti_organized.tar zhusheng@cvl4.cse.msu.edu:/scratch1/zhusheng/
+
+CUDA_VISIBLE_DEVICES=1 python train_cycleGan_sfnorm.py --dataA_path /scratch1/kitti_data --dataB_path /scratch1/zhusheng/virtual_kitti_organized --predDepth_path /scratch1/zhusheng/monodepth2_depth_prediction --split sfnorm --width 848 --height 256 --serial_batches --batch_size 1 --model_name cycleGan_sfnorm --learning_rate 0.0002 --log_dir /research/cvl-zhusheng/DepIns/tmp --gtDepth_path /scratch1/zhusheng/projected_groundtruth
+
+
+tar -xvf virtual_kitti_organized.tar
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/cycleGan_sfnorm
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/SDNET/tmp_new
+
+--data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --split eigen
+
+
+--dataA_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --dataB_path /media/shengjie/other/Data/virtual_kitti_organized --predDepth_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction --split sfnorm --width 848 --height 256 --serial_batches --batch_size 1 --model_name cycleGan_sfnorm --learning_rate 0.0002 --log_dir /media/shengjie/other/Depins/Depins/tmp --gtDepth_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --num_workers 1
+
+CUDA_VISIBLE_DEVICES=1 python train_cycleGan_sfnorm.py --dataA_path /scratch1/kitti_data --dataB_path /scratch1/zhusheng/virtual_kitti_organized --predDepth_path /scratch1/zhusheng/monodepth2_depth_prediction --split sfnorm --width 848 --height 256 --batch_size 1 --model_name cycleGan_sfnorm2 --learning_rate 0.0002 --log_dir /research/cvl-zhusheng/DepIns/tmp --gtDepth_path /scratch1/zhusheng/projected_groundtruth
+
+--dataA_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --dataB_path /media/shengjie/other/Data/virtual_kitti_organized --predDepth_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction --split sfnorm --width 848 --height 256 --batch_size 1 --model_name cycleGan_sfnorm --learning_rate 0.0002 --log_dir /media/shengjie/other/Depins/Depins/tmp --gtDepth_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --num_workers 1
+
+CUDA_VISIBLE_DEVICES=2 python train_cycleGan_sfnorm.py --dataA_path /scratch1/kitti_data --dataB_path /scratch1/zhusheng/virtual_kitti_organized --predDepth_path /scratch1/zhusheng/monodepth2_depth_prediction --split sfnorm --width 848 --height 256 --batch_size 1 --model_name cycleGan_sfnorm_serial --learning_rate 0.0002 --log_dir /research/cvl-zhusheng/DepIns/tmp --gtDepth_path /scratch1/zhusheng/projected_groundtruth --serial_batches
+
+
+--model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm2 --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/sfnD_1/models/weights_0 --models_to_load encoder depth sfnD --save_frequency 1 --log_dir /media/shengjie/other/Depins/Depins/tmp --discrimScale 1e-2 --print_freq 1 --log_frequency 1 --lrD 2e-4
+
+
+scp /media/shengjie/other/Data/virtual_kitti_organized.tar zhusheng@cvl2.cse.msu.edu:/scratch1/zhusheng/
+
+
+CUDA_VISIBLE_DEVICES=0 python trainer_sfGan.py --model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm2 --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/sfnD_1/models/weights_0 --models_to_load encoder depth sfnD --save_frequency 1 --log_dir /media/shengjie/other/Depins/Depins/tmp 
+
+
+CUDA_VISIBLE_DEVICES=2 python trainer_sfGan.py --model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm2 --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 8 --log_dir /research/cvl-zhusheng/DepIns/tmp --discrimScale 1e-2 --lrD 2e-4
+
+CUDA_VISIBLE_DEVICES=1 python trainer_sfGan.py --model_name sfnD_1_bs --frame_ids 0 --use_stereo --split sfnorm2 --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 8 --log_dir /research/cvl-zhusheng/DepIns/tmp --discrimScale 0 --lrD 2e-4
+
+CUDA_VISIBLE_DEVICES=0 python trainer_sfGan.py --model_name sfnD_10 --frame_ids 0 --use_stereo --split sfnorm2 --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 7 --log_dir /research/cvl-zhusheng/DepIns/tmp --discrimScale 1e-1 --lrD 2e-4
+
+
+CUDA_VISIBLE_DEVICES=1 python trainer_sfGan.py --model_name sfnD_2 --frame_ids 0 --use_stereo --split sfnorm2 --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 8 --log_dir /research/cvl-zhusheng/DepIns/tmp --discrimScale 2e-1 --lrD 2e-4
+
+CUDA_VISIBLE_DEVICES=1 python trainer_sfGan.py --model_name sfnD_05_finetune --frame_ids 0 --use_stereo --split sfnorm2 --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 8 --log_dir /research/cvl-zhusheng/DepIns/tmp --discrimScale 5e-3 --lrD 2e-4 --learning_rate 1e-5 --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth
+
+cvl3.cse.msu.edu:8100/
+
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/sfnD_10 --port 2001
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/sfnD_1 --port 2002
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/sfnD_1_bs --port 2003
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/sfnD_2 --port 2004
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/sfnD_05 --port 2004
+
+
+
+scp -r /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp
+
+
+python train_classification.py --dataset <dataset path> --nepoch=<number epochs> --dataset_type <modelnet40 | shapenet>
+
+--dataset /media/shengjie/other/Depins/pointnet.pytorch/shapenetcore_partanno_segmentation_benchmark_v0 --nepoch=20 --dataset_type shapenet
+
+python train_segmentation.py --dataset <dataset path> --nepoch=<number epochs
+
+--dataset /media/shengjie/other/Depins/pointnet.pytorch/shapenetcore_partanno_segmentation_benchmark_v0 --nepoch=20
+
+
+--model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm2 --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/sfnD_1/models/weights_0 --models_to_load encoder depth sfnD --save_frequency 1 --log_dir /media/shengjie/other/Depins/Depins/tmp --discrimScale 1e-2 --print_freq 1 --log_frequency 1 --lrD 2e-4
+
+--model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 1 --discrimScale 1e-2 --print_freq 1 --log_frequency 1 --lrD 2e-4 --script_name trainer_ptnGan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --loadVelo --doVisualization --num_epochs 1
+
+--syn_root /media/shengjie/other/Data/virtual_kitti_organized
+
+
+CUDA_VISIBLE_DEVICES=0 python convert_synSemantic.py --syn_root /scratch1/zhusheng/virtual_kitti_organized
+
+
+scp /media/shengjie/other/Downloads/01_06_20_boyneMountain.jpg zhusheng@cvl1.cse.msu.edu:/research/liuxm/web/cvlab-website/content/images/labfun
+
+/research/liuxm/web/cvlab-website/content/images/labfun
+
+--eval_stereo --split eigen --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.107  &   0.851  &   4.776  &   0.202  &   0.873  &   0.953  &   0.977  \\
+
+
+--model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --loadVelo --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 1e-4 --log_frequency 5
+
+python3 -m tensorboard.main --logdir=/media/shengjie/other/Depins/Depins/tmp/sfnD_1/train
+
+
+
+--model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 3 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 1e-4 --log_frequency 50 --noShuffle
+
+
+CUDA_VISIBLE_DEVICES=1 python trainer_ptnGan.py --model_name pts2e6 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 1e-5 --log_frequency 50
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/pts2e6/train --port 7006
+
+
+CUDA_VISIBLE_DEVICES=2 python trainer_ptnGan.py --model_name pts2e7d1e6 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 1e-6 --log_frequency 50
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/pts2e7d1e6/train --port 7007
+
+
+CUDA_VISIBLE_DEVICES=0 python trainer_ptnGan.py --model_name true_pts2e7d1e6 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-7 --discrimScale 1e-6 --log_frequency 50
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/true_pts2e7d1e6/train --port 7008
+
+CUDA_VISIBLE_DEVICES=1 python trainer_ptnGan.py --model_name true_pts2e8d1e7 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-8 --discrimScale 1e-7 --log_frequency 50 --save_frequency 500
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/true_pts2e8d1e7/train --port 7009
+
+CUDA_VISIBLE_DEVICES=2 python trainer_ptnGan.py --model_name true_pts2e8d1e7_bs --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-8 --discrimScale 0 --log_frequency 50 --save_frequency 500
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/true_pts2e8d1e7_bs/train --port 7010
+
+CUDA_VISIBLE_DEVICES=2 python trainer_ptnGan.py --model_name true_pts2e7d1e6 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-7 --discrimScale 1e-6 --log_frequency 50 --save_frequency 500
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/true_pts2e7d1e6/train --port 7011
+
+
+CUDA_VISIBLE_DEVICES=2 python trainer_ptnGan.py --model_name true_pts2e6d1e5 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-6 --discrimScale 1e-5 --log_frequency 50 --save_frequency 500
+
+--model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 3 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 1e-4 --log_frequency 50 --save_frequency 500
+
+
+
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/true_pts2e8d1e7 /media/shengjie/other/Depins/Depins/tmp
+
+
+--script_name visualize_ptnGan.py --model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 1 --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 1e-4 --log_frequency 50 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/true_pts2e7d1e6/models/weights_step7499 --noShuffle
+
+--script_name visualize_ptnGan.py --model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 1 --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 1e-4 --log_frequency 50 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/true_pts2e8d1e7/models/weights_step7499 --noShuffle
+
+--script_name visualize_ptnGan.py --model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 1 --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 1e-4 --log_frequency 50 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/true_pts2e8d1e7_bs/models/weights_step7499 --noShuffle
+
+
+CUDA_VISIBLE_DEVICES=2 python trainer_ptnGan.py --model_name true_pts2e6d1e4 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-6 --discrimScale 1e-4 --log_frequency 50 --save_frequency 500
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/true_pts2e6d1e4/train --port 7012
+
+--model_name sfnD_1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 3 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 1e-4 --log_frequency 50 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/sfnD_1/models/weights_0
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 3 --save_frequency 500000000 --script_name trainer_ptnGan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --noShuffle
+python3 -m tensorboard.main --logdir=/media/shengjie/other/Depins/Depins/tmp/local_test1 --port 7012
+
+
+
+CUDA_VISIBLE_DEVICES=2 python trainer_ptnGan.py --model_name poleOnly2e61e4 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-6 --discrimScale 1e-4 --log_frequency 50 --save_frequency 10000
+-------------------------------------------------------------------------------------------------------------------------
+CUDA_VISIBLE_DEVICES=2 python trainer_ptnGan.py --model_name poleOnly2e71e5 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-7 --discrimScale 1e-5 --log_frequency 50 --save_frequency 10000
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/poleOnly2e71e5 --port 7012
+
+CUDA_VISIBLE_DEVICES=3 python trainer_ptnGan.py --model_name poleOnly2e61e5 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-6 --discrimScale 1e-5 --log_frequency 50 --save_frequency 10000
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/poleOnly2e61e5 --port 7013
+
+CUDA_VISIBLE_DEVICES=4 python trainer_ptnGan.py --model_name poleOnly2e81e5 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-8 --discrimScale 1e-5 --log_frequency 50 --save_frequency 10000
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/poleOnly2e81e5 --port 7014
+
+
+CUDA_VISIBLE_DEVICES=2 python trainer_ptnGan.py --model_name poleOnlybs --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-8 --discrimScale 0 --log_frequency 50 --save_frequency 10000
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/poleOnlybs --port 7015
+
+
+
+CUDA_VISIBLE_DEVICES=3 python trainer_ptnGan.py --model_name poleOnly2e61e6 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-6 --discrimScale 1e-6 --log_frequency 50 --save_frequency 10000
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/poleOnly2e61e6 --port 7016
+
+
+CUDA_VISIBLE_DEVICES=1 python trainer_ptnGan.py --model_name poleOnly2e61e7 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-6 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/poleOnly2e61e6 --port 7017
+
+CUDA_VISIBLE_DEVICES=1 python trainer_ptnGan.py --model_name poleOnlyBs --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_ptnGan.py --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --discriminator_pretrain_round 50 --print_freq 10 --lrD 2e-5 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/poleOnlyBs --port 7000
+
+
+
+
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 3 --save_frequency 500000000 --script_name trainer_ptnGan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --noShuffle
+
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 3 --save_frequency 500000000 --script_name trainer_pts3d_segmentation.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --noShuffle
+
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 3 --save_frequency 500000000 --script_name trainer_pts2pts.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 20 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction
+
+
+
+CUDA_VISIBLE_DEVICES=2 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --print_freq 10 --lrD 2e-5 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test --port 7000
+
+
+CUDA_VISIBLE_DEVICES=3 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_850 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --noShuffle --num_epochs 10 --print_freq 10 --lrD 2e-5 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_850 --port 7001
+
+CUDA_VISIBLE_DEVICES=2 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --print_freq 10 --lrD 2e-5 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+
+CUDA_VISIBLE_DEVICES=2 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test2 --frame_ids 0 --use_stereo --split sfnorm_pole --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --print_freq 10 --lrD 2e-5 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test2 --port 7002
+
+CUDA_VISIBLE_DEVICES=3 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test3 --frame_ids 0 --use_stereo --split sfnorm_pole --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-4 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test3 --port 7003
+
+
+CUDA_VISIBLE_DEVICES=4 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test4 --frame_ids 0 --use_stereo --split sfnorm_pole --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-4 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test4 --port 7004
+
+CUDA_VISIBLE_DEVICES=3 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test5 --frame_ids 0 --use_stereo --split sfnorm_pole --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-4 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test5 --port 7005
+
+scp /media/shengjie/other/Data/virtual_kitti_organized.tar zhusheng@cvl2.cse.msu.edu:/scratch1/zhusheng/
+
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test6 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-4 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test6 --port 7006
+
+CUDA_VISIBLE_DEVICES=1 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test7 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-4 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test7 --port 7007
+
+
+CUDA_VISIBLE_DEVICES=1 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test7 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-4 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test7 --port 7007
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name trainer_pts2pts.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction
+
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test8 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-4 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test8 --port 7008
+
+CUDA_VISIBLE_DEVICES=1 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test9 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-4 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test9 --port 7009
+
+
+CUDA_VISIBLE_DEVICES=2 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test10 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test10 --port 7010
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test11 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test11 --port 7011
+
+CUDA_VISIBLE_DEVICES=2 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test12 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test12 --port 7012
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test13 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test13 --port 7013
+
+
+CUDA_VISIBLE_DEVICES=1 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test14 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test14 --port 7014
+
+CUDA_VISIBLE_DEVICES=2 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test15 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test15 --port 7015
+
+CUDA_VISIBLE_DEVICES=1 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test16 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test16 --port 7016
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test17 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test17 --port 7017
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test18 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test18 --port 7018
+
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test19 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test19 --port 7019
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test20 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test20 --port 7020
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test21 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 4 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test21 --port 7021
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test22 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 3 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test22 --port 7022
+
+CUDA_VISIBLE_DEVICES=1 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test23 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 3 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000 --noShuffle
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test23 --port 7023
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test24 --frame_ids 0 --use_stereo --split sfnorm_pole --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 3 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test24 --port 7024
+
+CUDA_VISIBLE_DEVICES=1 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test25 --frame_ids 0 --use_stereo --split sfnorm_pole --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 3 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 500000 --discrimScale 1e-7 --log_frequency 50 --save_frequency 10000
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test25 --port 7025
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name trainer_pts2pts.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name trainer_pts2pts.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/local_test1/models/weights_step0 --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction
+
+
+CUDA_VISIBLE_DEVICES=2 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test26 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 3 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 1 --discrimScale 1e-7 --log_frequency 50 --save_frequency 1
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test26 --port 7026
+
+CUDA_VISIBLE_DEVICES=2 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test27 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 4 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 1 --discrimScale 1e-7 --log_frequency 50 --save_frequency 1
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test27 --port 7027
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test28 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 4 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 1 --discrimScale 1e-7 --log_frequency 50 --save_frequency 1
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test28 --port 7028
+
+
+CUDA_VISIBLE_DEVICES=1 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test29 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 4 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 1 --discrimScale 1e-7 --log_frequency 50 --save_frequency 1
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test29 --port 7029
+
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name visualize_discriminator.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/local_test1/models/weights_step0 --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction
+
+
+CUDA_VISIBLE_DEVICES=1 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test30 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 4 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 1 --discrimScale 1e-7 --log_frequency 50 --save_frequency 1
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test30 --port 7030
+
+CUDA_VISIBLE_DEVICES=1 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test31 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 4 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 1 --discrimScale 1e-7 --log_frequency 50 --save_frequency 1
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test31 --port 7031
+
+CUDA_VISIBLE_DEVICES=1 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test32 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 4 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 1 --discrimScale 1e-7 --log_frequency 50 --save_frequency 1
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test32 --port 7032
+
+http://archive.ics.uci.edu/ml/datasets/Online+News+Popularity
+
+
+
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test32 /media/shengjie/other/Depins/Depins/tmp
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair_idt --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 1 --script_name visualize_discriminator.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/discriminaotr_test32/models/weights_step21280/ --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 5 --save_frequency 500000000 --script_name trainer_pts2pts.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/discriminaotr_test32/models/weights_step21280/ --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction
+
+
+
+
+CUDA_VISIBLE_DEVICES=0 python trainer_pts2pts.py --script_name trainer_pts2pts.py --model_name discriminaotr_test34 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 4 --log_dir /research/cvl-zhusheng/DepIns/tmp --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --num_epochs 100 --print_freq 10 --lrD 2e-3 --discriminator_pretrain_round 1 --discrimScale 1e-7 --log_frequency 100 --save_frequency 1
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test34 --port 7034
+
+tensor([[0.4785],
+        [0.4794],
+        [0.4803],
+        [0.4800],
+        [0.4755]], device='cuda:0', grad_fn=<SigmoidBackward>)
+tensor([[3.8498e-12],
+        [1.9755e-01],
+        [9.9986e-01],
+        [9.9986e-01],
+        [9.9986e-01]], device='cuda:0', grad_fn=<SigmoidBackward>)
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 5 --save_frequency 500000000 --script_name trainer_pts2pts.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 5 --save_frequency 500000000 --script_name visualize_discriminator.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/discriminaotr_test32/models/weights_step21280/ --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 1 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction
+
+
+
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test34 /media/shengjie/other/Depins/Depins/tmp
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 5 --save_frequency 500000000 --script_name visualize_discriminator.py --log_dir /media/shengjie/other/Depins/Depins/tmp --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/discriminaotr_test34/models/weights_step14098 --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 1 --lrD 0 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pole_shuffle --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 5 --save_frequency 500000000 --script_name trainer_oview_gan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction
+
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name trainer_oview_gan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --models_to_load encoder depth
+
+
+scp zhusheng@cvl1.cse.msu.edu:/usr/bin/g++ /media/shengjie/other
+scp /media/shengjie/other/g++ zhusheng@cvl2.cse.msu.edu:/usr/bin
+
+ln -s /usr/bin/g++-9 /usr/bin/g++
+
+grep -r sigmoid_cuda_forward extension-cpp/
+
+CUDA_VISIBLE_DEVICES=7 python benchmark.py cuda --cuda
+
+build_directory = '/research/cvl-zhusheng/extension-cpp/cpp'
+
+
+CUDA_VISIBLE_DEVICES=7 python grad_check.py cuda --cuda
+
+
+
+
+scp -r /media/shengjie/other/sceneUnderstanding/bnmorph zhusheng@cvl1.cse.msu.edu:/research/cvl-zhusheng
+
+scl enable devtoolset-3 tcsh 
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name ppir_test.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --models_to_load encoder depth
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --models_to_load encoder depth
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 960 --height 288 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 5 --save_frequency 500000000 --script_name trainer_oview_gan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/SDNET_bst --models_to_load encoder depth --num_layers 50
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 10 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --predDepthPath /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/monodepth2_prediction --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --models_to_load encoder depth
+
+
+--model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --models_to_load encoder depth --oRenderFolder /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/rendered_oview
+
+CUDA_VISIBLE_DEVICES=1 python epipolar_rendering_test.py --model_name local_test1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --oRenderFolder /scratch1/zhusheng/oviewRender
+
+
+--model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --models_to_load encoder depth --oRenderFolder /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/rendered_oview
+
+
+python3 -m tensorboard.main --logdir=/media/shengjie/other/Depins/Depins/tmp/oview_iterate/train --port 7028
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/discriminaotr_test29 --port 7029
+
+--model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --models_to_load encoder depth --epplr 1e-6 --eppsm 20
+
+
+CUDA_VISIBLE_DEVICES=1 python epipolar_rendering_test.py --model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/oview_iterate --port 7030
+
+CUDA_VISIBLE_DEVICES=1 python epipolar_rendering_test.py --model_name oview_iteratel1 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/oview_iteratel1 --port 7031
+
+CUDA_VISIBLE_DEVICES=2 python epipolar_rendering_test.py --model_name oview_iteratel11e5sm40 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/oview_iteratel11e5sm40 --port 7032
+
+CUDA_VISIBLE_DEVICES=1 python epipolar_rendering_test.py --model_name oview_iteratel11e6sm40 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --epplr 1e-6 --eppsm 40
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/oview_iteratel11e6sm40 --port 7033
+
+CUDA_VISIBLE_DEVICES=2 python epipolar_rendering_test.py --model_name oview_iteratel11e6sm50 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --epplr 1e-6 --eppsm 50
+
+
+CUDA_VISIBLE_DEVICES=3 python epipolar_rendering_test.py --model_name oview_iteratel11e6sm70 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --epplr 1e-6 --eppsm 70
+
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/oview_iteratel11e6sm40 --port 7034
+
+--model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --models_to_load encoder depth --epplr 1e-3 --eppsm 20
+
+
+
+CUDA_VISIBLE_DEVICES=3 python epipolar_rendering_test.py --model_name oit1e3_30 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --epplr 1e-3 --eppsm 30
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/oit1e3_30 --port 7100
+
+CUDA_VISIBLE_DEVICES=2 python epipolar_rendering_test.py --model_name oit1e4_40 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --epplr 1e-4 --eppsm 40
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/oit1e4_40 --port 7101
+
+CUDA_VISIBLE_DEVICES=1 python epipolar_rendering_test.py --model_name oit1e5_40 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --epplr 1e-5 --eppsm 40
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/oit1e5_40 --port 7102
+
+
+
+
+CUDA_VISIBLE_DEVICES=1 python epipolar_rendering_test.py --model_name oit1e3_30_2 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --epplr 1e-3 --eppsm 30
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/oit1e3_30_2 --port 7103
+
+
+CUDA_VISIBLE_DEVICES=1 python epipolar_rendering_test.py --model_name oit1e3_30_3 --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /scratch1/kitti_data --width 1024 --height 320 --png --gtDepthRoot /scratch1/zhusheng/projected_groundtruth --synRoot /scratch1/zhusheng/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /research/cvl-zhusheng/DepIns/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/stereo_1024x320 --models_to_load encoder depth --epplr 1e-3 --eppsm 30
+python3 -m tensorboard.main --logdir=/research/cvl-zhusheng/DepIns/tmp/oit1e3_30_3 --port 7104
+
+
+--model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --models_to_load encoder depth --epplr 1e-3 --eppsm 10
+
+
+--model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test_gan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --noShuffle --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --models_to_load encoder depth --epplr 1e-3 --eppsm 10
+
+
+
+--model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name epipolar_rendering_test_gan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --discrimScale 0 --log_frequency 10 --noShuffle --num_workers 1 --epplr 1e-5 --eppsm 10 --learning_rate 1e-5
+
+--model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test_gan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --discrimScale 0 --log_frequency 10 --noShuffle --num_workers 1 --epplr 1e-3 --eppsm 10 --learning_rate 1e-3
+
+python3 -m tensorboard.main --logdir=/media/shengjie/other/Depins/Depins/tmp/oview_iterate --port 7102
+
+
+--model_name birderMerge --frame_ids 0 --use_stereo --split visualize_split --log_dir tmp --dataset kitti --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --switchMode off --png --selfocclu --load_weights_folder /media/shengjie/other/sceneUnderstanding/SDNET/tmp/fintune_resnet50_eigen_full/models/weights_3 --use_kitti_gt_semantics --batch_size 1 --val_frequency 1 --writeImg --num_epochs 81 --save_frequency 80 --learning_rate 1e-4 --eval_stereo --is_predicted_semantics --num_layers 50
+
+scl enable devtoolset-3 tcsh 
+
+--model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name epipolar_rendering_test_gan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --discrimScale 0 --log_frequency 10 --noShuffle --num_workers 1 --epplr 1e-3 --eppsm 10 --learning_rate 1e-3
+
+
+--model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --script_name epipolar_rendering_test_gan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --discrimScale 0 --log_frequency 10 --noShuffle --num_workers 1 --epplr 1e-3 --eppsm 10 --learning_rate 1e-3
+
+--model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 256 --height 80 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --script_name epipolar_rendering_test_gan.py --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --discrimScale 0 --log_frequency 10 --noShuffle --num_workers 1 --epplr 1e-3 --eppsm 5 --learning_rate 1e-3
+
+--script_name epplCpuTest.py --model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --lrD 2e-6 --discrimScale 0 --log_frequency 10 --load_weights_folder /media/shengjie/other/Depins/Depins/tmp/mono+stereo_1024x320 --models_to_load encoder depth --epplr 1e-3 --eppsm 10
+
+--script_name epplGpuTest.py --model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 256 --height 80 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --discrimScale 0 --log_frequency 10 --noShuffle --num_workers 1 --epplr 1e-3 --eppsm 5 --learning_rate 1e-3
+
+--script_name epplGpuTest.py --model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 10 --num_workers 1 --eppsm 20 --epplr 1e-4 --learning_rate 1e-4 --noShuffle

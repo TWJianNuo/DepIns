@@ -175,6 +175,7 @@ class EpplRender(nn.Module):
 
         self.lr = lr
 
+        self.epplf = EPPLFunction.apply
     def get_camtrail(self, extrinsic, intrinsic):
         ws = 3
         y = 10
@@ -204,17 +205,18 @@ class EpplRender(nn.Module):
 
 
     def cvtCamtrail2Extrsic(self, camtrail, campos, viewbias, camdir, extrinsic):
-        diffvec = (campos + viewbias).unsqueeze(1).expand(self.batch_size, self.sampleNum * 2, 4, -1) - camtrail
+        sampleNum = camtrail.shape[1]
+        diffvec = (campos + viewbias).unsqueeze(1).expand(self.batch_size, sampleNum, 4, -1) - camtrail
         diffvec = diffvec / torch.norm(diffvec, dim=[2, 3], keepdim=True)
 
         diffvece = diffvec[:,:,0:3,0]
-        camdire = camdir.unsqueeze(1).expand(-1, self.sampleNum * 2, -1, -1)[:,:,0:3,0]
+        camdire = camdir.unsqueeze(1).expand(-1, sampleNum, -1, -1)[:,:,0:3,0]
 
         v = torch.cross(camdire, diffvece, dim=2)
         s = torch.norm(v, dim=2, keepdim=True)
         c = torch.sum(camdire * diffvece, dim=2, keepdim=True)
 
-        V = torch.zeros([self.batch_size, self.sampleNum * 2, 3, 3], dtype=torch.float32, device=torch.device("cuda"))
+        V = torch.zeros([self.batch_size, sampleNum, 3, 3], dtype=torch.float32, device=torch.device("cuda"))
         V[:, :, 0, 1] = -v[:, :, 2]
         V[:, :, 0, 2] = v[:, :, 1]
         V[:, :, 1, 0] = v[:, :, 2]
@@ -223,13 +225,13 @@ class EpplRender(nn.Module):
         V[:, :, 2, 1] = v[:, :, 0]
 
         ce = c.unsqueeze(3).expand(-1,-1,3,3)
-        R = torch.eye(3).view(1, 1, 3, 3).expand([self.batch_size, self.sampleNum * 2, -1, -1]).cuda() + V + V @ V * (1 / (1 + ce))
+        R = torch.eye(3).view(1, 1, 3, 3).expand([self.batch_size, sampleNum, -1, -1]).cuda() + V + V @ V * (1 / (1 + ce))
 
 
-        r_ex = torch.transpose(R @ torch.transpose(extrinsic[:,0:3,0:3], 1, 2).unsqueeze(1).expand([-1, self.sampleNum * 2, -1, -1]), 2, 3)
+        r_ex = torch.transpose(R @ torch.transpose(extrinsic[:,0:3,0:3], 1, 2).unsqueeze(1).expand([-1, sampleNum, -1, -1]), 2, 3)
         t_ex = - r_ex @ camtrail[:,:,0:3,:]
         nextrinsic = torch.cat([r_ex, t_ex], dim=3)
-        addr = torch.from_numpy(np.array([[[0,0,0,1]]], dtype=np.float32)).unsqueeze(2).expand(self.batch_size, self.sampleNum * 2, -1, -1).cuda()
+        addr = torch.from_numpy(np.array([[[0,0,0,1]]], dtype=np.float32)).unsqueeze(2).expand(self.batch_size, sampleNum, -1, -1).cuda()
         nextrinsic = torch.cat([nextrinsic, addr], dim=2)
 
         return nextrinsic
@@ -283,11 +285,12 @@ class EpplRender(nn.Module):
         self.eng.quiver3(draw_campos[0], draw_campos[1], draw_campos[2], draw_camdir[0], draw_camdir[1], draw_camdir[2], nargout=0)
 
     def proj2de(self, pts3d, intrinsic, nextrinsic, addmask = None):
-        intrinsice = intrinsic.unsqueeze(1).expand(-1, self.sampleNum * 2, -1, -1)
+        sampleNum = nextrinsic.shape[1]
+        intrinsice = intrinsic.unsqueeze(1).expand(-1, sampleNum, -1, -1)
         camKs = intrinsice @ nextrinsic
 
-        camKs_e = camKs.view(self.batch_size, self.sampleNum * 2, 1, 1, 4, 4).expand(-1, -1, self.height, self.width, -1, -1)
-        pts3d_e = pts3d.permute([0,2,3,1]).unsqueeze(4).unsqueeze(1).expand([-1,self.sampleNum * 2, -1, -1, -1, -1])
+        camKs_e = camKs.view(self.batch_size, sampleNum, 1, 1, 4, 4).expand(-1, -1, self.height, self.width, -1, -1)
+        pts3d_e = pts3d.permute([0,2,3,1]).unsqueeze(4).unsqueeze(1).expand([-1,sampleNum, -1, -1, -1, -1])
         projected3d = torch.matmul(camKs_e, pts3d_e).squeeze(5).permute(0, 1, 4, 2, 3)
 
         projecteddepth = projected3d[:, :, 2, :, :] + self.eps
@@ -298,7 +301,7 @@ class EpplRender(nn.Module):
         projecteddepth = projecteddepth.unsqueeze(2)
 
         if addmask is not None:
-            selector = selector * addmask.unsqueeze(1).expand([-1, self.sampleNum * 2, -1, -1 , -1])
+            selector = selector * addmask.unsqueeze(1).expand([-1, sampleNum, -1, -1 , -1])
         return projected2d, projecteddepth, selector
 
     def visualize2d_e(self, projected2d, projecteddepth, pvpts = None, selector = None):
@@ -476,16 +479,17 @@ class EpplRender(nn.Module):
         rimg_t = torch.from_numpy(rimg).unsqueeze(2)
         bz = 0
         imgt = list()
-        for i in list(np.linspace(0,self.sampleNum -1 ,4).astype(np.int)):
+        for i in list(np.linspace(0,rimg.shape[1] -1 ,4).astype(np.int)):
         # for i in list(np.linspace(0,self.sampleNum -1 ,self.sampleNum).astype(np.int)):
             imgt.append(np.array(tensor2disp(rimg_t[bz], vmax=vmax, ind=i)))
         return pil.fromarray(np.concatenate(imgt, axis=0))
 
-    def grad_check(self, depthmap, semanticmap, intrinsic, extrinsic):
+    def grad_check(self, depthmap, semanticmap, intrinsic, extrinsic, camIndex):
         # Compute Mask
         addmask = self.post_mask(depthmap = depthmap, semanticmap = semanticmap)
         # Generate Camera Track
         camtrail, campos, viewbias, camdir = self.get_camtrail(extrinsic, intrinsic)
+        camtrail = camtrail[:, camIndex, :, :]
         nextrinsic = self.cvtCamtrail2Extrsic(camtrail, campos, viewbias, camdir, extrinsic)
         invcamK = torch.inverse(intrinsic @ extrinsic)
         epipoLine, Pcombined = self.get_eppl(intrinsic=intrinsic, extrinsic=extrinsic, nextrinsic=nextrinsic)
@@ -498,14 +502,36 @@ class EpplRender(nn.Module):
         # rimg_gt, grad2d, _, depthmapnp_grad = eppl_render_l2(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
 
         # Grad Check
-        from torch.autograd import gradcheck
-        epplfck = EPPLFunctionExam.apply
-        depthmapns = depthmap + torch.randn(depthmap.shape, device=torch.device("cuda")) * 1e-2
-        depthmapns = nn.Parameter(depthmapns, requires_grad=True)
-        pts3dns = self.bck(predDepth=depthmapns, invcamK=invcamK)
-        projected2dns, _, selectorns = self.proj2de(pts3d=pts3dns, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask=addmask)
-        input = (depthmap, depthmapns, inv_r_sigma, projected2d, projected2dns, selector, selectorns, Pcombined, self.kws, self.sr)
-        gradcheck(epplfck, input, eps=1e-3, atol=1e-3, raise_exception=True)
+        # from torch.autograd import gradcheck
+        # epplfck = EPPLFunctionExam.apply
+        # depthmapns = depthmap + torch.randn(depthmap.shape, device=torch.device("cuda")) * 1e-2
+        # depthmapns = nn.Parameter(depthmapns, requires_grad=True)
+        # pts3dns = self.bck(predDepth=depthmapns, invcamK=invcamK)
+        # projected2dns, _, selectorns = self.proj2de(pts3d=pts3dns, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask=addmask)
+        # input = (depthmap, depthmapns, inv_r_sigma, projected2d, projected2dns, selector, selectorns, Pcombined, self.kws, self.sr)
+        # gradcheck(epplfck, input, eps=1e-3, atol=1e-3, raise_exception=True)
+
+        epplf = EPPLFunction.apply
+        rimg = epplf(depthmap, inv_r_sigma, projected2d, selector, Pcombined, self.kws, self.sr)
+        ns = torch.randn(depthmap.shape, device=torch.device("cuda")) * 1e0
+        ns = nn.Parameter(ns, requires_grad=True)
+        opts = torch.optim.Adam([ns], lr=1e-2)
+        imggt = self.show_rendered_eppl(rimg.cpu().numpy())
+        lossrec = list()
+        for i in range(1000):
+            depthmap_ns = depthmap + ns
+            pts3d_ns = self.bck(predDepth=depthmap_ns, invcamK=invcamK)
+            projected2d_ns, projecteddepth_ns, selector_ns = self.proj2de(pts3d=pts3d_ns, intrinsic=intrinsic,
+                                                                          nextrinsic=nextrinsic, addmask=addmask)
+            rimg_ns = epplf(depthmap_ns, inv_r_sigma, projected2d_ns, selector_ns, Pcombined, self.kws, self.sr)
+
+            loss = torch.sum(torch.abs(rimg - rimg_ns))
+            opts.zero_grad()
+            loss.backward()
+            opts.step()
+            print(loss)
+
+
 
         # Visualization
         epplf = EPPLFunction.apply
@@ -527,24 +553,26 @@ class EpplRender(nn.Module):
             opts.step()
             print(loss)
 
-            vmax = 0.08
-            bz = 0
-            imgt = list()
-            for j in list(np.linspace(0, self.sampleNum - 1, 4).astype(np.int)):
-                imgt.append(np.array(tensor2disp(rimg_ns[bz].unsqueeze(1), vmax=vmax, ind=j)))
-            imgt = pil.fromarray(np.concatenate(imgt, axis=0))
-            imgt = pil.fromarray(np.concatenate([np.array(imggt), np.array(imgt)], axis=1)).save(os.path.join('/media/shengjie/other/Depins/Depins/visualization/oview_iterate/it_40_torch', str(i) + '.png'))
+            # vmax = 0.08
+            # bz = 0
+            # imgt = list()
+            # for j in list(np.linspace(0, len(camIndex) - 1, 4).astype(np.int)):
+            #     imgt.append(np.array(tensor2disp(rimg_ns[bz].unsqueeze(1), vmax=vmax, ind=j)))
+            # imgt = pil.fromarray(np.concatenate(imgt, axis=0))
+            # imgt = pil.fromarray(np.concatenate([np.array(imggt), np.array(imgt)], axis=1)).save(os.path.join('/media/shengjie/other/Depins/Depins/visualization/oview_iterate/it_40_torch_indexed', str(i) + '.png'))
 
         depthmap_ns = depthmap + torch.randn(depthmap.shape, device=torch.device("cuda")) * 1e-1
         pts3d_ns = self.bck(predDepth=depthmap_ns, invcamK=invcamK)
         projected2d_ns, projecteddepth_ns, selector_ns = self.proj2de(pts3d=pts3d_ns, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask = addmask)
         rimg_ns, grad2d_ns, _, depthmapnp_grad = eppl_render_l1(inv_sigmaM=inv_r_sigma.detach().cpu().numpy(), pts2d=projected2d_ns.permute([0,1,3,4,2]).detach().cpu().numpy(), mask = selector_ns.detach().cpu().numpy(), Pcombinednp = Pcombined.cpu().numpy(), depthmapnp = depthmap_ns.cpu().numpy(), rimg_gt = rimg_gt, kws = self.kws, sr = self.sr, bs = self.batch_size, samplesz = self.sampleNum * 2, height = self.height, width = self.width)
 
-    def forward(self, depthmap, semanticmap, intrinsic, extrinsic):
+    def forward(self, depthmap, semanticmap, intrinsic, extrinsic, camIndex):
         # Compute Mask
         addmask = self.post_mask(depthmap = depthmap, semanticmap = semanticmap)
+
         # Generate Camera Track
         camtrail, campos, viewbias, camdir = self.get_camtrail(extrinsic, intrinsic)
+        camtrail = camtrail[:,camIndex,:,:]
         nextrinsic = self.cvtCamtrail2Extrsic(camtrail, campos, viewbias, camdir, extrinsic)
         invcamK = torch.inverse(intrinsic @ extrinsic)
         epipoLine, Pcombined = self.get_eppl(intrinsic=intrinsic, extrinsic=extrinsic, nextrinsic=nextrinsic)
@@ -553,10 +581,10 @@ class EpplRender(nn.Module):
         # Compute GT Mask
         pts3d = self.bck(predDepth=depthmap, invcamK=invcamK)
         projected2d, projecteddepth, selector = self.proj2de(pts3d=pts3d, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask = addmask)
-        epplf = EPPLFunction.apply
-        rimg = epplf(depthmap, inv_r_sigma, projected2d, selector, Pcombined, self.kws, self.sr)
+        rimg = self.epplf(depthmap, inv_r_sigma, projected2d, selector, Pcombined, self.kws, self.sr)
 
-        return rimg
+        # tensor2disp(rimg[:,0:1,:,:], vmax=0.04, ind = 0).show()
+        return rimg, inv_r_sigma, Pcombined
 
     def erpipolar_rendering_test(self, depthmap, semanticmap, intrinsic, extrinsic):
         # Compute Mask
@@ -658,22 +686,24 @@ class EpplRender(nn.Module):
         return projected2d
 
     def get_eppl(self, intrinsic, extrinsic, nextrinsic):
+        sampleNum = nextrinsic.shape[1]
         intrinsic_44, added_extrinsic = self.org_intrinsic(intrinsic)
-        intrinsic_44e = intrinsic_44.unsqueeze(1).expand([-1, self.sampleNum * 2, -1, -1])
-        added_extrinsice = added_extrinsic.unsqueeze(1).expand([-1, self.sampleNum * 2, -1, -1])
-        extrinsice = extrinsic.unsqueeze(1).expand([-1, self.sampleNum * 2, -1, -1])
+        intrinsic_44e = intrinsic_44.unsqueeze(1).expand([-1, sampleNum, -1, -1])
+        added_extrinsice = added_extrinsic.unsqueeze(1).expand([-1, sampleNum, -1, -1])
+        extrinsice = extrinsic.unsqueeze(1).expand([-1, sampleNum, -1, -1])
         extrinsic_old = added_extrinsice @ extrinsice
         extrinsic_new = added_extrinsice @ nextrinsic
 
         Pold = intrinsic_44e @ extrinsic_old
         Pnew = intrinsic_44e @ extrinsic_new
-        Cold = torch.inverse(Pold) @ torch.tensor([0, 0, 0, 1]).view(1, 1, 4, 1).expand([self.batch_size, self.sampleNum * 2, -1, -1]).float().cuda()
+        Cold = torch.inverse(Pold) @ torch.tensor([0, 0, 0, 1]).view(1, 1, 4, 1).expand([self.batch_size, sampleNum, -1, -1]).float().cuda()
         Pcombined = Pnew @ torch.inverse(Pold)
 
-        rand_dmap = torch.rand([self.batch_size, 1, 1, self.height, self.width]).expand([-1, self.sampleNum * 2, -1, -1, -1]).cuda() + 2
-        xxe = self.xx.unsqueeze(1).expand([-1, self.sampleNum * 2, -1, -1, -1])
-        yye = self.yy.unsqueeze(1).expand([-1, self.sampleNum * 2, -1, -1, -1])
-        onese = self.ones.unsqueeze(1).expand([-1, self.sampleNum * 2, -1, -1, -1])
+        xxe = self.xx.unsqueeze(1).expand([-1, sampleNum, -1, -1, -1])
+        yye = self.yy.unsqueeze(1).expand([-1, sampleNum, -1, -1, -1])
+        onese = self.ones.unsqueeze(1).expand([-1, sampleNum, -1, -1, -1])
+        torch.random.manual_seed(200)
+        rand_dmap = torch.rand([self.batch_size, 1, 1, self.height, self.width]).expand([-1, sampleNum, -1, -1, -1]).cuda() + 2
         randx = torch.cat([xxe * rand_dmap, yye * rand_dmap, rand_dmap, onese], dim=2)
 
         Cold_new = Pnew @ Cold
@@ -682,18 +712,18 @@ class EpplRender(nn.Module):
         Cold_new[:, :, 1, :] = Cold_new[:, :, 1, :] / Cold_new[:, :, 2, :]
         Cold_new[:, :, 2, :] = Cold_new[:, :, 2, :] / Cold_new[:, :, 2, :]
         Cold_newn = Cold_new / torch.norm(Cold_new, dim = [2,3], keepdim=True).expand([-1,-1,3,-1])
-        Cold_newne = Cold_newn.view(self.batch_size, self.sampleNum * 2, 1, 1, 3, 1).expand([-1, -1, self.height, self.width, -1, -1])
+        Cold_newne = Cold_newn.view(self.batch_size, sampleNum, 1, 1, 3, 1).expand([-1, -1, self.height, self.width, -1, -1])
 
         tmpM = Pnew @ torch.inverse(Pold)
-        tmpM = tmpM.view(self.batch_size, self.sampleNum * 2, 1, 1, 4, 4).expand(-1, -1, self.height, self.width, -1, -1)
+        tmpM = tmpM.view(self.batch_size, sampleNum, 1, 1, 4, 4).expand(-1, -1, self.height, self.width, -1, -1)
 
         randx_e = randx.permute([0,1,3,4,2]).unsqueeze(5)
         randx_new = torch.matmul(tmpM, randx_e)
 
         randx_new = randx_new[:,:,:,:,0:3,:]
-        randx_new[:, :, :, :, 0, :] = randx_new[:, :, :, :, 0, :] / randx_new[:, :, :, :, 2, :]
-        randx_new[:, :, :, :, 1, :] = randx_new[:, :, :, :, 1, :] / randx_new[:, :, :, :, 2, :]
-        randx_new[:, :, :, :, 2, :] = randx_new[:, :, :, :, 2, :] / randx_new[:, :, :, :, 2, :]
+        randx_new[:, :, :, :, 0, :] = randx_new[:, :, :, :, 0, :] / (randx_new[:, :, :, :, 2, :] + self.eps)
+        randx_new[:, :, :, :, 1, :] = randx_new[:, :, :, :, 1, :] / (randx_new[:, :, :, :, 2, :] + self.eps)
+        randx_new[:, :, :, :, 2, :] = randx_new[:, :, :, :, 2, :] / (randx_new[:, :, :, :, 2, :] + self.eps)
         randx_newn = randx_new / (torch.norm(randx_new, dim = [4,5], keepdim=True).expand([-1,-1,-1,-1,3,-1]) + self.eps)
 
         epipoLine = torch.cross(Cold_newne, randx_newn, dim = 4)
@@ -710,11 +740,12 @@ class EpplRender(nn.Module):
 
     def eppl2CovM(self, epipoLine):
         # Turn Epipolar Line to Covarian Matrix
+        sampleNum = epipoLine.shape[1]
         ln = torch.sqrt(epipoLine[:,:,0,:,:].pow(2) + epipoLine[:,:,1,:,:].pow(2))
         ldeg = torch.acos(epipoLine[:,:,1,:,:] / ln)
 
         rotM = torch.stack([torch.stack([torch.cos(ldeg), torch.sin(ldeg)], dim=4), torch.stack([-torch.sin(ldeg), torch.cos(ldeg)], dim=4)], dim=5)
-        r_sigma = rotM @ self.sigma.unsqueeze(1).expand([-1,self.sampleNum*2,-1,-1,-1,-1]) @ rotM.transpose(dim0=4, dim1=5)
+        r_sigma = rotM @ self.sigma.unsqueeze(1).expand([-1,sampleNum,-1,-1,-1,-1]) @ rotM.transpose(dim0=4, dim1=5)
         r_sigma = r_sigma / (torch.norm(r_sigma, dim = [4, 5], keepdim = True) + self.eps)
 
         determinant = r_sigma[:,:,:,:,0,0] * r_sigma[:,:,:,:,1,1] - r_sigma[:,:,:,:,0,1] * r_sigma[:,:,:,:,1,0]

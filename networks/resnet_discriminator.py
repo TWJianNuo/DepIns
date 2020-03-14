@@ -102,11 +102,11 @@ class ResnetDiscriminator(nn.Module):
         x = input_image
         x = self.encoder.conv1(x)
         x = self.encoder.bn1(x)
-        self.features.append(self.encoder.relu(x))
-        self.features.append(self.encoder.layer1(self.encoder.maxpool(self.features[-1])))
-        self.features.append(self.encoder.layer2(self.features[-1]))
-        self.features.append(self.encoder.layer3(self.features[-1]))
-        self.features.append(self.encoder.layer4(self.features[-1]))
-        self.features.append(self.encoder.output_layer(self.features[-1]))
+        x = self.encoder.relu(x)
+        x = self.encoder.layer1(self.encoder.maxpool(x))
+        x = self.encoder.layer2(x)
+        x = self.encoder.layer3(x)
+        x = self.encoder.layer4(x)
+        x = self.encoder.output_layer(x)
 
-        return self.features
+        return x
