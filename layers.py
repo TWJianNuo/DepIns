@@ -1625,3 +1625,134 @@ class Proj2Oview(nn.Module):
         nextrinsic = torch.cat([r_ex, t_ex], dim=2)
         nextrinsic = torch.cat([nextrinsic, torch.from_numpy(np.array([[[0,0,0,1]]], dtype=np.float32)).expand(self.batch_size, -1, -1).cuda()], dim=1)
         return nextrinsic
+
+
+
+
+class SelfOccluMask(nn.Module):
+    def __init__(self, maxDisp = 21):
+        super(SelfOccluMask, self).__init__()
+        self.maxDisp = maxDisp
+        self.init_kernel()
+
+    def init_kernel(self):
+        convweights = torch.zeros(self.maxDisp, 1, 3, self.maxDisp + 2)
+        for i in range(0, self.maxDisp):
+            convweights[i, 0, :, 0:2] = 1/6
+            convweights[i, 0, :, i+2:i+3] = -1/3
+        self.conv = torch.nn.Conv2d(in_channels=1, out_channels=self.maxDisp, kernel_size=(3,self.maxDisp + 2), stride=1, padding=self.maxDisp, bias=False)
+        self.conv.bias = nn.Parameter(torch.arange(self.maxDisp).type(torch.FloatTensor) + 1, requires_grad=False)
+        self.conv.weight = nn.Parameter(convweights, requires_grad=False)
+
+        self.detectWidth = 19  # 3 by 7 size kernel
+        self.detectHeight = 3
+        convWeightsLeft = torch.zeros(1, 1, self.detectHeight, self.detectWidth)
+        convWeightsRight = torch.zeros(1, 1, self.detectHeight, self.detectWidth)
+        convWeightsLeft[0, 0, :, :int((self.detectWidth + 1) / 2)] = 1
+        convWeightsRight[0, 0, :, int((self.detectWidth - 1) / 2):] = 1
+        self.convLeft = torch.nn.Conv2d(in_channels=1, out_channels=1,
+                                        kernel_size=(self.detectHeight, self.detectWidth), stride=1,
+                                        padding=[1, int((self.detectWidth - 1) / 2)], bias=False)
+        self.convRight = torch.nn.Conv2d(in_channels=1, out_channels=1,
+                                         kernel_size=(self.detectHeight, self.detectWidth), stride=1,
+                                         padding=[1, int((self.detectWidth - 1) / 2)], bias=False)
+        self.convLeft.weight = nn.Parameter(convWeightsLeft, requires_grad=False)
+        self.convRight.weight = nn.Parameter(convWeightsRight, requires_grad=False)
+
+    def forward(self, dispmap, bsline):
+        with torch.no_grad():
+            maskl = self.computeMask(dispmap, direction='l')
+            maskr = self.computeMask(dispmap, direction='r')
+            lind = bsline < 0
+            rind = bsline > 0
+            mask = torch.zeros_like(dispmap)
+            mask[lind,:, :, :] = maskl[lind,:, :, :]
+            mask[rind, :, :, :] = maskr[rind, :, :, :]
+            return mask
+
+    def computeMask(self, dispmap, direction):
+        width = dispmap.shape[3]
+        if direction == 'l':
+            output = self.conv(dispmap)
+            output = torch.clamp(output, max=0)
+            output = torch.min(output, dim=1, keepdim=True)[0]
+            output = output[:, :, self.maxDisp - 1:-(self.maxDisp - 1):, -width:]
+            output = torch.tanh(-output)
+            mask = (output > 0.05).float()
+        elif direction == 'r':
+            dispmap_opp = torch.flip(dispmap, dims=[3])
+            output_opp = self.conv(dispmap_opp)
+            output_opp = torch.clamp(output_opp, max=0)
+            output_opp = torch.min(output_opp, dim=1, keepdim=True)[0]
+            output_opp = output_opp[:, :, self.maxDisp - 1:-(self.maxDisp - 1):, -width:]
+            output_opp = torch.tanh(-output_opp)
+            mask = (output_opp > 0.05).float()
+            mask = torch.flip(mask, dims=[3])
+        return mask
+
+
+class grad_computation_tools(nn.Module):
+    def __init__(self, batch_size, height, width):
+        super(grad_computation_tools, self).__init__()
+        weightsx = torch.Tensor([
+            [-1., 0., 1.],
+            [-2., 0., 2.],
+            [-1., 0., 1.]]).unsqueeze(0).unsqueeze(0)
+
+        weightsy = torch.Tensor([
+            [1., 2., 1.],
+            [0., 0., 0.],
+            [-1., -2., -1.]]).unsqueeze(0).unsqueeze(0)
+        self.convDispx = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+        self.convDispy = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+        self.convDispx.weight = nn.Parameter(weightsx, requires_grad=False)
+        self.convDispy.weight = nn.Parameter(weightsy, requires_grad=False)
+
+        self.disparityTh = 0.011
+        self.semanticsTh = 0.6
+
+        self.zeroRange = 2
+        self.zero_mask = torch.ones([batch_size, 1, height, width]).cuda()
+        self.zero_mask[:, :, :self.zeroRange, :] = 0
+        self.zero_mask[:, :, -self.zeroRange:, :] = 0
+        self.zero_mask[:, :, :, :self.zeroRange] = 0
+        self.zero_mask[:, :, :, -self.zeroRange:] = 0
+
+        self.mask = torch.ones([batch_size, 1, height, width], device=torch.device("cuda"))
+        self.mask[:, :, 0:128, :] = 0
+
+        self.foregroundType = [5, 6, 7, 11, 12, 13, 14, 15, 16, 17,
+                               18]  # pole, traffic light, traffic sign, person, rider, car, truck, bus, train, motorcycle, bicycle
+
+    def get_disparityEdge(self, disparityMap):
+        disparity_grad = torch.abs(self.convDispx(disparityMap)) + torch.abs(self.convDispy(disparityMap))
+        disparity_grad = disparity_grad * self.zero_mask
+        disparity_grad_bin = disparity_grad > self.disparityTh
+        return disparity_grad_bin
+
+    def get_semanticsEdge(self, semanticsMap):
+        batch_size, c, height, width = semanticsMap.shape
+        foregroundMapGt = torch.ones([batch_size, 1, height, width], dtype=torch.uint8, device=torch.device("cuda"))
+        for m in self.foregroundType:
+            foregroundMapGt = foregroundMapGt * (semanticsMap != m).byte()
+        foregroundMapGt = (1 - foregroundMapGt).float()
+
+        semantics_grad = torch.abs(self.convDispx(foregroundMapGt)) + torch.abs(self.convDispy(foregroundMapGt))
+        semantics_grad = semantics_grad * self.zero_mask
+
+        semantics_grad_bin = semantics_grad > self.semanticsTh
+
+        return semantics_grad_bin
+
+class TextureIndicatorM(nn.Module):
+    def __init__(self):
+        super(TextureIndicatorM, self).__init__()
+        self.mu_x_pool   = nn.AvgPool2d(3, 1)
+        self.sig_x_pool  = nn.AvgPool2d(3, 1)
+        self.refl = nn.ReflectionPad2d(1)
+
+    def forward(self, x):
+        x = self.refl(x)
+        mu_x = self.mu_x_pool(x)
+        sigma_x  = self.sig_x_pool(x ** 2) - mu_x ** 2
+        return sigma_x

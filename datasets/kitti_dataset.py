@@ -17,6 +17,7 @@ from kitti_utils import read_calib_file, load_velodyne_points
 from kitti_utils import labels
 from utils import *
 import cv2
+from PIL import Image  # using pillow-simd for increased speed
 
 class KITTIDataset(MonoDataset):
     """Superclass for different types of KITTI dataset loaders
@@ -201,7 +202,7 @@ class KITTIRAWDataset(KITTIDataset):
         semantic_label_copy = np.array(semantic_label.copy())
         for k in np.unique(semantic_label):
             semantic_label_copy[semantic_label_copy == k] = labels[k].trainId
-        # visualize_semantic(semantic_label_copy)
+
         semantic_label_copy = np.expand_dims(semantic_label_copy, axis=0)
         return semantic_label_copy
 
@@ -248,6 +249,73 @@ class KITTIRAWDataset(KITTIDataset):
         predDepth = predDepth.astype(np.float32) / 256
         predDepth = np.expand_dims(predDepth, axis=0)
         return predDepth
+
+    def get_hints(self, folder, frame_index, side, do_flip):
+        stereoFolder = self.hints_path
+        side_folder = 'image_02' if side == 'l' else 'image_03'
+        depth_folder = os.path.join(stereoFolder, folder, side_folder, str(frame_index).zfill(10) + '.png')
+
+        depth = cvtPNG2Arr(pil.open(depth_folder))
+
+        if do_flip:
+            depth = np.fliplr(depth)
+        # import copy
+        # tensor2disp(torch.from_numpy(copy.deepcopy(depth)).unsqueeze(0).unsqueeze(0), percentile=90, ind=0).show()
+        depth = cv2.resize(depth, dsize=(self.width, self.height), interpolation=cv2.INTER_NEAREST)
+        depth = torch.from_numpy(depth).float().unsqueeze(0)
+        depth_hint_mask = (depth > 0).float()
+        return depth, depth_hint_mask
+
+    def get_seman_syn(self, folder, frame_index):
+        seman_real_path = os.path.join(self.syn_root, folder, 'scene_label', str(frame_index).zfill(4) + '.png')
+
+        semantic_label = pil.open(seman_real_path)
+
+        # Do resize
+        semantic_label = pil.Image.resize(semantic_label, [self.width, self.height], resample = Image.NEAREST)
+
+        semantic_label_copy = np.array(semantic_label.copy())
+
+        # Do label transformation
+        for k in np.unique(semantic_label):
+            semantic_label_copy[semantic_label_copy == k] = labels[k].trainId
+
+        # visualize_semantic(semantic_label_copy)
+        # semantic_label_copy = np.expand_dims(semantic_label_copy, axis=0)
+
+        return semantic_label_copy
+
+    def get_syn_data(self, index, do_flip):
+        index = index % len(self.syn_filenames)
+
+        inputs = {}
+        seq, frame_ind, _ = self.syn_filenames[index].split(' ')
+
+        # Read RGB
+        B_path = os.path.join(self.syn_root, seq, 'rgb', frame_ind + '.png')
+        B_rgb = np.array(Image.open(B_path).convert('RGB')).astype(np.float32) / 255
+
+        # Read Depth
+        B_path = os.path.join(self.syn_root, seq, 'depthgt', frame_ind + '.png')
+        B_depth = np.array(cv2.imread(B_path, -1)).astype(np.float32) / 100 # 1 intensity inidicates 1 cm, max is 655.35 meters
+
+        # Read Semantic Label
+        B_semanLabel = self.get_seman_syn(folder = seq, frame_index=frame_ind)
+        if do_flip:
+            B_rgb = np.copy(np.fliplr(B_rgb))
+            B_depth = np.copy(np.fliplr(B_depth))
+            B_semanLabel = np.copy(np.fliplr(B_semanLabel))
+        inputs[('syn_rgb', 0)] = np.moveaxis(cv2.resize(B_rgb, (self.width, self.height), interpolation = cv2.INTER_LINEAR), [0,1,2], [1,2,0])
+        inputs[('syn_depth', 0)] = np.expand_dims(cv2.resize(B_depth, (self.width, self.height), interpolation = cv2.INTER_LINEAR), axis=0)
+        inputs['syn_semanLabel'] = np.expand_dims(B_semanLabel, axis = 0)
+        for i in range(1, self.num_scales):
+            inputs[('syn_depth', i)] = np.expand_dims(cv2.resize(B_depth, (int(self.width / np.power(2,i)), int(self.height / np.power(2,i))), interpolation = cv2.INTER_LINEAR), axis=0)
+
+
+        folder, ind, dir = self.syn_filenames[index].split(' ')
+        inputs['syn_tag'] = str('Folder: ' + folder + '\nFrame_Index: ' + ind.zfill(10) + '\nIndex: ' +str(index).zfill(10) + '\nDo_flip: ' + str(do_flip))
+
+        return inputs
 
 class KITTIOdomDataset(KITTIDataset):
     """KITTI dataset for odometry training and testing

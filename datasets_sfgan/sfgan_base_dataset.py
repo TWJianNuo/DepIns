@@ -404,7 +404,6 @@ class SFGAN_Base_Dataset(data.Dataset):
         folder, ind, dir = self.syn_filenames[index].split(' ')
         inputs['syn_tag'] = str('Folder: ' + folder + '\nFrame_Index: ' + ind.zfill(10) + '\nIndex: ' +str(index).zfill(10) + '\nDo_flip: ' + str(do_flip))
 
-
         return inputs
 
     def get_pred_depth(self, folder, frame_index, side, do_flip):

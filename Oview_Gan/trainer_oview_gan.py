@@ -22,7 +22,6 @@ from layers import *
 
 import datasets_sfgan
 import networks
-from IPython import embed
 
 import torchvision.transforms
 from pointNet_network.pointNet_model import PointNetCls
@@ -242,32 +241,6 @@ class Trainer_GAN:
 
             outputs, losses = self.process_batch(inputs)
             print("{} finished".format(batch_idx))
-            # Optimize Unet
-            # self.model_optimizer.zero_grad()
-            # losses["loss"].backward()
-            # self.model_optimizer.step()
-
-            # for i in range(self.opt.batch_size):
-            #     curind = np.mod(self.itcount, self.cap)
-            #     self.dp_real[curind] = outputs['pred_real'][i].cpu().detach().numpy()
-            #     self.dp_fake[curind] = outputs['pred_fake'][i].cpu().detach().numpy()
-            #     self.itcount = self.itcount + 1
-            #
-            #
-            # duration = time.time() - before_op_time
-            #
-            # if self.step % self.opt.print_freq == 0 or (self.step < 2000 and self.step % 5 == 0):
-            #     self.log_time(batch_idx, duration, losses["loss"].cpu().data)
-            #     self.log_data(mode="train", losses=losses)
-            #
-            # if self.step % self.opt.log_frequency == 0:
-            #     if "depth_gt" in inputs:
-            #         self.compute_depth_losses(inputs, outputs, losses)
-            #     self.log_data(mode="train", losses=losses)
-            #     self.log_img(mode="train", inputs=inputs, outputs=outputs)
-            #     self.val()
-
-
             self.step += 1
 
         self.model_lr_scheduler.step()
@@ -604,7 +577,6 @@ class Trainer_GAN:
         # if self.eng is None:
         #     self.eng = matlab.engine.start_matlab()
 
-
         # Record stem
         n_bins = 30
         fig, axs = plt.subplots(1, 2, sharey=True, tight_layout=True)
@@ -614,8 +586,6 @@ class Trainer_GAN:
         axs[1].set_title('pred_fake')
         writer.add_figure("pred_stem", fig, self.step)
         plt.close(fig)
-
-
 
         for j in range(min(2, self.opt.batch_size)):  # write a maxmimum of four images
             input_rgb = inputs[('color', 0, 0)][j].data

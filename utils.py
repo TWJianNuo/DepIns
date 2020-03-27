@@ -300,3 +300,14 @@ def latlonToMercator(lat, lon, scale):
 def latToScale(lat):
     scale = np.cos(lat * np.pi / 180.0)
     return scale
+
+def cvtPNG2Arr(png):
+    sr = 10000
+    png = np.array(png)
+    h = png[:,:,0]
+    e = png[:,:,1]
+    l = png[:,:,2]
+
+    arrs = h.astype(np.float32) * 256 * 256 + e.astype(np.float32) * 256 + l.astype(np.float32)
+    arr = arrs / sr
+    return arr

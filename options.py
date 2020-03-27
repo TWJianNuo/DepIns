@@ -117,8 +117,6 @@ class MonodepthOptions:
                                  type=str)
         self.parser.add_argument("--discrimScale",
                                  type=float)
-        self.parser.add_argument("--lrD",
-                                 type=float)
         self.parser.add_argument("--print_freq",
                                  default=50,
                                  type=int)
@@ -141,7 +139,35 @@ class MonodepthOptions:
                                  type=float,
                                  help="sample num",
                                  default=1e-4)
+        self.parser.add_argument("--load_hints",
+                                 help="if set, doesn't do auto-masking",
+                                 action="store_true")
+        self.parser.add_argument("--hints_path",
+                                 type=str
+                                 )
+        self.parser.add_argument("--bnMorphLoss",
+                                 help="if set, use morphing loss",
+                                 action="store_true")
+        self.parser.add_argument("--val_frequency",
+                                 type=int,
+                                 default=10)
+        self.parser.add_argument("--bnMorphLoss_w",
+                                 type=float,
+                                 default=0.15)
 
+        self.parser.add_argument("--load_syn",
+                                 action="store_true")
+        self.parser.add_argument("--syn_split",
+                                 type=str)
+        self.parser.add_argument("--syn_path",
+                                 type=str)
+
+        self.parser.add_argument("--Dloss",
+                                 action="store_true")
+        self.parser.add_argument("--lrD",
+                                 type=float)
+        self.parser.add_argument("--weightD",
+                                 type=float)
 
         # OPTIMIZATION options
         self.parser.add_argument("--batch_size",
@@ -160,6 +186,16 @@ class MonodepthOptions:
                                  type=int,
                                  help="step size of the scheduler",
                                  default=15)
+        self.parser.add_argument("--selfocclu",
+                                 help="if set, use self occlusion",
+                                 action="store_true")
+        self.parser.add_argument("--depth_hint_param",
+                                 type=float,
+                                 default=1)
+        self.parser.add_argument("--SGMStereo_prediction_folder",
+                                 type=str,
+                                 default="Nothing"
+                                 )
 
         # ABLATION options
         self.parser.add_argument("--v1_multiscale",
@@ -210,7 +246,7 @@ class MonodepthOptions:
                                  nargs="+",
                                  type=str,
                                  help="models to load",
-                                 default=["encoder", "depth", "pose_encoder", "pose"])
+                                 default=["encoder", "depth"])
 
         # LOGGING options
         self.parser.add_argument("--log_frequency",

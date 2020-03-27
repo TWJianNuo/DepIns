@@ -51,12 +51,17 @@ class MonoDataset(data.Dataset):
                  num_scales,
                  is_train=False,
                  img_ext='.png',
+                 load_seman=False,
+                 load_pose=False,
+                 load_hints = False,
+                 hints_path = '',
                  load_detect = False,
-                 load_seman = False,
                  detect_path = '',
-                 load_pose = False,
                  loadPredDepth = False,
-                 predDepthPath = ''
+                 predDepthPath = '',
+                 load_syn = False,
+                 syn_filenames = None,
+                 syn_root = ''
                  ):
         super(MonoDataset, self).__init__()
 
@@ -105,6 +110,13 @@ class MonoDataset(data.Dataset):
         self.load_pose = load_pose
         self.loadPredDepth = loadPredDepth
         self.predDepthPath = predDepthPath
+
+        self.load_hints = load_hints
+        self.hints_path = hints_path
+
+        self.load_syn = load_syn
+        self.syn_root = syn_root
+        self.syn_filenames = syn_filenames
     def preprocess(self, inputs, color_aug):
         """Resize colour images to the required scales and augment if required
 
@@ -196,6 +208,9 @@ class MonoDataset(data.Dataset):
         else:
             color_aug = (lambda x: x)
 
+        if self.load_syn:
+            inputs.update(self.get_syn_data(index, do_flip))
+
         self.preprocess(inputs, color_aug)
 
         # Read Detection Label
@@ -261,7 +276,14 @@ class MonoDataset(data.Dataset):
         if self.loadPredDepth:
             inputs['predDepth'] = self.get_predDepth(folder, frame_index, side, do_flip)
 
+        if self.load_hints:
+            depth_hint, depth_hint_mask = self.get_hints(folder, frame_index, side, do_flip)
+            inputs["depth_hint"] = depth_hint
+            inputs["depth_hint_mask"] = depth_hint_mask
         inputs['indicesRec'] = index
+
+
+
         return inputs
 
     def get_color(self, folder, frame_index, side, do_flip):
@@ -289,4 +311,10 @@ class MonoDataset(data.Dataset):
         raise NotImplementedError
 
     def get_bundlePose(self, folder, frame_index):
+        raise NotImplementedError
+
+    def get_hints(self, folder, frame_index, side, do_flip):
+        raise NotImplementedError
+
+    def get_syn_data(self, index, do_flip):
         raise NotImplementedError

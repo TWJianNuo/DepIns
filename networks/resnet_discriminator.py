@@ -108,5 +108,4 @@ class ResnetDiscriminator(nn.Module):
         x = self.encoder.layer3(x)
         x = self.encoder.layer4(x)
         x = self.encoder.output_layer(x)
-
         return x

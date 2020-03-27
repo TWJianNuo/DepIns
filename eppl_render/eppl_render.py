@@ -105,7 +105,7 @@ class EPPLFunctionExam(torch.autograd.Function):
 
 
 class EpplRender(nn.Module):
-    def __init__(self, height, width, batch_size, lr, sampleNum = 10):
+    def __init__(self, height, width, batch_size, lr = 0, sampleNum = 10):
         super(EpplRender, self).__init__()
         self.height = height
         self.width = width
@@ -176,6 +176,13 @@ class EpplRender(nn.Module):
         self.lr = lr
 
         self.epplf = EPPLFunction.apply
+
+        self.nextrinsic = dict()
+        self.inv_r_sigma = dict()
+        self.Pcombined = dict()
+        self.keys = dict()
+
+        self.rand_dmap = dict()
     def get_camtrail(self, extrinsic, intrinsic):
         ws = 3
         y = 10
@@ -570,20 +577,38 @@ class EpplRender(nn.Module):
         # Compute Mask
         addmask = self.post_mask(depthmap = depthmap, semanticmap = semanticmap)
 
-        # Generate Camera Track
-        camtrail, campos, viewbias, camdir = self.get_camtrail(extrinsic, intrinsic)
-        camtrail = camtrail[:,camIndex,:,:]
-        nextrinsic = self.cvtCamtrail2Extrsic(camtrail, campos, viewbias, camdir, extrinsic)
-        invcamK = torch.inverse(intrinsic @ extrinsic)
-        epipoLine, Pcombined = self.get_eppl(intrinsic=intrinsic, extrinsic=extrinsic, nextrinsic=nextrinsic)
-        r_sigma, inv_r_sigma, rotM = self.eppl2CovM(epipoLine)
+        # Get Keys for computation wise
+        keys = [str(key) + '_' + str(camIndex) for key in torch.sum(torch.abs(extrinsic @ intrinsic), dim = [1,2]).detach().cpu().numpy()]
+
+        inPool = True
+        for key in keys:
+            if key not in self.keys:
+                inPool = False
+
+        if not inPool:
+            # Generate Camera Track
+            camtrail, campos, viewbias, camdir = self.get_camtrail(extrinsic, intrinsic)
+            camtrail = camtrail[:,camIndex,:,:]
+            nextrinsic = self.cvtCamtrail2Extrsic(camtrail, campos, viewbias, camdir, extrinsic)
+            epipoLine, Pcombined = self.get_eppl(intrinsic=intrinsic, extrinsic=extrinsic, nextrinsic=nextrinsic)
+            r_sigma, inv_r_sigma, rotM = self.eppl2CovM(epipoLine)
+
+            # Store
+            for idx, key in enumerate(keys):
+                self.nextrinsic[key] = nextrinsic[idx].detach()
+                self.inv_r_sigma[key] = inv_r_sigma[idx].detach()
+                self.Pcombined[key] = Pcombined[idx].detach()
+        else:
+            nextrinsic = torch.stack([self.nextrinsic[key] for key in keys], dim=0)
+            inv_r_sigma = torch.stack([self.inv_r_sigma[key] for key in keys], dim=0)
+            Pcombined = torch.stack([self.Pcombined[key] for key in keys], dim=0)
 
         # Compute GT Mask
+        invcamK = torch.inverse(intrinsic @ extrinsic)
         pts3d = self.bck(predDepth=depthmap, invcamK=invcamK)
         projected2d, projecteddepth, selector = self.proj2de(pts3d=pts3d, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask = addmask)
         rimg = self.epplf(depthmap, inv_r_sigma, projected2d, selector, Pcombined, self.kws, self.sr)
 
-        # tensor2disp(rimg[:,0:1,:,:], vmax=0.04, ind = 0).show()
         return rimg, inv_r_sigma, Pcombined
 
     def erpipolar_rendering_test(self, depthmap, semanticmap, intrinsic, extrinsic):
@@ -687,6 +712,12 @@ class EpplRender(nn.Module):
 
     def get_eppl(self, intrinsic, extrinsic, nextrinsic):
         sampleNum = nextrinsic.shape[1]
+        if sampleNum not in self.rand_dmap:
+            torch.random.manual_seed(200)
+            rand_dmap = torch.rand([self.batch_size, 1, 1, self.height, self.width]).expand([-1, sampleNum, -1, -1, -1]).cuda() + 2
+            self.rand_dmap[sampleNum] = rand_dmap
+        else:
+            rand_dmap = self.rand_dmap[sampleNum]
         intrinsic_44, added_extrinsic = self.org_intrinsic(intrinsic)
         intrinsic_44e = intrinsic_44.unsqueeze(1).expand([-1, sampleNum, -1, -1])
         added_extrinsice = added_extrinsic.unsqueeze(1).expand([-1, sampleNum, -1, -1])
@@ -702,8 +733,7 @@ class EpplRender(nn.Module):
         xxe = self.xx.unsqueeze(1).expand([-1, sampleNum, -1, -1, -1])
         yye = self.yy.unsqueeze(1).expand([-1, sampleNum, -1, -1, -1])
         onese = self.ones.unsqueeze(1).expand([-1, sampleNum, -1, -1, -1])
-        torch.random.manual_seed(200)
-        rand_dmap = torch.rand([self.batch_size, 1, 1, self.height, self.width]).expand([-1, sampleNum, -1, -1, -1]).cuda() + 2
+
         randx = torch.cat([xxe * rand_dmap, yye * rand_dmap, rand_dmap, onese], dim=2)
 
         Cold_new = Pnew @ Cold
@@ -885,7 +915,7 @@ class EpplRender(nn.Module):
         # visibletype = [13, 14, 15, 16]  # car, truck, bus, train
         addmask = torch.zeros_like(semanticmap)
         for vt in visibletype:
-            addmask = addmask + (semanticmap == vt)
+            addmask = addmask + (semanticmap == vt).byte()
         addmask = addmask > 0
 
         # Shrink Semantic Mask
