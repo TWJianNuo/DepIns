@@ -18,6 +18,10 @@ warnings.filterwarnings("ignore")
 options = MonodepthOptions()
 opts = options.parse()
 
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir)
 class Trainer:
     def __init__(self, options):
         self.opt = options
