@@ -263,9 +263,10 @@ class Trainer:
         pred_real = self.models_D['discriminator'](rendered_real.detach())
         loss_D = (self.bcewl(pred_syn, torch.ones_like(pred_syn)) + self.bcewl(pred_real, torch.zeros_like(pred_real))) / 2
         losses['loss_D'] = loss_D
-        self.DOptimizer.zero_grad()
-        loss_D.backward()
-        self.DOptimizer.step()
+        if self.step < 200:
+            self.DOptimizer.zero_grad()
+            loss_D.backward()
+            self.DOptimizer.step()
 
         acc_rate = (torch.sum(self.sig(pred_syn) > 0.5) + torch.sum(self.sig(pred_real) <= 0.5)) / (2 * torch.sum(torch.ones_like(pred_syn)))
         losses['D_acc_rate'] = acc_rate
