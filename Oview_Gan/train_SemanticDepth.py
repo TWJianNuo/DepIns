@@ -8,7 +8,9 @@ import warnings
 
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
+writer = SummaryWriter('runs/fashion_mnist_experiment_1')
 
 from layers import *
 
@@ -86,7 +88,7 @@ class Trainer:
         self.bcewl = nn.BCEWithLogitsLoss()
         self.sig = nn.Sigmoid()
         self.DOptimizer = optim.Adam(self.models_D["discriminator"].parameters(), self.opt.lrD)
-        self.recent_rec = -torch.ones([2, 100]) # Record recent 40 results
+        self.accRec = list() # Record recent 40 results
 
     def set_layers(self):
         """properly handle layer initialization under multiple dataset situation
@@ -203,14 +205,13 @@ class Trainer:
         semantics_grad_bin = self.tool.get_semanticsEdge(inputs['semanLabel'])
         # tensor2disp(semantics_grad_bin, ind=0, vmax=1).show()
 
-        print(1)
         morphedx, morphedy, ocoeff = self.bnmorph.bnmorph(disparity_grad_bin, semantics_grad_bin)
         morphedx = (morphedx / (self.opt.width - 1) - 0.5) * 2
         morphedy = (morphedy / (self.opt.height - 1) - 0.5) * 2
         grid = torch.cat([morphedx, morphedy], dim=1).permute(0, 2, 3, 1)
         dispMaps_morphed = F.grid_sample(stable_disp, grid, padding_mode="border")
         outputs['dispMaps_morphed'] = dispMaps_morphed
-        print(2)
+
         with torch.no_grad():
             th = 1.05
             ssim_val_predict = self.compute_reprojection_loss(outputs[('color', 's', 0)], inputs[('color', 0, 0)])
@@ -227,31 +228,34 @@ class Trainer:
         losses["similarity_loss"] = 100 * torch.sum(torch.log(1 + torch.abs(dispMaps_morphed - outputs['disp', 0]) * texture_measure) * selector_mask) / (torch.sum(selector_mask) + 1)
         losses['totLoss'] = losses["similarity_loss"] * self.opt.bnMorphLoss_w + losses['totLoss']
 
-        print(3)
         camIndex = [3]
         rendered_syn, _, _ = self.epplrender.forward(depthmap=inputs[('syn_depth', 0)],
                                                      semanticmap=inputs['syn_semanLabel'],
                                                      intrinsic=inputs['realIn'],
                                                      extrinsic=inputs['realEx'],
                                                      camIndex=camIndex)
-        print(4)
+
         rendered_real, _, _ = self.epplrender.forward(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR,
                                                     semanticmap=inputs['semanLabel'],
                                                     intrinsic=inputs['realIn'],
                                                     extrinsic=inputs['realEx'],
                                                     camIndex=camIndex)
-        print(5)
+
         outputs['rendered_syn'] = rendered_syn
         outputs['rendered_real'] = rendered_real
         self.set_eval_D()
         pred_real = self.models_D['discriminator'](rendered_real)
         loss_G = self.bcewl(pred_real,torch.ones_like(pred_real))
         losses['loss_G'] = loss_G
-        losses['totLoss'] = losses['totLoss'] + loss_G * self.opt.weightD
+        if np.sum(np.array(self.accRec)) > 0.8:
+            losses['totLoss'] = losses['totLoss'] + loss_G * self.opt.weightD
+            losses['isD'] = 1
+        else:
+            losses['isD'] = 0
         self.model_optimizer.zero_grad()
         losses['totLoss'].backward()
         self.model_optimizer.step()
-        print(6)
+
         # Train Discriminator
         self.set_eval()
         self.set_train_D()
@@ -262,7 +266,13 @@ class Trainer:
         self.DOptimizer.zero_grad()
         loss_D.backward()
         self.DOptimizer.step()
-        print(7)
+
+        acc_rate = (torch.sum(self.sig(pred_syn) > 0.5) + torch.sum(self.sig(pred_real) <= 0.5)) / (2 * torch.sum(torch.ones_like(pred_syn)))
+        losses['D_acc_rate'] = acc_rate
+        if len(self.accRec) < 100:
+            self.accRec.append(acc_rate.detach().cpu().numpy())
+        else:
+            self.accRec[self.step % 100] = acc_rate.detach().cpu().numpy()
         return outputs, losses
 
     def run_epoch(self):
