@@ -23,6 +23,13 @@ import json
 warnings.filterwarnings("ignore")
 options = MonodepthOptions()
 opts = options.parse()
+
+grads = {}
+def save_grad(name):
+    def hook(grad):
+        grads[name] = grad
+    return hook
+
 class Trainer:
     def __init__(self, options):
         self.opt = options
@@ -247,13 +254,33 @@ class Trainer:
         pred_real = self.models_D['discriminator'](rendered_real)
         loss_G = self.bcewl(pred_real,torch.ones_like(pred_real))
         losses['loss_G'] = loss_G
+
+        # For Visualization
+        # testT = nn.Parameter(torch.zeros_like(rendered_real), requires_grad = True)
+        # testT.register_hook(save_grad('testT'))
+        # targetT = torch.zeros_like(rendered_real)
+        # targetT[:,:,:,0:512] = 1
+        # targetT[:, :, :, 512::] = -1
+        # ada = optim.Adam([testT], lr=1e-5)
+        # loss = torch.sum((targetT - testT) ** 2)
+        # ada.zero_grad()
+        # loss.backward()
+        # a = grads['testT']
+        # tensor2grad(-a, viewind=0, percentile=99).show()
+        # tensor2grad(targetT, viewind=0, percentile=99).show()
+        # ada.step()
+
+        rendered_real.register_hook(save_grad('rendered_real'))
         if np.sum(np.array(self.accRec)) > 0.8:
             losses['totLoss'] = losses['totLoss'] + loss_G * self.opt.weightD
             losses['isD'] = 1
         else:
             losses['isD'] = 0
+            losses['totLoss'] = losses['totLoss'] + loss_G * 0
         self.model_optimizer.zero_grad()
         losses['totLoss'].backward()
+        outputs['rendered_real_grad'] = -grads['rendered_real']
+        # tensor2grad(outputs['rendered_real_grad'], viewind=0, percentile=99).show()
         self.model_optimizer.step()
 
         # Train Discriminator
@@ -500,7 +527,11 @@ class Trainer:
         combined2 = np.concatenate([np.array(fig_render_real), np.array(fig_seman_real)], axis=1)
 
         combined = np.concatenate([combined3, combined1, combined2], axis=0)
+
         self.writers['train'].add_image('rendered', torch.from_numpy(combined).float() / 255, dataformats = 'HWC', global_step = self.step)
+
+        fig_grad = tensor2grad(outputs['rendered_real_grad'], viewind=viewIndex, percentile=99)
+        self.writers['train'].add_image('grad', torch.from_numpy(np.array(fig_grad)).float() / 255, dataformats='HWC', global_step=self.step)
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
         """

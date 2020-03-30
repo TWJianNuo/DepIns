@@ -197,6 +197,24 @@ def tensor2semantic(tensor, ind, isGt = False):
     # visualize_semantic(slice).show()
     return visualize_semantic(slice)
 
+def tensor2grad(gradtensor, percentile = 95, viewind = 0):
+    cm = plt.get_cmap('bwr')
+    gradnumpy = gradtensor.detach().cpu().numpy()[viewind, 0, :, :]
+
+    selector_pos = gradnumpy > 0
+    if np.sum(selector_pos) > 1:
+        pos_bar = np.percentile(gradnumpy[selector_pos], percentile)
+        gradnumpy[selector_pos] = gradnumpy[selector_pos] / pos_bar / 2
+
+    selector_neg = gradnumpy < 0
+    if np.sum(selector_neg) > 1:
+        neg_bar = -np.percentile(-gradnumpy[selector_neg], percentile)
+        gradnumpy[selector_neg] = -gradnumpy[selector_neg] / neg_bar / 2
+
+    disp_grad_numpy = gradnumpy + 0.5
+    colorMap = cm(disp_grad_numpy)[:,:,0:3]
+    return pil.fromarray((colorMap * 255).astype(np.uint8))
+
 def draw_detection(data, detection_res, ind):
     data_entry = data[ind, :, :, :].unsqueeze(0)
     detection_res_entry = detection_res[ind, :, :]
