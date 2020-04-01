@@ -267,7 +267,6 @@ class Trainer:
 
         self.set_eval_D()
         pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
-
         loss_G = self.mbcel(pred_real, asSyn = True)
 
         # For Visualization
@@ -305,12 +304,18 @@ class Trainer:
         pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real.detach()))
         loss_D = (self.mbcel(pred_syn, asSyn = True) + self.mbcel(pred_real, asSyn = False)) / 2
         losses['loss_D'] = loss_D
+        outputs['pred_syn'] = pred_syn
+        outputs['pred_real'] = pred_real
         if self.step < 2e10:
             self.DOptimizer.zero_grad()
             loss_D.backward()
             self.DOptimizer.step()
 
-        acc_rate = (torch.sum((pred_syn[('syn_prob', 0)]) > 0.5) + torch.sum(pred_real[('syn_prob', 0)] <= 0.5)) / (2 * torch.sum(torch.ones_like(pred_syn[('syn_prob', 0)])))
+        acc_rate = (
+        torch.sum(((pred_syn[('syn_prob', 0)]) > 0.5).float() * pred_syn['mask'][-1]) / (torch.sum(pred_syn['mask'][-1]) + 1e-3) + \
+        torch.sum(((pred_real[('syn_prob', 0)]) < 0.5).float() * pred_real['mask'][-1]) / (torch.sum(pred_real['mask'][-1]) + 1e-3)
+        ) / 2
+        # acc_rate = (torch.sum((pred_syn[('syn_prob', 0)]) > 0.5) + torch.sum(pred_real[('syn_prob', 0)] <= 0.5)) / (2 * torch.sum(torch.ones_like(pred_syn[('syn_prob', 0)])))
         losses['D_acc_rate'] = acc_rate
         if len(self.accRec) < 100:
             self.accRec.append(acc_rate.detach().cpu().numpy())
@@ -539,11 +544,15 @@ class Trainer:
         fig_rgb = tensor2rgb(inputs[('color', 0, 0)], ind=viewIndex)
         fig_render_real = tensor2disp(outputs['rendered_real'], ind=viewIndex, vmax=0.1)
 
+        fig_predReal2Real = tensor2disp((1-outputs['pred_real'][('syn_prob', 0)]) * outputs['pred_real']['mask'][-1], ind=viewIndex, vmax=1)
+        fig_predSyn2Syn = tensor2disp(outputs['pred_syn'][('syn_prob', 0)] * outputs['pred_syn']['mask'][-1], ind=viewIndex, vmax = 1)
+
         combined3 = np.concatenate([np.array(fig_render_syn), np.array(fig_seman_syn)], axis=1)
         combined1 = np.concatenate([np.array(fig_disp), np.array(fig_rgb)], axis=1)
         combined2 = np.concatenate([np.array(fig_render_real), np.array(fig_seman_real)], axis=1)
+        combined4 = np.concatenate([np.array(fig_predReal2Real), np.array(fig_predSyn2Syn)], axis=1)
 
-        combined = np.concatenate([combined3, combined1, combined2], axis=0)
+        combined = np.concatenate([combined3, combined1, combined2, combined4], axis=0)
 
         self.writers['train'].add_image('rendered', torch.from_numpy(combined).float() / 255, dataformats = 'HWC', global_step = self.step)
 
