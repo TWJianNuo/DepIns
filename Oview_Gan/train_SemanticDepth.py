@@ -252,37 +252,41 @@ class Trainer:
         outputs['rendered_syn'] = rendered_syn
         outputs['rendered_real'] = rendered_real
 
+        self.set_eval_D()
+        pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
+        loss_G = self.mbcel(pred_real, asSyn = True)
+        losses['loss_G'] = loss_G
+
         # Visualization
-        # rendered_real = rendered_real.detach()
-        # rendered_real = nn.Parameter(rendered_real, requires_grad = True)
-        # ada = optim.Adam([rendered_real], lr=1e-4)
-        # a = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
-        # ada.zero_grad()
+        # depMap = (outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR).detach()
+        # depMap = nn.Parameter(depMap, requires_grad=True)
+        # ada = optim.Adam([depMap], lr=1e-4)
+        # for i in range(1000):
+        #     rendered_real, _, _ = self.epplrender.forward(depthmap=depMap,
+        #                                                   semanticmap=inputs['semanLabel'],
+        #                                                   intrinsic=inputs['realIn'],
+        #                                                   extrinsic=inputs['realEx'],
+        #                                                   camIndex=camIndex)
+        #     predT = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
+        #     if i % 10 == 0:
+        #         fig1 = tensor2disp(rendered_real, ind = 0, vmax = 0.1)
+        #         fig2 = tensor2disp((1 - predT[('syn_prob', 0)]) * predT['mask'][-1], ind=0,vmax=1)
+        #         combined = np.concatenate([np.array(fig1), np.array(fig2)], axis=0)
+        #         pil.fromarray(combined).save(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/testD', str(i) + '.png'))
+        #
+        #     loss_G = self.mbcel(predT, asSyn=True)
+        #     ada.zero_grad()
+        #     loss_G.backward()
+        #     ada.step()
+        #     print(loss_G)
+
+
         # rendered_real.register_hook(save_grad('rendered_real'))
         # grads['rendered_real'] = grads['rendered_real'] * 0
         # # (torch.sum(a[('syn_prob', 0)])).backward()
         # (self.mbcel(a, asSyn = True)).backward()
         # g_real = -grads['rendered_real']
         # tensor2grad(g_real, viewind=0, percentile=99).show()
-
-        self.set_eval_D()
-        pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
-        loss_G = self.mbcel(pred_real, asSyn = True)
-        outputs['loss_G'] = loss_G
-        # For Visualization
-        # testT = nn.Parameter(torch.zeros_like(rendered_real), requires_grad = True)
-        # testT.register_hook(save_grad('testT'))
-        # targetT = torch.zeros_like(rendered_real)
-        # targetT[:,:,:,0:512] = 1
-        # targetT[:, :, :, 512::] = -1
-        # ada = optim.Adam([testT], lr=1e-5)
-        # loss = torch.sum((targetT - testT) ** 2)
-        # ada.zero_grad()
-        # loss.backward()
-        # a = grads['testT']
-        # tensor2grad(-a, viewind=0, percentile=99).show()
-        # tensor2grad(targetT, viewind=0, percentile=99).show()
-        # ada.step()
 
         rendered_real.register_hook(save_grad('rendered_real'))
         if np.sum(np.array(self.accRec)) > 0.8:
@@ -295,6 +299,7 @@ class Trainer:
         losses['totLoss'].backward()
         outputs['rendered_real_grad'] = -grads['rendered_real']
         # tensor2grad(outputs['rendered_real_grad'], viewind=0, percentile=99).show()
+        # tensor2disp(rendered_real, vmax=0.1, ind=0).show()
         self.model_optimizer.step()
 
         # Train Discriminator
@@ -306,10 +311,15 @@ class Trainer:
         losses['loss_D'] = loss_D
         outputs['pred_syn'] = pred_syn
         outputs['pred_real'] = pred_real
-        if self.step < 250:
+
+        trTime = 500
+        if self.step == trTime:
+            self.save_model()
+        if self.step < trTime:
             self.DOptimizer.zero_grad()
             loss_D.backward()
             self.DOptimizer.step()
+
 
         acc_rate = (
         torch.sum(((pred_syn[('syn_prob', 0)]) > 0.5).float() * pred_syn['mask'][-1]) / (torch.sum(pred_syn['mask'][-1]) + 1e-3) + \
@@ -620,11 +630,18 @@ class Trainer:
         for n in self.opt.models_to_load:
             print("Loading {} weights...".format(n))
             path = os.path.join(self.opt.load_weights_folder, "{}.pth".format(n))
-            model_dict = self.models[n].state_dict()
-            pretrained_dict = torch.load(path)
-            pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-            model_dict.update(pretrained_dict)
-            self.models[n].load_state_dict(model_dict)
+            if n in self.models:
+                model_dict = self.models[n].state_dict()
+                pretrained_dict = torch.load(path)
+                pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+                model_dict.update(pretrained_dict)
+                self.models[n].load_state_dict(model_dict)
+            if n in self.models_D:
+                model_dict = self.models_D[n].state_dict()
+                pretrained_dict = torch.load(path)
+                pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+                model_dict.update(pretrained_dict)
+                self.models_D[n].load_state_dict(model_dict)
         # loading adam state
         optimizer_load_path = os.path.join(self.opt.load_weights_folder, "adam.pth")
         if os.path.isfile(optimizer_load_path):
