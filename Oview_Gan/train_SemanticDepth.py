@@ -251,6 +251,20 @@ class Trainer:
 
         outputs['rendered_syn'] = rendered_syn
         outputs['rendered_real'] = rendered_real
+
+        # Visualization
+        # rendered_real = rendered_real.detach()
+        # rendered_real = nn.Parameter(rendered_real, requires_grad = True)
+        # ada = optim.Adam([rendered_real], lr=1e-4)
+        # a = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
+        # ada.zero_grad()
+        # rendered_real.register_hook(save_grad('rendered_real'))
+        # grads['rendered_real'] = grads['rendered_real'] * 0
+        # # (torch.sum(a[('syn_prob', 0)])).backward()
+        # (self.mbcel(a, asSyn = True)).backward()
+        # g_real = -grads['rendered_real']
+        # tensor2grad(g_real, viewind=0, percentile=99).show()
+
         self.set_eval_D()
         pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
 
@@ -291,7 +305,7 @@ class Trainer:
         pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real.detach()))
         loss_D = (self.mbcel(pred_syn, asSyn = True) + self.mbcel(pred_real, asSyn = False)) / 2
         losses['loss_D'] = loss_D
-        if self.step < 200:
+        if self.step < 2e10:
             self.DOptimizer.zero_grad()
             loss_D.backward()
             self.DOptimizer.step()
