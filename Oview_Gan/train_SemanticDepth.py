@@ -268,7 +268,7 @@ class Trainer:
         self.set_eval_D()
         pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
         loss_G = self.mbcel(pred_real, asSyn = True)
-        outputs['loss_G'] = -grads['loss_G']
+        outputs['loss_G'] = loss_G
         # For Visualization
         # testT = nn.Parameter(torch.zeros_like(rendered_real), requires_grad = True)
         # testT.register_hook(save_grad('testT'))
