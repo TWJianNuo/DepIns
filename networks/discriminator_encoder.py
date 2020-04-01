@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 import torch.utils.model_zoo as model_zoo
-
+import torch.nn.functional as F
 
 class ResNetMultiImageInput(models.ResNet):
     """Constructs a resnet model with varying number of input images.
@@ -31,7 +31,7 @@ class ResNetMultiImageInput(models.ResNet):
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
 
-        self.output_layer = nn.Sequential(nn.Conv2d(in_channels=512, out_channels=1, kernel_size=3, padding=1))
+        # self.output_layer = nn.Sequential(nn.Conv2d(in_channels=512, out_channels=1, kernel_size=3, padding=1))
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -60,11 +60,11 @@ def resnet_multiimage_input(num_layers, pretrained=False, num_input_images=1):
     return model
 
 
-class ResnetDiscriminator(nn.Module):
+class DiscriminatorEncoder(nn.Module):
     """Pytorch module for a resnet encoder
     """
     def __init__(self, num_layers, pretrained, num_input_images=1):
-        super(ResnetDiscriminator, self).__init__()
+        super(DiscriminatorEncoder, self).__init__()
 
         self.num_ch_enc = np.array([64, 64, 128, 256, 512])
 
@@ -91,21 +91,18 @@ class ResnetDiscriminator(nn.Module):
             if isinstance(module, torch.nn.modules.BatchNorm3d):
                 module.eval()
 
-        # layer1_new = nn.Sequential()
-        # for module in list(self.encoder.layer1):
-        #     if not isinstance(module, torch.nn.modules.BatchNorm2d):
-        #         layer1_new = nn.Sequential(layer1_new, module)
-        # self.encoder.layer1 = layer1_new
-
     def forward(self, input_image):
         self.features = []
-        x = input_image
-        x = self.encoder.conv1(x)
+        _, _, height, width = input_image.shape
+        scaleMask = dict()
+        for i in [-1, 0, 1, 2, 3, 4]:
+            scaleMask[i] = (F.interpolate(input_image, [int(height / 2 ** (i + 1)), int(width / 2 ** (i + 1))], mode="bilinear", align_corners=False) > 0).float()
+        x = self.encoder.conv1(input_image)
         x = self.encoder.bn1(x)
-        x = self.encoder.relu(x)
-        x = self.encoder.layer1(self.encoder.maxpool(x))
-        x = self.encoder.layer2(x)
-        x = self.encoder.layer3(x)
-        x = self.encoder.layer4(x)
-        x = self.encoder.output_layer(x)
-        return x
+        self.features.append(self.encoder.relu(x) * scaleMask[0].expand([-1, self.num_ch_enc[0], -1, -1]))
+        self.features.append(self.encoder.layer1(self.encoder.maxpool(self.features[-1])) * scaleMask[1].expand([-1, self.num_ch_enc[1], -1, -1]))
+        self.features.append(self.encoder.layer2(self.features[-1]) * scaleMask[2].expand([-1, self.num_ch_enc[2], -1, -1]))
+        self.features.append(self.encoder.layer3(self.features[-1]) * scaleMask[3].expand([-1, self.num_ch_enc[3], -1, -1]))
+        self.features.append(self.encoder.layer4(self.features[-1]) * scaleMask[4].expand([-1, self.num_ch_enc[4], -1, -1]))
+        self.features.append(scaleMask)
+        return self.features

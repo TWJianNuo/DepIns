@@ -6,7 +6,8 @@
 
 CUDA_VISIBLE_DEVICES=1 python generate_depth_prediction.py --load_weights_folder /research/cvl-zhusheng/DepIns/trained_models/mono+stereo_1024x320 --split quadruplets --width 1024 --height 320 --batch_size 16 --num_workers 16 --png --data_path /scratch1/kitti_data --post_process --save_dir /scratch1/zhusheng/monodepth2_depth_prediction
 
-scp /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/predicted_detect_label.tar zhusheng@cvl4.cse.msu.edu:/scratch1/zhusheng
+scp kumar_marks_mou_wang_jones_akino_cherian_liu_feng_cvpr2020.mp4 zhusheng@cvl1.cse.msu.edu:/research/liuxm/web
+scp bai_cui_rahim_liu_tan_cvpr2020.mp4 zhusheng@cvl1.cse.msu.edu:/research/liuxm/web
 
 tar -xvf predicted_detect_label.tar
 
@@ -587,3 +588,47 @@ scl enable devtoolset-3 tcsh
 --script_name epplGpuTest.py --model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 256 --height 80 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 1 --save_frequency 500000000 --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 1 --discriminator_pretrain_round 2000000000 --print_freq 10 --discrimScale 0 --log_frequency 10 --noShuffle --num_workers 1 --epplr 1e-3 --eppsm 5 --learning_rate 1e-3
 
 --script_name epplGpuTest.py --model_name oview_iterate --frame_ids 0 --use_stereo --split sfnorm_pair --data_path /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw --width 1024 --height 320 --png --gtDepthRoot /media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/projected_groundtruth --synRoot /media/shengjie/other/Data/virtual_kitti_organized --batch_size 2 --save_frequency 500000000 --log_dir /media/shengjie/other/Depins/Depins/tmp --models_to_load encoder depth sfnD --num_epochs 10 --num_workers 1 --eppsm 20 --epplr 1e-4 --learning_rate 1e-4 --noShuffle
+
+--model_name semantics_trial --frame_ids 0 --use_stereo --split eigen_full --log_dir /home/shengjie/Documents/Project_SemanticDepth/tmp --dataset kitti --data_path /media/shengjie/41ff2257-7f26-40ad-8e61-6c4653074759/home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --selfocclu --batch_size 3 --load_weights_folder /home/shengjie/Documents/Project_EdgeDepth/EdgeDepth_release/tmp/2fenf_bs_occ_lp15_res50_ft/models/weights_3 --num_epochs 15 --depth_hint_param 1 --SGMStereo_prediction_folder /home/shengjie/Documents/Data/Kitti/fused_depth_hints --height 320 --width 1024 --num_workers 4 --load_hints --hints_path /home/shengjie/Documents/Data/Kitti/fused_depth_hints --bnMorphLoss --num_layers 50 --load_syn --syn_split vrkitti_pole --syn_path /home/shengjie/Documents/Data/virtual_kitti_organized --Dloss --lrD 1e-5 --weightD 1e-5 --bnMorphLoss_w 0
+
+
+CUDA_VISIBLE_DEVICES=4 python Oview_Gan/train_SemanticDepth.py --model_name semantics_trial_t200_3 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --selfocclu --batch_size 4 --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/2fenf_bs_occ_lp15_res50_ft/models/weights_3 --num_epochs 15 --depth_hint_param 1 --SGMStereo_prediction_folder /scratch1/zhusheng/fused_depth_hints --height 320 --width 1024 --num_workers 8 --load_hints --hints_path /scratch1/zhusheng/fused_depth_hints --bnMorphLoss --num_layers 50 --load_syn --syn_split vrkitti_pole --syn_path /scratch1/zhusheng/virtual_kitti_organized --Dloss --lrD 1e-5 --weightD 2e-5 --bnMorphLoss_w 0
+
+CUDA_VISIBLE_DEVICES=5 python Oview_Gan/train_SemanticDepth.py --model_name semantics_trial_t200 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --selfocclu --batch_size 4 --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/2fenf_bs_occ_lp15_res50_ft/models/weights_3 --num_epochs 15 --depth_hint_param 1 --SGMStereo_prediction_folder /scratch1/zhusheng/fused_depth_hints --height 320 --width 1024 --num_workers 8 --load_hints --hints_path /scratch1/zhusheng/fused_depth_hints --bnMorphLoss --num_layers 50 --load_syn --syn_split vrkitti_pole --syn_path /scratch1/zhusheng/virtual_kitti_organized --Dloss --lrD 1e-5 --weightD 1e-5 --bnMorphLoss_w 0
+
+
+CUDA_VISIBLE_DEVICES=1 python Oview_Gan/train_SemanticDepth.py --model_name semantics_trial_t200_3 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --selfocclu --batch_size 4 --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/2fenf_bs_occ_lp15_res50_ft/models/weights_3 --num_epochs 15 --depth_hint_param 1 --SGMStereo_prediction_folder /scratch1/zhusheng/fused_depth_hints --height 320 --width 1024 --num_workers 8 --load_hints --hints_path /scratch1/zhusheng/fused_depth_hints --bnMorphLoss --num_layers 50 --load_syn --syn_split vrkitti_pole --syn_path /scratch1/zhusheng/virtual_kitti_organized --Dloss --lrD 1e-5 --weightD 2e-5 --bnMorphLoss_w 0
+
+CUDA_VISIBLE_DEVICES=5 python Oview_Gan/train_SemanticDepth.py --model_name semantics_trial_t200_5 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --selfocclu --batch_size 4 --load_weights_folder /research/cvl-zhusheng/DepIns/tmp/2fenf_bs_occ_lp15_res50_ft/models/weights_3 --num_epochs 15 --depth_hint_param 1 --SGMStereo_prediction_folder /scratch1/zhusheng/fused_depth_hints --height 320 --width 1024 --num_workers 8 --load_hints --hints_path /scratch1/zhusheng/fused_depth_hints --bnMorphLoss --num_layers 50 --load_syn --syn_split vrkitti_pole --syn_path /scratch1/zhusheng/virtual_kitti_organized --Dloss --lrD 1e-5 --weightD 2e-5 --bnMorphLoss_w 0
+
+
+scp -r /media/shengjie/other/Depins/EdgeDepth/tmp/2fenf_bs_occ_lp15_res50_ft zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp
+
+python3 -m tensorboard.main --logdir=/home/shengjie/Documents/Project_SemanticDepth/tmp/semantics_trial3 --port 2007
+
+tensorboard --logdir /home/shengjie/Documents/Project_SemanticDepth/tmp/semantics_trial --samples_per_plugin=images=100 --port 2010
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/semantics_trial --samples_per_plugin=images=100 --port 2010
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/semantics_trial --samples_per_plugin=images=100 --port 2012
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/semantics_trial_t200 --samples_per_plugin=images=100 --port 2013
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/semantics_trial_t200_2 --samples_per_plugin=images=100 --port 2014
+
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/semantics_trial_t200_3 --samples_per_plugin=images=100 --port 2015
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/semantics_trial_t200_4 --samples_per_plugin=images=100 --port 2016
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/semantics_trial_t200_5 --samples_per_plugin=images=100 --port 2017
+
+
+--model_name bnMT1_bs --frame_ids 0 --use_stereo --split eigen_full --log_dir tmp --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --switchMode off --png --batch_size 2 --is_predicted_semantics --num_epochs 25 --inline_finetune --use_ssim_compare_mask --l1_weight 0 --is_texture_weighted --read_stereo --depth_hint_param 0 --SGMStereo_prediction_folder /home/shengjie/Documents/Data/Kitti/fused_depth_hints --num_workers 0 --load_weights_folder /home/shengjie/Documents/Project_EdgeDepth/EdgeDepth_release/tmp/depth_hints_resnet50_stereo_lowres --num_layers 50 --models_to_load encoder depth --height 320 --width 1024 --no_shuffle --no_aug --disparity_smoothness 0 --scheduler_step_size 5 --bnMorphLoss
+
+
+
+--model_name semantics_trial --frame_ids 0 --use_stereo --split eigen_full --log_dir /home/shengjie/Documents/Project_SemanticDepth/tmp --dataset kitti --data_path /media/shengjie/41ff2257-7f26-40ad-8e61-6c4653074759/home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --selfocclu --batch_size 2 --load_weights_folder /home/shengjie/Documents/Project_EdgeDepth/EdgeDepth_release/tmp/2fenf_bs_occ_lp15_res50_ft/models/weights_3 --num_epochs 15 --depth_hint_param 1 --SGMStereo_prediction_folder /home/shengjie/Documents/Data/Kitti/fused_depth_hints --height 320 --width 1024 --num_workers 0 --load_hints --hints_path /home/shengjie/Documents/Data/Kitti/fused_depth_hints --bnMorphLoss --num_layers 50 --load_syn --syn_split vrkitti_pole --syn_path /home/shengjie/Documents/Data/virtual_kitti_organized --Dloss --lrD 1e-5 --weightD 1e-5 --bnMorphLoss_w 0
+
+
+convert aba_combined2.png -quality 95 aba_combined2.jpg
+convert combined2.png -quality 95 combined2.jpg
+convert compare3_2.png -quality 95 compare3_2.jpg
+convert aba_combined2.png -background white -flatten -alpha off -quality 95 aba_combined2.jpg
+convert combined2.png -background white -flatten -alpha off -quality 95 combined2.jpg
+convert compare3_2.png -background white -flatten -alpha off -quality 95 compare3_2.jpg
+pdflatex ExplicitConstraintSegDepth.tex & bibtex ExplicitConstraintSegDepth.aux & pdflatex ExplicitConstraintSegDepth.tex  & pdflatex ExplicitConstraintSegDepth.tex
+

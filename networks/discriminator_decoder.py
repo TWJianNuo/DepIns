@@ -14,9 +14,9 @@ from collections import OrderedDict
 from layers import *
 
 
-class DepthDecoder(nn.Module):
-    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_skips=True, predins=False):
-        super(DepthDecoder, self).__init__()
+class DiscriminatorDecoder(nn.Module):
+    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_skips=True):
+        super(DiscriminatorDecoder, self).__init__()
 
         self.num_output_channels = num_output_channels
         self.use_skips = use_skips
@@ -42,7 +42,7 @@ class DepthDecoder(nn.Module):
             self.convs[("upconv", i, 1)] = ConvBlock(num_ch_in, num_ch_out)
 
         for s in self.scales:
-            self.convs[("dispconv", s)] = Conv3x3(self.num_ch_dec[s], self.num_output_channels)
+            self.convs[("syn_prob", s)] = Conv3x3(self.num_ch_dec[s], self.num_output_channels)
 
         self.decoder = nn.ModuleList(list(self.convs.values()))
         self.sigmoid = nn.Sigmoid()
@@ -52,15 +52,17 @@ class DepthDecoder(nn.Module):
         self.outputs = {}
 
         # decoder
-        x = input_features[-1]
+        mask = input_features[5]
+        x = input_features[-2]
         for i in range(4, -1, -1):
             x = self.convs[("upconv", i, 0)](x)
             x = [upsample(x)]
             if self.use_skips and i > 0:
                 x += [input_features[i - 1]]
             x = torch.cat(x, 1)
-            x = self.convs[("upconv", i, 1)](x)
+            x = self.convs[("upconv", i, 1)](x) * mask[i - 1].expand([-1, self.num_ch_dec[i], -1, -1])
             if i in self.scales:
-                self.outputs[("disp", i)] = self.sigmoid(self.convs[("dispconv", i)](x))
-
+                self.outputs[("syn_prob", i)] = self.sigmoid(self.convs[("syn_prob", i)](x))
+        self.outputs['mask'] = mask
         return self.outputs
+

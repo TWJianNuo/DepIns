@@ -8,7 +8,8 @@ from .sfn_discriminator import SfnD
 
 from .cycle_gan_model import CycleGANModel
 
-from .resnet_discriminator import ResnetDiscriminator
+from .discriminator_encoder import DiscriminatorEncoder
+from .discriminator_decoder import DiscriminatorDecoder
 def create_model(opt):
     instance = CycleGANModel(opt)
     print("model [%s] was created" % type(instance).__name__)

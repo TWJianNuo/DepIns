@@ -1756,3 +1756,19 @@ class TextureIndicatorM(nn.Module):
         mu_x = self.mu_x_pool(x)
         sigma_x  = self.sig_x_pool(x ** 2) - mu_x ** 2
         return sigma_x
+
+
+class MulScaleBCELoss(nn.Module):
+    def __init__(self, scales):
+        super(MulScaleBCELoss, self).__init__()
+        self.scales = scales
+        self.bcel = nn.BCELoss(reduction='none')
+    def forward(self, pred_real, asSyn):
+        l = 0
+        _, _, height, width = pred_real[('syn_prob', 0)].shape
+        for i in self.scales:
+            if asSyn:
+                l += torch.sum(self.bcel(F.interpolate(pred_real[('syn_prob', i)], [height, width], mode="bilinear",align_corners=False), torch.ones_like(pred_real[('syn_prob', 0)])) * pred_real['mask'][-1]) / torch.sum(pred_real['mask'][-1] + 1e-3)
+            else:
+                l += torch.sum(self.bcel(F.interpolate(pred_real[('syn_prob', i)], [height, width], mode="bilinear",align_corners=False), torch.zeros_like(pred_real[('syn_prob', 0)])) * pred_real['mask'][-1]) / torch.sum(pred_real['mask'][-1] + 1e-3)
+        return l

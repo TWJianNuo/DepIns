@@ -58,10 +58,16 @@ class Trainer:
         self.models["depth"] = networks.DepthDecoder(
             self.models["encoder"].num_ch_enc, self.opt.scales)
         self.models["depth"].to(self.device)
+
         self.models_D = {}
-        self.models_D["discriminator"] = networks.ResnetDiscriminator(
-            18, self.opt.weights_init == "pretrained")
-        self.models_D["discriminator"].to(self.device)
+        self.models_D["D_encoder"] = networks.DiscriminatorEncoder(18, self.opt.weights_init == "pretrained")
+        self.models_D["D_encoder"].to(self.device)
+        self.models_D["D_decoder"] = networks.DiscriminatorDecoder(self.models_D["D_encoder"].num_ch_enc, self.opt.scales)
+        self.models_D["D_decoder"].to(self.device)
+        self.DOptimizer = optim.Adam(list(self.models_D["D_encoder"].parameters()) + list( self.models_D["D_decoder"].parameters()), self.opt.lrD)
+        self.accRec = list() # Record recent 40 results
+        # self.bcel = torch.nn.BCELoss()
+        self.mbcel = MulScaleBCELoss(self.opt.scales)
 
         self.parameters_to_train += list(self.models["depth"].parameters())
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
@@ -91,11 +97,6 @@ class Trainer:
         if self.opt.load_weights_folder is not None:
             self.load_model()
         self.save_opts()
-
-        self.bcewl = nn.BCEWithLogitsLoss()
-        self.sig = nn.Sigmoid()
-        self.DOptimizer = optim.Adam(self.models_D["discriminator"].parameters(), self.opt.lrD)
-        self.accRec = list() # Record recent 40 results
 
     def set_layers(self):
         """properly handle layer initialization under multiple dataset situation
@@ -251,9 +252,9 @@ class Trainer:
         outputs['rendered_syn'] = rendered_syn
         outputs['rendered_real'] = rendered_real
         self.set_eval_D()
-        pred_real = self.models_D['discriminator'](rendered_real)
-        loss_G = self.bcewl(pred_real,torch.ones_like(pred_real))
-        losses['loss_G'] = loss_G
+        pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
+
+        loss_G = self.mbcel(pred_real, asSyn = True)
 
         # For Visualization
         # testT = nn.Parameter(torch.zeros_like(rendered_real), requires_grad = True)
@@ -286,22 +287,24 @@ class Trainer:
         # Train Discriminator
         self.set_eval()
         self.set_train_D()
-        pred_syn = self.models_D['discriminator'](rendered_syn)
-        pred_real = self.models_D['discriminator'](rendered_real.detach())
-        loss_D = (self.bcewl(pred_syn, torch.ones_like(pred_syn)) + self.bcewl(pred_real, torch.zeros_like(pred_real))) / 2
+        pred_syn = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_syn))
+        pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real.detach()))
+        loss_D = (self.mbcel(pred_syn, asSyn = True) + self.mbcel(pred_real, asSyn = False)) / 2
         losses['loss_D'] = loss_D
         if self.step < 200:
             self.DOptimizer.zero_grad()
             loss_D.backward()
             self.DOptimizer.step()
 
-        acc_rate = (torch.sum(self.sig(pred_syn) > 0.5) + torch.sum(self.sig(pred_real) <= 0.5)) / (2 * torch.sum(torch.ones_like(pred_syn)))
+        acc_rate = (torch.sum((pred_syn[('syn_prob', 0)]) > 0.5) + torch.sum(pred_real[('syn_prob', 0)] <= 0.5)) / (2 * torch.sum(torch.ones_like(pred_syn[('syn_prob', 0)])))
         losses['D_acc_rate'] = acc_rate
         if len(self.accRec) < 100:
             self.accRec.append(acc_rate.detach().cpu().numpy())
         else:
             self.accRec[self.step % 100] = acc_rate.detach().cpu().numpy()
         return outputs, losses
+
+
 
     def run_epoch(self):
         """Run a single epoch of training and validation

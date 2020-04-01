@@ -97,7 +97,7 @@ class Trainer_GAN:
         if self.opt.use_stereo:
             self.opt.frame_ids.append("s")
 
-        self.models["discriminator"] = networks.ResnetDiscriminator(self.opt.num_layers, self.opt.weights_init == "pretrained")
+        self.models["discriminator"] = networks.DiscriminatorEncoder(self.opt.num_layers, self.opt.weights_init == "pretrained")
         self.models["discriminator"].to(self.device)
 
         self.models["encoder"] = networks.ResnetEncoder(
