@@ -167,7 +167,8 @@ class EpplRender(nn.Module):
         # Init kernel window size
         self.kws = 2.3
         # Init sense range
-        self.sr = 7
+        # self.sr = 7
+        self.sr = 39
 
         self.eps = 1e-6
         # self.sampleNum = 10

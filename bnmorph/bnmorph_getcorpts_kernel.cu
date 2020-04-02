@@ -45,7 +45,6 @@ __device__ __forceinline__ scalar_t alpha_d_weight_function(scalar_t x, scalar_t
     }
     else{
         y = sigmoid(-sigmoid_sr * (x - bias_pos));
-
     }
     return y;
 }

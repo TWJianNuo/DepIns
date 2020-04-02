@@ -236,7 +236,7 @@ class Trainer:
         losses["similarity_loss"] = 100 * torch.sum(torch.log(1 + torch.abs(dispMaps_morphed - outputs['disp', 0]) * texture_measure) * selector_mask) / (torch.sum(selector_mask) + 1)
         losses['totLoss'] = losses["similarity_loss"] * self.opt.bnMorphLoss_w + losses['totLoss']
 
-        camIndex = [3]
+        camIndex = [4]
         rendered_syn, _, _ = self.epplrender.forward(depthmap=inputs[('syn_depth', 0)],
                                                      semanticmap=inputs['syn_semanLabel'],
                                                      intrinsic=inputs['realIn'],
@@ -251,6 +251,10 @@ class Trainer:
 
         outputs['rendered_syn'] = rendered_syn
         outputs['rendered_real'] = rendered_real
+        # tensor2disp(rendered_syn, vmax=0.01, ind=0).show()
+        # tensor2disp(rendered_real, vmax=0.01, ind=0).show()
+        # tensor2disp(rendered_real > 0, vmax=0.01, ind=0).show()
+        # tensor2disp(inputs['semanLabel'] == 5, vmax=1, ind=0).show()
 
         self.set_eval_D()
         pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
@@ -260,7 +264,7 @@ class Trainer:
         # Visualization
         # depMap = (outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR).detach()
         # depMap = nn.Parameter(depMap, requires_grad=True)
-        # ada = optim.Adam([depMap], lr=1e-4)
+        # ada = optim.Adam([depMap], lr=1e-2)
         # for i in range(1000):
         #     rendered_real, _, _ = self.epplrender.forward(depthmap=depMap,
         #                                                   semanticmap=inputs['semanLabel'],
@@ -269,8 +273,8 @@ class Trainer:
         #                                                   camIndex=camIndex)
         #     predT = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
         #     if i % 10 == 0:
-        #         fig1 = tensor2disp(rendered_real, ind = 0, vmax = 0.1)
-        #         fig2 = tensor2disp((1 - predT[('syn_prob', 0)]) * predT['mask'][-1], ind=0,vmax=1)
+        #         fig1 = tensor2disp(rendered_real, ind = 1, vmax = 0.01)
+        #         fig2 = tensor2disp((1 - predT[('syn_prob', 0)]) * predT['mask'][-1], ind=1, vmax=1)
         #         combined = np.concatenate([np.array(fig1), np.array(fig2)], axis=0)
         #         pil.fromarray(combined).save(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/testD', str(i) + '.png'))
         #
@@ -279,7 +283,7 @@ class Trainer:
         #     loss_G.backward()
         #     ada.step()
         #     print(loss_G)
-
+        # aaa
 
         # rendered_real.register_hook(save_grad('rendered_real'))
         # grads['rendered_real'] = grads['rendered_real'] * 0
@@ -552,7 +556,7 @@ class Trainer:
         fig_seman_real = tensor2semantic(inputs['semanLabel'], ind=viewIndex)
         fig_disp = tensor2disp(outputs[('disp', 0)], ind=viewIndex, vmax=0.1)
         fig_rgb = tensor2rgb(inputs[('color', 0, 0)], ind=viewIndex)
-        fig_render_real = tensor2disp(outputs['rendered_real'], ind=viewIndex, vmax=0.1)
+        fig_render_real = tensor2disp(outputs['rendered_real'], ind=viewIndex, vmax=0.01)
 
         fig_predReal2Real = tensor2disp((1-outputs['pred_real'][('syn_prob', 0)]) * outputs['pred_real']['mask'][-1], ind=viewIndex, vmax=1)
         fig_predSyn2Syn = tensor2disp(outputs['pred_syn'][('syn_prob', 0)] * outputs['pred_syn']['mask'][-1], ind=viewIndex, vmax = 1)
