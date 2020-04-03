@@ -319,6 +319,8 @@ class Trainer:
         trTime = 500
         if self.step == trTime:
             self.save_model()
+        if self.step % 8000:
+            self.save_model()
         if self.step < trTime:
             self.DOptimizer.zero_grad()
             loss_D.backward()
@@ -594,7 +596,8 @@ class Trainer:
     def save_model(self):
         """Save model weights to disk
         """
-        save_folder = os.path.join(self.log_path, "models", "weights_{}".format(self.epoch))
+        # save_folder = os.path.join(self.log_path, "models", "weights_{}".format(self.epoch))
+        save_folder = os.path.join(self.log_path, "models", "weights_{}".format(self.step))
         if not os.path.exists(save_folder):
             os.makedirs(save_folder)
 
