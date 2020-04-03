@@ -319,7 +319,7 @@ class Trainer:
         trTime = 500
         if self.step == trTime:
             self.save_model()
-        if self.step % 8000:
+        if self.step % 8000 == 0:
             self.save_model()
         if self.step < trTime:
             self.DOptimizer.zero_grad()
