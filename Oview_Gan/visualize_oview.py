@@ -237,20 +237,84 @@ class Trainer:
         losses['totLoss'] = losses["similarity_loss"] * self.opt.bnMorphLoss_w + losses['totLoss']
 
         camIndex = [4]
+        # camIndex = list(range(20))
+        rendered_syn, _, _ = self.epplrender.forward(depthmap=inputs[('syn_depth', 0)],
+                                                     semanticmap=inputs['syn_semanLabel'],
+                                                     intrinsic=inputs['realIn'],
+                                                     extrinsic=inputs['realEx'],
+                                                     camIndex=camIndex)
 
-        rendered_real, _, _, addmask = self.epplrender.forward(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR,
+        rendered_real, _, _ = self.epplrender.forward(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR,
                                                     semanticmap=inputs['semanLabel'],
                                                     intrinsic=inputs['realIn'],
                                                     extrinsic=inputs['realEx'],
                                                     camIndex=camIndex)
+
+        combines = list()
+        for i in range(1):
+            fig1 = tensor2disp(rendered_syn[0, :, :, :].unsqueeze(1), vmax=0.1, ind=i)
+            fig2 = tensor2disp(rendered_syn[0, :, :, :].unsqueeze(1), vmax=0.1, ind=i)
+            combined = np.concatenate([np.array(fig1), np.array(fig2)], axis=1)
+            combines.append(combined)
+        pil.fromarray(np.concatenate(combines, axis=0)).save(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/vis_vircams', str(self.step) + '_syn.png'))
+        rendered_syn = rendered_syn[:, 0:1, :, :]
         combines = list()
         for i in range(1):
             fig1 = tensor2disp(rendered_real[0, :, :, :].unsqueeze(1), vmax=0.1, ind=i)
-            fig2 = tensor2disp(addmask[0, :, :, :].unsqueeze(1), vmax=1, ind=i)
+            fig2 = tensor2disp(rendered_real[0, :, :, :].unsqueeze(1), vmax=0.1, ind=i)
             combined = np.concatenate([np.array(fig1), np.array(fig2)], axis=1)
             combines.append(combined)
         pil.fromarray(np.concatenate(combines, axis=0)).save(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/vis_vircams', str(self.step) + '_real.png'))
         # rendered_real = rendered_real[:, 0:1, :, :]
+
+        outputs['rendered_syn'] = rendered_syn
+        outputs['rendered_real'] = rendered_real
+
+        self.set_eval_D()
+        pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real))
+        loss_G = self.mbcel(pred_real, asSyn = True)
+        losses['loss_G'] = loss_G
+
+        rendered_real.register_hook(save_grad('rendered_real'))
+        if np.sum(np.array(self.accRec)) > 0.8:
+            losses['totLoss'] = losses['totLoss'] + loss_G * self.opt.weightD
+            losses['isD'] = 1
+        else:
+            losses['isD'] = 0
+            losses['totLoss'] = losses['totLoss'] + loss_G * 0
+        self.model_optimizer.zero_grad()
+        losses['totLoss'].backward()
+        outputs['rendered_real_grad'] = -grads['rendered_real']
+        self.model_optimizer.step()
+
+        # Train Discriminator
+        self.set_eval()
+        self.set_train_D()
+        pred_syn = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_syn))
+        pred_real = self.models_D['D_decoder'](self.models_D['D_encoder'](rendered_real.detach()))
+        loss_D = (self.mbcel(pred_syn, asSyn = True) + self.mbcel(pred_real, asSyn = False)) / 2
+        losses['loss_D'] = loss_D
+        outputs['pred_syn'] = pred_syn
+        outputs['pred_real'] = pred_real
+
+        trTime = 500
+        if self.step % 8000 == 0:
+            self.save_model()
+        if self.step < trTime:
+            self.DOptimizer.zero_grad()
+            loss_D.backward()
+            self.DOptimizer.step()
+
+
+        acc_rate = (
+        torch.sum(((pred_syn[('syn_prob', 0)]) > 0.5).float() * pred_syn['mask'][-1]) / (torch.sum(pred_syn['mask'][-1]) + 1e-3) + \
+        torch.sum(((pred_real[('syn_prob', 0)]) < 0.5).float() * pred_real['mask'][-1]) / (torch.sum(pred_real['mask'][-1]) + 1e-3)
+        ) / 2
+        losses['D_acc_rate'] = acc_rate
+        if len(self.accRec) < 100:
+            self.accRec.append(acc_rate.detach().cpu().numpy())
+        else:
+            self.accRec[self.step % 100] = acc_rate.detach().cpu().numpy()
         return outputs, losses
 
 
@@ -272,6 +336,9 @@ class Trainer:
 
             if self.step % 100 == 0:
                 self.log_time(batch_idx, duration, losses['loss_depth/0'], losses["totLoss"])
+
+            if self.step % 50 == 0:
+                self.record_img(inputs, outputs)
 
             if self.step % 2 == 0:
                 self.log("train", inputs, outputs, losses, writeImage=False)

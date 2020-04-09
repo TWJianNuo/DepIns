@@ -167,8 +167,8 @@ class EpplRender(nn.Module):
         # Init kernel window size
         self.kws = 2.3
         # Init sense range
-        # self.sr = 7
-        self.sr = 39
+        self.sr = 7
+        # self.sr = 39
 
         self.eps = 1e-6
         # self.sampleNum = 10
@@ -610,7 +610,7 @@ class EpplRender(nn.Module):
         projected2d, projecteddepth, selector = self.proj2de(pts3d=pts3d, intrinsic=intrinsic, nextrinsic=nextrinsic, addmask = addmask)
         rimg = self.epplf(depthmap, inv_r_sigma, projected2d, selector, Pcombined, self.kws, self.sr)
 
-        return rimg, inv_r_sigma, Pcombined
+        return rimg, inv_r_sigma, Pcombined, addmask
 
     def erpipolar_rendering_test(self, depthmap, semanticmap, intrinsic, extrinsic):
         # Compute Mask
@@ -910,10 +910,11 @@ class EpplRender(nn.Module):
 
     def post_mask(self, depthmap, semanticmap):
         # Post Semantic Mask
-        visibletype = [5]  # pole
+        # visibletype = [5]  # pole
         # visibletype = [2, 3, 4]  # building, wall, fence
         # visibletype = [11, 12, 16, 17]  # person, rider, motorcycle, bicycle
         # visibletype = [13, 14, 15, 16]  # car, truck, bus, train
+        visibletype = [13, 14, 15, 16]
         addmask = torch.zeros_like(semanticmap)
         for vt in visibletype:
             addmask = addmask + (semanticmap == vt).byte()

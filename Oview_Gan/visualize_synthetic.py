@@ -197,13 +197,14 @@ class Trainer:
     def train(self):
         """Run the entire training pipeline
         """
-        self.epoch = 0
-        self.step = 0
-        self.start_time = time.time()
-        for self.epoch in range(self.opt.num_epochs):
-            self.run_epoch()
-            if (self.epoch + 1) % self.opt.save_frequency == 0:
-                self.save_model()
+        with torch.no_grad():
+            self.epoch = 0
+            self.step = 0
+            self.start_time = time.time()
+            for self.epoch in range(self.opt.num_epochs):
+                self.run_epoch()
+                if (self.epoch + 1) % self.opt.save_frequency == 0:
+                    self.save_model()
 
     def supervised_with_morph(self, inputs):
         outputs, losses = self.process_batch(inputs)
@@ -236,21 +237,25 @@ class Trainer:
         losses["similarity_loss"] = 100 * torch.sum(torch.log(1 + torch.abs(dispMaps_morphed - outputs['disp', 0]) * texture_measure) * selector_mask) / (torch.sum(selector_mask) + 1)
         losses['totLoss'] = losses["similarity_loss"] * self.opt.bnMorphLoss_w + losses['totLoss']
 
-        camIndex = [4]
-
-        rendered_real, _, _, addmask = self.epplrender.forward(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR,
-                                                    semanticmap=inputs['semanLabel'],
+        camIndex = [3]
+        # camIndex = list(range(20))
+        rendered_real, _, _, _ = self.epplrender.forward(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR,
+                                                    semanticmap=inputs['syn_semanLabel'],
                                                     intrinsic=inputs['realIn'],
                                                     extrinsic=inputs['realEx'],
                                                     camIndex=camIndex)
-        combines = list()
-        for i in range(1):
-            fig1 = tensor2disp(rendered_real[0, :, :, :].unsqueeze(1), vmax=0.1, ind=i)
-            fig2 = tensor2disp(addmask[0, :, :, :].unsqueeze(1), vmax=1, ind=i)
-            combined = np.concatenate([np.array(fig1), np.array(fig2)], axis=1)
-            combines.append(combined)
-        pil.fromarray(np.concatenate(combines, axis=0)).save(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/vis_vircams', str(self.step) + '_real.png'))
-        # rendered_real = rendered_real[:, 0:1, :, :]
+        rendered_syn, _, _, _ = self.epplrender.forward(depthmap=inputs[('syn_depth', 0)],
+                                                    semanticmap=inputs['syn_semanLabel'],
+                                                    intrinsic=inputs['realIn'],
+                                                    extrinsic=inputs['realEx'],
+                                                    camIndex=camIndex)
+        fig1 = tensor2disp(rendered_real[0, :, :, :].unsqueeze(1), vmax=0.1, ind=0)
+        fig2 = tensor2disp(outputs[('disp', 0)], vmax=0.1, ind=0)
+        fig3 = tensor2rgb(inputs[('syn_rgb', 0)], ind = 0)
+        fig4 = tensor2disp(rendered_syn[0, :, :, :].unsqueeze(1), vmax=0.1, ind=0)
+        combined = np.concatenate([np.array(fig3), np.array(fig2), np.array(fig1), np.array(fig4)], axis=0)
+        # pil.fromarray(combined).show()
+        pil.fromarray(combined).save(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/pred_on_synthetic', str(self.step) + '_real.png'))
         return outputs, losses
 
 
@@ -268,17 +273,6 @@ class Trainer:
             outputs, losses = self.supervised_with_morph(inputs)
 
             duration = time.time() - before_op_time
-
-
-            if self.step % 100 == 0:
-                self.log_time(batch_idx, duration, losses['loss_depth/0'], losses["totLoss"])
-
-            if self.step % 2 == 0:
-                self.log("train", inputs, outputs, losses, writeImage=False)
-
-            if self.step % 15 == 0:
-                self.val()
-
             self.step += 1
 
     def process_batch(self, inputs):
@@ -288,7 +282,7 @@ class Trainer:
             if not (key == 'entry_tag' or key == 'syn_tag'):
                 inputs[key] = ipt.to(self.device)
 
-        features = self.models["encoder"](inputs["color_aug", 0, 0])
+        features = self.models["encoder"](inputs[('syn_rgb', 0)])
         outputs = dict()
         outputs.update(self.models["depth"](features))
         self.generate_images_pred(inputs, outputs)
@@ -383,9 +377,9 @@ class Trainer:
             reprojection_loss_mask = (idxs != 1).float() * (1 - outputs['ssimMask'])
             depth_hint_loss_mask = (idxs == 2).float()
 
-
             losses["loss_depth/{}".format(scale)] = (reprojection_loss * reprojection_loss_mask).sum() / (reprojection_loss_mask.sum() +1e-7)
             losses["totLoss"] += losses["loss_depth/{}".format(scale)] / self.num_scales
+
             # proxy supervision loss
             if self.opt.load_hints:
                 valid_pixels = inputs['depth_hint_mask']
