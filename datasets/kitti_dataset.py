@@ -18,7 +18,8 @@ from kitti_utils import labels
 from utils import *
 import cv2
 from PIL import Image  # using pillow-simd for increased speed
-
+from torchvision import transforms
+import random
 class KITTIDataset(MonoDataset):
     """Superclass for different types of KITTI dataset loaders
     """
@@ -59,6 +60,29 @@ class KITTIRAWDataset(KITTIDataset):
     """
     def __init__(self, *args, **kwargs):
         super(KITTIRAWDataset, self).__init__(*args, **kwargs)
+
+    def get_PreSIL(self):
+        index = int(np.random.randint(5000, size=1)[0])
+        seq = int(index / 5000)
+        rgb_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'rgb', "{:06d}.png".format(index))
+        depth_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'depth', "{:06d}.png".format(index))
+        ins_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'ins', "{:06d}.png".format(index))
+
+        rgb = pil.open(rgb_path)
+        depth_path = pil.open(depth_path)
+        ins_path = pil.open(ins_path)
+
+        do_color_aug = self.is_train and random.random() > 0.5
+        do_flip = self.is_train and random.random() > 0.5
+
+        if do_color_aug:
+            color_aug = transforms.ColorJitter.get_params(
+                self.brightness, self.contrast, self.saturation, self.hue)
+            rgb = color_aug(rgb)
+
+        # if do_flip:
+        #     rgb =
+
 
     def get_image_path(self, folder, frame_index, side):
         f_str = "{:010d}{}".format(frame_index, self.img_ext)

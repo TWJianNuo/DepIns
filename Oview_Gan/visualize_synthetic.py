@@ -59,14 +59,8 @@ class Trainer:
             self.models["encoder"].num_ch_enc, self.opt.scales)
         self.models["depth"].to(self.device)
 
-        self.models_D = {}
-        self.models_D["D_encoder"] = networks.DiscriminatorEncoder(18, self.opt.weights_init == "pretrained")
-        self.models_D["D_encoder"].to(self.device)
-        self.models_D["D_decoder"] = networks.DiscriminatorDecoder(self.models_D["D_encoder"].num_ch_enc, self.opt.scales)
-        self.models_D["D_decoder"].to(self.device)
-        self.DOptimizer = optim.Adam(list(self.models_D["D_encoder"].parameters()) + list( self.models_D["D_decoder"].parameters()), self.opt.lrD)
+
         self.accRec = list() # Record recent 40 results
-        # self.bcel = torch.nn.BCELoss()
         self.mbcel = MulScaleBCELoss(self.opt.scales)
 
         self.parameters_to_train += list(self.models["depth"].parameters())
@@ -548,12 +542,6 @@ class Trainer:
                 pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
                 model_dict.update(pretrained_dict)
                 self.models[n].load_state_dict(model_dict)
-            if n in self.models_D:
-                model_dict = self.models_D[n].state_dict()
-                pretrained_dict = torch.load(path)
-                pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-                model_dict.update(pretrained_dict)
-                self.models_D[n].load_state_dict(model_dict)
         # loading adam state
         optimizer_load_path = os.path.join(self.opt.load_weights_folder, "adam.pth")
         if os.path.isfile(optimizer_load_path):

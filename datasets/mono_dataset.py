@@ -61,7 +61,8 @@ class MonoDataset(data.Dataset):
                  predDepthPath = '',
                  load_syn = False,
                  syn_filenames = None,
-                 syn_root = ''
+                 syn_root = '',
+                 PreSIL_root = None
                  ):
         super(MonoDataset, self).__init__()
 
@@ -117,6 +118,11 @@ class MonoDataset(data.Dataset):
         self.load_syn = load_syn
         self.syn_root = syn_root
         self.syn_filenames = syn_filenames
+
+        if PreSIL_root is not 'None':
+            self.PreSIL_root = PreSIL_root
+        else:
+            self.PreSIL_root = None
     def preprocess(self, inputs, color_aug):
         """Resize colour images to the required scales and augment if required
 
@@ -282,8 +288,8 @@ class MonoDataset(data.Dataset):
             inputs["depth_hint_mask"] = depth_hint_mask
         inputs['indicesRec'] = index
 
-
-
+        if self.PreSIL_root is not None:
+            self.get_PreSIL()
         return inputs
 
     def get_color(self, folder, frame_index, side, do_flip):
@@ -317,4 +323,7 @@ class MonoDataset(data.Dataset):
         raise NotImplementedError
 
     def get_syn_data(self, index, do_flip):
+        raise NotImplementedError
+
+    def get_PreSIL(self):
         raise NotImplementedError

@@ -244,6 +244,7 @@ class Trainer_GAN:
             self.step += 1
 
         self.model_lr_scheduler.step()
+
     def process_batch(self, inputs, istrain = True):
         """Pass a minibatch through the network and generate images and losses
         """

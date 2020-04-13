@@ -192,10 +192,10 @@ class MonodepthOptions:
         self.parser.add_argument("--depth_hint_param",
                                  type=float,
                                  default=1)
-        self.parser.add_argument("--SGMStereo_prediction_folder",
+
+        self.parser.add_argument("--PreSIL_path",
                                  type=str,
-                                 default="Nothing"
-                                 )
+                                 default='None')
 
         # ABLATION options
         self.parser.add_argument("--v1_multiscale",
