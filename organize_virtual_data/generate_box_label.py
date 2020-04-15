@@ -25,7 +25,7 @@ from utils import download_model_if_doesnt_exist
 from utils import *
 
 import random
-
+import time
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Simple testing funtion for Monodepthv2 models.')
@@ -58,7 +58,8 @@ def test_simple(args):
     fill_rate = 0.3
     # pixelcountmin = 0
 
-    for idx in range(0, 5000):
+    st = time.time()
+    for idx in range(3059, 51075):
         index = idx
         seq = int(index / 5000)
 
@@ -78,6 +79,8 @@ def test_simple(args):
         ins_img = np.array(ins_img).astype(np.float)
         ins_img = ins_img[:,:,0] * 255 * 255 + ins_img[:,:,1] * 255 + ins_img[:,:,2]
 
+        # tensor2disp(torch.from_numpy(ins_img > 0).unsqueeze(0).unsqueeze(0), vmax=1, ind=0).show()
+
         self_ind_count = list()
         self_ind = list()
         self_indc = np.unique(ins_img[mask])
@@ -85,7 +88,10 @@ def test_simple(args):
             if si != 0:
                 self_ind.append(si)
                 self_ind_count.append(np.sum(ins_img == si))
-        self_ind = self_ind[np.argmax(self_ind_count)]
+        if len(self_ind_count) == 0:
+            self_ind = 0
+        else:
+            self_ind = self_ind[np.argmax(self_ind_count)]
 
         unq_inds = np.unique(ins_img)
         # tensor2disp(torch.from_numpy(depth_img).unsqueeze(0).unsqueeze(0), ind=0, percentile=93).show()
@@ -114,10 +120,14 @@ def test_simple(args):
                         drawhanlde = ImageDraw.Draw(rgb)
                         drawhanlde.rectangle([xmin, ymin, xmax, ymax], outline="red")
 
-                        f.write('%d %d %d %d\n' % (int(xmin), int(xmax), int(ymin), int(ymax)))
+                        f.write('%d %d %d %d %d\n' % (int(ind), int(xmin), int(xmax), int(ymin), int(ymax)))
 
         rgb.save(os.path.join(box_vls_root, "{:06d}.png".format(index)))
         f.close()
+
+        dr = time.time() - st
+        print("%d Finished, %f hours left" % (idx, dr / (idx + 1) * (51075 - idx) / 60 / 60))
+
 
         # rgb.show()
 

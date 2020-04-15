@@ -101,7 +101,7 @@ def resize_arr_ins(ins_label):
 import time
 st = time.time()
 target_dir = '/home/shengjie/Documents/Data/PreSIL_organized'
-for img_idx in range(0, 51050):
+for img_idx in range(51050, 51075):
     file_path = depth_dir + '/{:06d}.bin'.format(img_idx)
     fd = open(file_path, 'rb')
     f = np.fromfile(fd, dtype=np.float32,count=rows*cols)

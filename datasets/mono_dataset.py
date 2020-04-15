@@ -123,6 +123,10 @@ class MonoDataset(data.Dataset):
             self.PreSIL_root = PreSIL_root
         else:
             self.PreSIL_root = None
+        self.prsil_w = 1024
+        self.prsil_h = 448
+        self.prsil_cw = 32 * 10
+        self.prsil_ch = 32 * 8
     def preprocess(self, inputs, color_aug):
         """Resize colour images to the required scales and augment if required
 
@@ -289,7 +293,10 @@ class MonoDataset(data.Dataset):
         inputs['indicesRec'] = index
 
         if self.PreSIL_root is not None:
-            self.get_PreSIL()
+            pSIL_rgb, pSIL_depth, pSIL_insMask = self.get_PreSIL()
+            inputs["pSIL_rgb"] = pSIL_rgb
+            inputs["pSIL_depth"] = pSIL_depth
+            inputs["pSIL_insMask"] = pSIL_insMask
         return inputs
 
     def get_color(self, folder, frame_index, side, do_flip):

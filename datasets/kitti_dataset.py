@@ -61,16 +61,71 @@ class KITTIRAWDataset(KITTIDataset):
     def __init__(self, *args, **kwargs):
         super(KITTIRAWDataset, self).__init__(*args, **kwargs)
 
+    def crop_PreSIL(self, xmax, xmin, ymax, ymin):
+        padding = 32
+        xmax = xmax + padding
+        xmin = xmin - padding
+        ymax = ymax + padding
+        ymin = ymin - padding
+
+        padw = self.prsil_cw - (xmax - xmin)
+        padh = self.prsil_ch - (ymax - ymin)
+
+        rnd_bias_w = int(round((random.random() - 0.5) * padw))
+        rnd_bias_h = int(round((random.random() - 0.5) * padh))
+
+        cx = int((xmin + xmax) / 2) + rnd_bias_w
+        cy = int((ymin + ymax) / 2) + rnd_bias_h
+
+        lx = int(cx - self.prsil_cw / 2)
+        rx = int(cx + self.prsil_cw / 2)
+
+        if lx < 0:
+            lx = 0
+            rx = lx + self.prsil_cw
+
+        if rx >= self.prsil_w:
+            rx = self.prsil_w
+            lx = rx - self.prsil_cw
+
+        uy = int(cy - self.prsil_ch / 2)
+        by = int(cy + self.prsil_ch / 2)
+        if uy <= 0:
+            uy = 0
+            by = uy + self.prsil_ch
+
+        if by >= self.prsil_h:
+            by = self.prsil_h
+            uy = by - self.prsil_ch
+        return lx, rx, uy, by
+
+    def cvt_png2depth_PreSIL(self, tsv_depth):
+        maxM = 1000
+        sMax = 255 ** 3 - 1
+
+        tsv_depth = tsv_depth.astype(np.float)
+        depthIm = (tsv_depth[:,:,0] * 255 * 255 + tsv_depth[:,:,1] * 255 + tsv_depth[:,:,2]) / sMax * maxM
+        return depthIm
+
     def get_PreSIL(self):
-        index = int(np.random.randint(5000, size=1)[0])
-        seq = int(index / 5000)
+
+
+        while True:
+            index = int(np.random.randint(100, size=1)[0])
+            seq = int(index / 5000)
+            label_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'boxlabels', "{:06d}.txt".format(index))
+            with open(label_path) as f:
+                lines = f.readlines()
+            if len(lines) > 0:
+                break
         rgb_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'rgb', "{:06d}.png".format(index))
         depth_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'depth', "{:06d}.png".format(index))
         ins_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'ins', "{:06d}.png".format(index))
 
         rgb = pil.open(rgb_path)
-        depth_path = pil.open(depth_path)
-        ins_path = pil.open(ins_path)
+        depth = pil.open(depth_path)
+        ins = pil.open(ins_path)
+        boxlabel = [int(x) for x in random.choice(lines)[:-1].split(' ')]
 
         do_color_aug = self.is_train and random.random() > 0.5
         do_flip = self.is_train and random.random() > 0.5
@@ -80,9 +135,39 @@ class KITTIRAWDataset(KITTIDataset):
                 self.brightness, self.contrast, self.saturation, self.hue)
             rgb = color_aug(rgb)
 
-        # if do_flip:
-        #     rgb =
+        if do_flip:
+            rgb = rgb.transpose(Image.FLIP_LEFT_RIGHT)
+            depth = depth.transpose(Image.FLIP_LEFT_RIGHT)
+            ins = ins.transpose(Image.FLIP_LEFT_RIGHT)
+            boxlabel = [boxlabel[0], self.prsil_w - boxlabel[2], self.prsil_w - boxlabel[1], boxlabel[3], boxlabel[4]]
 
+        lx, rx, uy, by = self.crop_PreSIL(xmax = boxlabel[2], xmin = boxlabel[1], ymax = boxlabel[4], ymin = boxlabel[3])
+        rgb = np.array(rgb)[uy: by, lx: rx, :]
+        ins = np.array(ins)[uy: by, lx: rx, :]
+        depth = np.array(depth)[uy: by, lx: rx, :]
+
+        # Decode Depth Map
+        depth = self.cvt_png2depth_PreSIL(depth)
+
+        # Decode Instance Map
+        ins = np.array(ins).astype(np.int)
+        ins = ins[:,:,0] * 255 * 255 + ins[:,:,1] * 255 + ins[:,:,2]
+        insMask = ins == boxlabel[0]
+
+        # fig1 = tensor2rgb(torch.from_numpy(rgb).float().permute([2,0,1]).unsqueeze(0) / 255, ind=0)
+        # fig2 = tensor2disp(torch.from_numpy(depth).float().unsqueeze(0).unsqueeze(0), ind=0, percentile=95)
+        # fig3 = tensor2disp(torch.from_numpy(insMask).float().unsqueeze(0).unsqueeze(0), ind=0, vmax=1)
+        # fig = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0)
+        # pil.fromarray(fig).save(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/preSIL_cropp_check', str(i) + '.png'))
+
+        # fig, ax = plt.subplots(1)
+        # ax.imshow(np.array(rgb))
+        # rect = patches.Rectangle((boxlabel[1], boxlabel[3]), boxlabel[2] - boxlabel[1], boxlabel[4] - boxlabel[3], linewidth=1, edgecolor='r', facecolor='none')
+        # ax.add_patch(rect)
+        # plt.show()
+        # tensor2disp(torch.from_numpy(insMask).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
+
+        return self.to_tensor(rgb), torch.from_numpy(depth).unsqueeze(0).float(), torch.from_numpy(insMask).float().unsqueeze(0)
 
     def get_image_path(self, folder, frame_index, side):
         f_str = "{:010d}{}".format(frame_index, self.img_ext)

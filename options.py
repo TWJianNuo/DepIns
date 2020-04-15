@@ -196,6 +196,10 @@ class MonodepthOptions:
         self.parser.add_argument("--PreSIL_path",
                                  type=str,
                                  default='None')
+        self.parser.add_argument("--synloss_w",
+                                 type=float,
+                                 default=1)
+
 
         # ABLATION options
         self.parser.add_argument("--v1_multiscale",

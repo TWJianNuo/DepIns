@@ -329,3 +329,16 @@ def cvtPNG2Arr(png):
     arrs = h.astype(np.float32) * 256 * 256 + e.astype(np.float32) * 256 + l.astype(np.float32)
     arr = arrs / sr
     return arr
+
+def norm_tensor(depth, pSIL_insMask_shrinked):
+    batch_size, _, prsil_ch, prsil_cw = depth.shape
+    mu = torch.sum(pSIL_insMask_shrinked * depth, dim=[1, 2, 3]) / torch.sum(pSIL_insMask_shrinked, dim=[1, 2, 3])
+    mu_ex = mu.view(batch_size, 1, 1, 1).expand([-1, 1, prsil_ch, prsil_cw])
+    scale = torch.sqrt(torch.sum(pSIL_insMask_shrinked * ((depth - mu_ex) ** 2), dim=[1, 2, 3])) / torch.sum(
+        pSIL_insMask_shrinked, dim=[1, 2, 3])
+    scale_ex = scale.view(batch_size, 1, 1, 1).expand([-1, 1, prsil_ch, prsil_cw])
+
+    torch.sqrt(torch.sum(((depth - mu_ex) / scale_ex) ** 2 * pSIL_insMask_shrinked, dim=[1, 2, 3])) / torch.sum(
+        pSIL_insMask_shrinked, dim=[1, 2, 3])
+
+    return (depth - mu_ex) / scale_ex
