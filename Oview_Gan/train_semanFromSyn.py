@@ -626,8 +626,6 @@ class Trainer:
 
         save_path = os.path.join(save_folder, "{}.pth".format("adam"))
         torch.save(self.model_optimizer.state_dict(), save_path)
-        save_path = os.path.join(save_folder, "{}.pth".format("adam_D"))
-        torch.save(self.DOptimizer.state_dict(), save_path)
         print("save to %s" % save_folder)
 
     def load_model(self):
