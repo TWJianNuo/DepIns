@@ -113,7 +113,7 @@ def evaluate(opt):
                                                          intrinsic=inputs['realIn'],
                                                          extrinsic=inputs['realEx'],
                                                          camIndex=camIndex)
-            # print(torch.mean(rendered_real))
+
             disparityMap = outputs[('disp', 0)]
             fig_seman = tensor2semantic(inputs['semanLabel'], ind=viewIndex, isGt=True)
             fig_rgb = tensor2rgb(inputs[('color', 0, 0)], ind=viewIndex)
@@ -134,7 +134,7 @@ def evaluate(opt):
                                                           extrinsic=inputs['realEx'],
                                                           camIndex=camIndex)
 
-            # print(torch.mean(rendered_real_bs))
+
             disparityMap_bs = outputs[('disp', 0)]
             fig_seman_bs = tensor2semantic(inputs['semanLabel'], ind=viewIndex, isGt=True)
             fig_rgb_bs = tensor2rgb(inputs[('color', 0, 0)], ind=viewIndex)

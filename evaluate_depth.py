@@ -12,7 +12,7 @@ from utils import readlines
 from options import MonodepthOptions
 import datasets
 import networks
-
+import glob
 cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV 3.3.1)
 
 
@@ -227,4 +227,18 @@ def evaluate(opt):
 
 if __name__ == "__main__":
     options = MonodepthOptions()
-    evaluate(options.parse())
+    args = options.parse()
+    if args.load_weights_folders is not None:
+        folders_to_eval = glob.glob(os.path.join(args.load_weights_folders, '*/'))
+        to_order = list()
+        for i in range(len(folders_to_eval)):
+            to_order.append(int(folders_to_eval[i].split('/')[-2].split('_')[1]))
+        to_order = np.array(to_order)
+        to_order_index = np.argsort(to_order)
+        for i in to_order_index:
+            print(folders_to_eval[i])
+            args.load_weights_folder = folders_to_eval[i]
+            evaluate(args)
+    else:
+        evaluate(args)
+
