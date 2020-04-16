@@ -235,6 +235,7 @@ class Trainer:
 
 
         syn_pred = self.models["depth"](self.models["encoder"](inputs['pSIL_rgb']))
+        outputs['syn_pred'] = syn_pred
         pSIL_insMask_shrinked = (self.shrinkConv(inputs['pSIL_insMask']) > self.shrinkbar).float()
         l_syn = 0
         for scale in self.opt.scales:
@@ -243,50 +244,50 @@ class Trainer:
 
 
             disp_gt = 0.1 / inputs['pSIL_depth']
-            disp_scalef = torch.sum(disp * pSIL_insMask_shrinked, dim=[1,2,3]) / torch.sum(disp_gt * pSIL_insMask_shrinked, dim=[1,2,3])
+            disp_scalef = torch.sum(disp_gt * pSIL_insMask_shrinked, dim=[1,2,3]) / torch.sum(disp * pSIL_insMask_shrinked, dim=[1,2,3])
             disp_scalef_ex = disp_scalef.view(self.opt.batch_size, 1, 1, 1).expand([-1, -1, self.prsil_ch, self.prsil_cw])
-            disp_gt_scaled = disp_gt * disp_scalef_ex
+            disp_scaled = disp * disp_scalef_ex
 
-            l_syn = l_syn + torch.sum(torch.abs(disp - disp_gt_scaled) * pSIL_insMask_shrinked) / (torch.sum(pSIL_insMask_shrinked) + 1)
+            l_syn = l_syn + torch.sum(torch.abs(disp_scaled - disp_gt) * pSIL_insMask_shrinked) / (torch.sum(pSIL_insMask_shrinked) + 1)
 
-            scaledDisp, depth = disp_to_depth(disp, self.opt.min_depth, self.opt.max_depth)
-            preSILIn = np.eye(4)
-            preSILIn[0, 0] = 512
-            preSILIn[1, 1] = 512
-            preSILIn[0, 3] = 512
-            preSILIn[1, 3] = 288
-            preSILIn = torch.from_numpy(preSILIn).unsqueeze(0).expand([self.opt.batch_size, -1, -1]).cuda().float()
-            invcamK = torch.inverse(preSILIn @ inputs['realEx'])
-            _, gt_syn_scaled_depth = disp_to_depth(disp_gt_scaled, self.opt.min_depth, self.opt.max_depth)
-            pts3d = self.bp3d(predDepth=gt_syn_scaled_depth, invcamK=invcamK)
-            pts3d_real = self.bp3d(predDepth=depth, invcamK=invcamK)
-
-            drawIndex = 0
-            pSIL_insMask_shrinked = pSIL_insMask_shrinked == 1
-            selector = pSIL_insMask_shrinked.cpu().numpy()[drawIndex, 0].flatten()
-
-            drawX = pts3d[drawIndex, 0, :, :].detach().cpu().numpy().flatten()[selector]
-            drawY = pts3d[drawIndex, 1, :, :].detach().cpu().numpy().flatten()[selector]
-            drawZ = pts3d[drawIndex, 2, :, :].detach().cpu().numpy().flatten()[selector]
-
-            drawX_real = pts3d_real[drawIndex, 0, :, :].detach().cpu().numpy().flatten()[selector]
-            drawY_real = pts3d_real[drawIndex, 1, :, :].detach().cpu().numpy().flatten()[selector]
-            drawZ_real = pts3d_real[drawIndex, 2, :, :].detach().cpu().numpy().flatten()[selector]
-            from mpl_toolkits.mplot3d import axes3d, Axes3D  # <-- Note the capitalization!
-            fig = plt.figure()
-            ax = Axes3D(fig)
-            ax.scatter(drawX, drawY, drawZ, s=0.7, c='r')
-            ax.scatter(drawX_real, drawY_real, drawZ_real, s=0.7, c='g')
-            set_axes_equal(ax)
-
-            fig1 = tensor2disp(syn_pred['disp', 0], vmax=0.07, ind=drawIndex)
-            fig2 = tensor2rgb(inputs['pSIL_rgb'], ind=drawIndex)
-            fig3 = tensor2disp(inputs['pSIL_insMask'], vmax=1, ind=drawIndex)
-            pil.fromarray(np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0)).show()
-
-            tensor2disp(disp_gt, percentile=95, ind=0).show()
-            tensor2disp(disp_gt_scaled, vmax=0.1, ind=0).show()
-            tensor2disp(disp, vmax=0.1, ind=0).show()
+            # scaledDisp, depth = disp_to_depth(disp_scaled, self.opt.min_depth, self.opt.max_depth)
+            # preSILIn = np.eye(4)
+            # preSILIn[0, 0] = 512
+            # preSILIn[1, 1] = 512
+            # preSILIn[0, 3] = 512
+            # preSILIn[1, 3] = 288
+            # preSILIn = torch.from_numpy(preSILIn).unsqueeze(0).expand([self.opt.batch_size, -1, -1]).cuda().float()
+            # invcamK = torch.inverse(preSILIn @ inputs['realEx'])
+            # _, gt_syn_scaled_depth = disp_to_depth(disp_gt, self.opt.min_depth, self.opt.max_depth)
+            # pts3d = self.bp3d(predDepth=gt_syn_scaled_depth, invcamK=invcamK)
+            # pts3d_real = self.bp3d(predDepth=depth, invcamK=invcamK)
+            #
+            # drawIndex = 0
+            # pSIL_insMask_shrinked = pSIL_insMask_shrinked == 1
+            # selector = pSIL_insMask_shrinked.cpu().numpy()[drawIndex, 0].flatten()
+            #
+            # drawX = pts3d[drawIndex, 0, :, :].detach().cpu().numpy().flatten()[selector]
+            # drawY = pts3d[drawIndex, 1, :, :].detach().cpu().numpy().flatten()[selector]
+            # drawZ = pts3d[drawIndex, 2, :, :].detach().cpu().numpy().flatten()[selector]
+            #
+            # drawX_real = pts3d_real[drawIndex, 0, :, :].detach().cpu().numpy().flatten()[selector]
+            # drawY_real = pts3d_real[drawIndex, 1, :, :].detach().cpu().numpy().flatten()[selector]
+            # drawZ_real = pts3d_real[drawIndex, 2, :, :].detach().cpu().numpy().flatten()[selector]
+            # from mpl_toolkits.mplot3d import axes3d, Axes3D  # <-- Note the capitalization!
+            # fig = plt.figure()
+            # ax = Axes3D(fig)
+            # ax.scatter(drawX, drawY, drawZ, s=0.7, c='r')
+            # ax.scatter(drawX_real, drawY_real, drawZ_real, s=0.7, c='g')
+            # set_axes_equal(ax)
+            #
+            # fig1 = tensor2disp(syn_pred['disp', 0], vmax=0.07, ind=drawIndex)
+            # fig2 = tensor2rgb(inputs['pSIL_rgb'], ind=drawIndex)
+            # fig3 = tensor2disp(inputs['pSIL_insMask'], vmax=1, ind=drawIndex)
+            # pil.fromarray(np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0)).show()
+            #
+            # tensor2disp(disp_gt, percentile=95, ind=0).show()
+            # tensor2disp(disp_gt_scaled, vmax=0.1, ind=0).show()
+            # tensor2disp(disp, vmax=0.1, ind=0).show()
 
         l_syn = l_syn / len(self.opt.scales)
 
@@ -372,6 +373,9 @@ class Trainer:
             outputs, losses = self.supervised_with_morph(inputs)
 
             duration = time.time() - before_op_time
+
+            if self.step % 500 == 0:
+                self.record_img(inputs, outputs)
 
             if self.step % 100 == 0:
                 self.log_time(batch_idx, duration, losses['loss_depth/0'], losses["totLoss"])
@@ -566,28 +570,17 @@ class Trainer:
 
     def record_img(self, inputs, outputs):
         viewIndex = 0
-        fig_seman_syn = tensor2semantic(inputs['syn_semanLabel'], ind=viewIndex)
-        fig_render_syn = tensor2disp(outputs['rendered_syn'], ind = viewIndex, vmax=0.1)
+        fig_sil_rgb = tensor2rgb(inputs['pSIL_rgb'], ind=viewIndex)
+        fig_sil_disp = tensor2disp(outputs['syn_pred'][('disp', 0)], ind = viewIndex, vmax=0.1)
+        fig_sil = np.concatenate([np.array(fig_sil_rgb), np.array(fig_sil_disp)], axis=0)
+        self.writers['train'].add_image('sil', torch.from_numpy(fig_sil).float() / 255, dataformats='HWC',global_step=self.step)
 
-        fig_seman_real = tensor2semantic(inputs['semanLabel'], ind=viewIndex)
         fig_disp = tensor2disp(outputs[('disp', 0)], ind=viewIndex, vmax=0.1)
         fig_rgb = tensor2rgb(inputs[('color', 0, 0)], ind=viewIndex)
-        fig_render_real = tensor2disp(outputs['rendered_real'], ind=viewIndex, vmax=0.01)
 
-        fig_predReal2Real = tensor2disp((1-outputs['pred_real'][('syn_prob', 0)]) * outputs['pred_real']['mask'][-1], ind=viewIndex, vmax=1)
-        fig_predSyn2Syn = tensor2disp(outputs['pred_syn'][('syn_prob', 0)] * outputs['pred_syn']['mask'][-1], ind=viewIndex, vmax = 1)
+        combined1 = np.concatenate([np.array(fig_disp), np.array(fig_rgb)], axis=0)
 
-        combined3 = np.concatenate([np.array(fig_render_syn), np.array(fig_seman_syn)], axis=1)
-        combined1 = np.concatenate([np.array(fig_disp), np.array(fig_rgb)], axis=1)
-        combined2 = np.concatenate([np.array(fig_render_real), np.array(fig_seman_real)], axis=1)
-        combined4 = np.concatenate([np.array(fig_predReal2Real), np.array(fig_predSyn2Syn)], axis=1)
-
-        combined = np.concatenate([combined3, combined1, combined2, combined4], axis=0)
-
-        self.writers['train'].add_image('rendered', torch.from_numpy(combined).float() / 255, dataformats = 'HWC', global_step = self.step)
-
-        fig_grad = tensor2grad(outputs['rendered_real_grad'], viewind=viewIndex, percentile=99)
-        self.writers['train'].add_image('grad', torch.from_numpy(np.array(fig_grad)).float() / 255, dataformats='HWC', global_step=self.step)
+        self.writers['train'].add_image('kitti', torch.from_numpy(combined1).float() / 255, dataformats = 'HWC', global_step = self.step)
 
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
