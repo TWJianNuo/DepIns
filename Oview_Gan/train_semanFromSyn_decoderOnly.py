@@ -208,38 +208,11 @@ class Trainer:
                 self.save_model()
 
     def supervised_with_morph(self, inputs):
-        outputs, losses = self.process_batch(inputs)
-
-        # stable_disp = outputs['disp', 0].detach()
-        # disparity_grad_bin = self.tool.get_disparityEdge(outputs['disp', 0])
-        # semantics_grad_bin = self.tool.get_semanticsEdge(inputs['semanLabel'])
-        #
-        # morphedx, morphedy, ocoeff = self.bnmorph.bnmorph(disparity_grad_bin, semantics_grad_bin)
-        # morphedx = (morphedx / (self.opt.width - 1) - 0.5) * 2
-        # morphedy = (morphedy / (self.opt.height - 1) - 0.5) * 2
-        # grid = torch.cat([morphedx, morphedy], dim=1).permute(0, 2, 3, 1)
-        # dispMaps_morphed = F.grid_sample(stable_disp, grid, padding_mode="border")
-        # outputs['dispMaps_morphed'] = dispMaps_morphed
-        #
-        # with torch.no_grad():
-        #     th = 1.05
-        #     ssim_val_predict = self.compute_reprojection_loss(outputs[('color', 's', 0)], inputs[('color', 0, 0)])
-        #     scaledDisp, depth = disp_to_depth(dispMaps_morphed, self.opt.min_depth, self.opt.max_depth)
-        #     frame_id = "s"
-        #     T = inputs["stereo_T"]
-        #     cam_points = self.backproject_depth[0](depth, inputs[("inv_K", 0)])
-        #     pix_coords = self.project_3d[0](cam_points, inputs[("K", 0)], T)
-        #     morphed_rgb = F.grid_sample(inputs[("color", frame_id, 0)], pix_coords, padding_mode="border")
-        #     ssim_val_morph = self.compute_reprojection_loss(morphed_rgb, inputs[('color', 0, 0)])
-        #     selector_mask = (ssim_val_predict - th * ssim_val_morph > 0).float() * outputs['grad_proj_msak']
-        #     texture_measure = torch.mean(self.textureMeasure(inputs[('color', 0, 0)]), dim=1, keepdim=True)
-
-        # losses["similarity_loss"] = 100 * torch.sum(torch.log(1 + torch.abs(dispMaps_morphed - outputs['disp', 0]) * texture_measure) * selector_mask) / (torch.sum(selector_mask) + 1)
-        # losses['totLoss'] = losses["similarity_loss"] * self.opt.bnMorphLoss_w + losses['totLoss']
-
-        self.model_optimizer.zero_grad()
-        losses['totLoss'].backward()
-        self.model_optimizer.step()
+        outputs = dict()
+        losses = dict()
+        for key, ipt in inputs.items():
+            if not (key == 'entry_tag' or key == 'syn_tag'):
+                inputs[key] = ipt.to(self.device)
 
         syn_pred = self.models["depth"](self.models["encoder"](inputs['pSIL_rgb']))
         outputs['syn_pred'] = syn_pred
@@ -251,11 +224,11 @@ class Trainer:
 
 
             disp_gt = 0.1 / inputs['pSIL_depth']
-            disp_scalef = torch.sum(disp * pSIL_insMask_shrinked, dim=[1,2,3]) / torch.sum(disp_gt * pSIL_insMask_shrinked, dim=[1,2,3])
+            disp_scalef = torch.sum(disp_gt * pSIL_insMask_shrinked, dim=[1,2,3]) / torch.sum(disp * pSIL_insMask_shrinked, dim=[1,2,3])
             disp_scalef_ex = disp_scalef.view(self.opt.batch_size, 1, 1, 1).expand([-1, -1, self.prsil_ch, self.prsil_cw])
-            disp_gt_scaled = disp_gt * disp_scalef_ex
+            disp_scaled = disp * disp_scalef_ex
 
-            l_syn = l_syn + torch.sum(torch.abs(disp - disp_gt_scaled) * pSIL_insMask_shrinked) / (torch.sum(pSIL_insMask_shrinked) + 1)
+            l_syn = l_syn + torch.sum(torch.abs(disp_scaled - disp_gt) * pSIL_insMask_shrinked) / (torch.sum(pSIL_insMask_shrinked) + 1)
 
             # scaledDisp, depth = disp_to_depth(disp, self.opt.min_depth, self.opt.max_depth)
             # preSILIn = np.eye(4)
@@ -308,78 +281,11 @@ class Trainer:
 
         l_syn = l_syn / len(self.opt.scales)
         losses['synloss'] = l_syn
-        if self.epoch > 0:
-            self.model_optimizer_syn.zero_grad()
-            (l_syn * self.opt.synloss_w).backward()
-            self.model_optimizer_syn.step()
+        losses["totLoss"] = l_syn
 
-        # paramSum = 0
-        # for param in self.models['encoder'].parameters():
-        #     paramSum = paramSum + torch.sum(torch.abs(param.data))
-        # print(paramSum)
-        #
-        # paramSum = 0
-        # for param in self.models['depth'].parameters():
-        #     paramSum = paramSum + torch.sum(torch.abs(param.data))
-        # print(paramSum)
-
-        # syn_pred = self.models["depth"](self.models["encoder"](inputs['pSIL_rgb']))
-        # pSIL_insMask_shrinked = (self.shrinkConv(inputs['pSIL_insMask']) > self.shrinkbar).float()
-        # fig1 = tensor2disp(outputs[('disp', 0)], vmax = 0.1, ind = 0)
-        # fig2 = tensor2disp(syn_pred[('disp', 0)], vmax = 0.1, ind = 0)
-        # for i in range(300):
-        #     syn_pred = self.models["depth"](self.models["encoder"](inputs['pSIL_rgb']))
-        #     pSIL_insMask_shrinked = (self.shrinkConv(inputs['pSIL_insMask']) > self.shrinkbar).float()
-        #     l_syn = 0
-        #     for scale in self.opt.scales:
-        #         disp = syn_pred[("disp", scale)]
-        #         disp = F.interpolate(disp, [self.prsil_ch, self.prsil_cw], mode="bilinear", align_corners=False)
-        #
-        #         disp_gt = 0.1 / inputs['pSIL_depth']
-        #         disp_scalef = torch.sum(disp * pSIL_insMask_shrinked, dim=[1, 2, 3]) / torch.sum(
-        #             disp_gt * pSIL_insMask_shrinked, dim=[1, 2, 3])
-        #         disp_scalef_ex = disp_scalef.view(self.opt.batch_size, 1, 1, 1).expand(
-        #             [-1, -1, self.prsil_ch, self.prsil_cw])
-        #         disp_gt_scaled = disp_gt * disp_scalef_ex
-        #
-        #         l_syn = l_syn + torch.sum(torch.abs(disp - disp_gt_scaled) * pSIL_insMask_shrinked) / (
-        #                     torch.sum(pSIL_insMask_shrinked) + 1)
-        #
-        #         # scaledDisp, depth = disp_to_depth(disp, self.opt.min_depth, self.opt.max_depth)
-        #         # preSILIn = np.eye(4)
-        #         # preSILIn[0, 0] = 512
-        #         # preSILIn[1, 1] = 512
-        #         # preSILIn[0, 3] = 512
-        #         # preSILIn[1, 3] = 288
-        #         # preSILIn = torch.from_numpy(preSILIn).unsqueeze(0).expand([self.opt.batch_size, -1, -1]).cuda().float()
-        #         # invcamK = torch.inverse(preSILIn @ inputs['realEx'])
-        #         # _, gt_syn_scaled_depth = disp_to_depth(disp_gt_scaled, self.opt.min_depth, self.opt.max_depth)
-        #         # pts3d = self.bp3d(predDepth=gt_syn_scaled_depth, invcamK=invcamK)
-        #         # pts3d_real = self.bp3d(predDepth=depth, invcamK=invcamK)
-        #         #
-        #         # drawIndex = 0
-        #         # pSIL_insMask_shrinked = pSIL_insMask_shrinked == 1
-        #         # selector = pSIL_insMask_shrinked.cpu().numpy()[drawIndex, 0].flatten()
-        #         #
-        #         # drawX = pts3d[drawIndex, 0, :, :].detach().cpu().numpy().flatten()[selector]
-        #         # drawY = pts3d[drawIndex, 1, :, :].detach().cpu().numpy().flatten()[selector]
-        #         # drawZ = pts3d[drawIndex, 2, :, :].detach().cpu().numpy().flatten()[selector]
-        #         #
-        #         # drawX_real = pts3d_real[drawIndex, 0, :, :].detach().cpu().numpy().flatten()[selector]
-        #         # drawY_real = pts3d_real[drawIndex, 1, :, :].detach().cpu().numpy().flatten()[selector]
-        #         # drawZ_real = pts3d_real[drawIndex, 2, :, :].detach().cpu().numpy().flatten()[selector]
-        #         # from mpl_toolkits.mplot3d import axes3d, Axes3D  # <-- Note the capitalization!
-        #         # fig = plt.figure()
-        #         # ax = Axes3D(fig)
-        #         # ax.scatter(drawX, drawY, drawZ, s=0.7, c='r')
-        #         # ax.scatter(drawX_real, drawY_real, drawZ_real, s=0.7, c='g')
-        #         # set_axes_equal(ax)
-        #     l_syn = l_syn / len(self.opt.scales)
-        #     print(l_syn)
-        #     self.model_optimizer.zero_grad()
-        #     l_syn.backward()
-        #     self.model_optimizer.step()
-        # fig3 = tensor2disp(syn_pred[('disp', 0)], vmax=0.1, ind=0)
+        self.model_optimizer_syn.zero_grad()
+        (l_syn * self.opt.synloss_w).backward()
+        self.model_optimizer_syn.step()
 
         return outputs, losses
 
@@ -401,13 +307,10 @@ class Trainer:
             duration = time.time() - before_op_time
 
             if self.step % 100 == 0:
-                self.log_time(batch_idx, duration, losses['loss_depth/0'], losses["totLoss"])
+                self.log_time(batch_idx, duration, 0, losses["totLoss"])
 
             if self.step % 2 == 0:
                 self.log("train", inputs, outputs, losses, writeImage=False)
-
-            if self.step % 15 == 0:
-                self.val()
 
             if self.step % 500 == 0:
                 self.record_img(inputs, outputs)
@@ -601,12 +504,6 @@ class Trainer:
         fig_sil = np.concatenate([np.array(fig_sil_rgb), np.array(fig_sil_disp)], axis=0)
         self.writers['train'].add_image('sil', torch.from_numpy(fig_sil).float() / 255, dataformats='HWC',global_step=self.step)
 
-        fig_disp = tensor2disp(outputs[('disp', 0)], ind=viewIndex, vmax=0.1)
-        fig_rgb = tensor2rgb(inputs[('color', 0, 0)], ind=viewIndex)
-
-        combined1 = np.concatenate([np.array(fig_disp), np.array(fig_rgb)], axis=0)
-
-        self.writers['train'].add_image('kitti', torch.from_numpy(combined1).float() / 255, dataformats = 'HWC', global_step = self.step)
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
         """
