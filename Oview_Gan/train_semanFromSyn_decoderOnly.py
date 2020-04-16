@@ -242,6 +242,7 @@ class Trainer:
         self.model_optimizer.step()
 
         syn_pred = self.models["depth"](self.models["encoder"](inputs['pSIL_rgb']))
+        outputs['syn_pred'] = syn_pred
         pSIL_insMask_shrinked = (self.shrinkConv(inputs['pSIL_insMask']) > self.shrinkbar).float()
         l_syn = 0
         for scale in self.opt.scales:
@@ -406,6 +407,9 @@ class Trainer:
 
             if self.step % 15 == 0:
                 self.val()
+
+            if self.step % 500 == 0:
+                self.record_img(inputs, outputs)
 
             self.step += 1
 
@@ -591,29 +595,17 @@ class Trainer:
 
     def record_img(self, inputs, outputs):
         viewIndex = 0
-        fig_seman_syn = tensor2semantic(inputs['syn_semanLabel'], ind=viewIndex)
-        fig_render_syn = tensor2disp(outputs['rendered_syn'], ind = viewIndex, vmax=0.1)
+        fig_sil_rgb = tensor2rgb(inputs['pSIL_rgb'], ind=viewIndex)
+        fig_sil_disp = tensor2disp(outputs['syn_pred'][('disp', 0)], ind = viewIndex, vmax=0.1)
+        fig_sil = np.concatenate([np.array(fig_sil_rgb), np.array(fig_sil_disp)], axis=0)
+        self.writers['train'].add_image('sil', torch.from_numpy(fig_sil).float() / 255, dataformats='HWC',global_step=self.step)
 
-        fig_seman_real = tensor2semantic(inputs['semanLabel'], ind=viewIndex)
         fig_disp = tensor2disp(outputs[('disp', 0)], ind=viewIndex, vmax=0.1)
         fig_rgb = tensor2rgb(inputs[('color', 0, 0)], ind=viewIndex)
-        fig_render_real = tensor2disp(outputs['rendered_real'], ind=viewIndex, vmax=0.01)
 
-        fig_predReal2Real = tensor2disp((1-outputs['pred_real'][('syn_prob', 0)]) * outputs['pred_real']['mask'][-1], ind=viewIndex, vmax=1)
-        fig_predSyn2Syn = tensor2disp(outputs['pred_syn'][('syn_prob', 0)] * outputs['pred_syn']['mask'][-1], ind=viewIndex, vmax = 1)
+        combined1 = np.concatenate([np.array(fig_disp), np.array(fig_rgb)], axis=0)
 
-        combined3 = np.concatenate([np.array(fig_render_syn), np.array(fig_seman_syn)], axis=1)
-        combined1 = np.concatenate([np.array(fig_disp), np.array(fig_rgb)], axis=1)
-        combined2 = np.concatenate([np.array(fig_render_real), np.array(fig_seman_real)], axis=1)
-        combined4 = np.concatenate([np.array(fig_predReal2Real), np.array(fig_predSyn2Syn)], axis=1)
-
-        combined = np.concatenate([combined3, combined1, combined2, combined4], axis=0)
-
-        self.writers['train'].add_image('rendered', torch.from_numpy(combined).float() / 255, dataformats = 'HWC', global_step = self.step)
-
-        fig_grad = tensor2grad(outputs['rendered_real_grad'], viewind=viewIndex, percentile=99)
-        self.writers['train'].add_image('grad', torch.from_numpy(np.array(fig_grad)).float() / 255, dataformats='HWC', global_step=self.step)
-
+        self.writers['train'].add_image('kitti', torch.from_numpy(combined1).float() / 255, dataformats = 'HWC', global_step = self.step)
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
         """

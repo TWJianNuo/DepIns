@@ -108,7 +108,7 @@ def evaluate(opt):
             for key, ipt in inputs.items():
                 if not (key == 'entry_tag' or key == 'syn_tag'):
                     inputs[key] = ipt.to(torch.device("cuda"))
-
+            #
             instance_semantic_gt = pil.open(os.path.join('/home/shengjie/Documents/Data/Kitti/kitti_semantics/training/instance', str(mapping_ind[idx]).zfill(6) + '_10.png'))
             instance_semantic_gt = instance_semantic_gt.resize([opt.width, opt.height], pil.NEAREST)
             instance_semantic_gt = np.array(instance_semantic_gt).astype(np.uint16)
@@ -120,10 +120,6 @@ def evaluate(opt):
             for vt in semantic_selector:
                 addmask = addmask + (semantic_gt == vt)
             addmask = addmask > 0
-
-            # for ind in np.unique(instance_semantic_gt[addmask]):
-            #     mask = instance_semantic_gt == ind
-            #     tensor2disp(torch.from_numpy(mask).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
 
             input_color = inputs[("color", 0, 0)].cuda()
             outputs = depth_decoder(encoder(input_color))
@@ -164,7 +160,10 @@ def evaluate(opt):
                 fig1 = tensor2disp(selector_torch, ind = 0, vmax = 1)
                 fig2 = tensor2rgb(input_color, ind=viewIndex)
                 fig3 = tensor2disp(outputs[('disp', 0)], vmax=0.1, ind=viewIndex)
-                fig = pil.fromarray(np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0))
+                fig4 = tensor2disp(outputs_bs[('disp', 0)], vmax=0.1, ind=viewIndex)
+                img1 = np.concatenate([np.array(fig4), np.array(fig3)], axis=0)
+                img2 = np.concatenate([np.array(fig2), np.array(fig1)], axis=0)
+                fig = pil.fromarray(np.concatenate([img1, img2], axis=1))
                 fig.save(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/pts3d_compare_kitti', str(idx) + '_' + str(ind) + '_2d.png'))
             # syn_pred = depth_decoder(encoder(inputs['pSIL_rgb']))
             # syn_pred_bs = depth_decoder_bs(encoder_bs(inputs['pSIL_rgb']))
@@ -220,14 +219,18 @@ def evaluate(opt):
             # ax.scatter(drawX_syn_bs, drawY_syn_bs, drawZ_syn_bs, s=0.7, c='g')
             # ax.scatter(drawX_syn_gt, drawY_syn_gt, drawZ_syn_gt, s=0.7, c='b')
             # set_axes_equal(ax)
-            # plt.savefig(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/pts3d_compare', str(idx) + '.png'))
+            # plt.savefig(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/pts3d_compare_presil', str(idx) + '_1.png'))
             # plt.close()
             # print("finished %d" % idx)
             #
             # fig1 = tensor2disp(syn_pred['disp', 0], vmax=0.1, ind=viewIndex)
+            # fig4 = tensor2disp(syn_pred_bs['disp', 0], vmax=0.1, ind=viewIndex)
             # fig2 = tensor2rgb(inputs['pSIL_rgb'], ind=viewIndex)
             # fig3 = tensor2disp(inputs['pSIL_insMask'], vmax=1, ind=viewIndex)
-            # pil.fromarray(np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0))
+            #
+            # img1 = np.concatenate([np.array(fig4), np.array(fig1)], axis=0)
+            # img2 = np.concatenate([np.array(fig2), np.array(fig3)], axis=0)
+            # pil.fromarray(np.concatenate([img1, img2], axis=1)).save(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/pts3d_compare_presil', str(idx) + '_2.png'))
 
 if __name__ == "__main__":
     options = MonodepthOptions()
