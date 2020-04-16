@@ -308,9 +308,10 @@ class Trainer:
 
         l_syn = l_syn / len(self.opt.scales)
         losses['synloss'] = l_syn
-        self.model_optimizer_syn.zero_grad()
-        (l_syn * self.opt.synloss_w).backward()
-        self.model_optimizer_syn.step()
+        if self.epoch > 0:
+            self.model_optimizer_syn.zero_grad()
+            (l_syn * self.opt.synloss_w).backward()
+            self.model_optimizer_syn.step()
 
         # paramSum = 0
         # for param in self.models['encoder'].parameters():
