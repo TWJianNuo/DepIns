@@ -120,7 +120,7 @@ class KITTIRAWDataset(KITTIDataset):
     def get_PreSIL(self):
         do_crop = False
         while True:
-            index = int(np.random.randint(100, size=1)[0])
+            index = int(np.random.randint(51074, size=1)[0])
             seq = int(index / 5000)
             label_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'boxlabels', "{:06d}.txt".format(index))
             with open(label_path) as f:
