@@ -301,6 +301,12 @@ class Trainer:
             l_theta2_l = torch.sum(torch.abs(pred_theta2 - theta2) * mask_theta2) / (torch.sum(mask_theta2) + 1)
             l_theta2_nl = torch.sum(torch.abs(pred_theta2 - theta2) * (1-mask_theta2)) / (torch.sum((1-mask_theta2)) + 1)
             l_theta2 = l_theta2 + (l_theta2_l + l_theta2_nl) / 2
+            if i == 0:
+                losses['l_theta1'] = l_theta1
+                losses['l_theta2'] = l_theta2
+                losses['l_theta2_l'] = l_theta2_l
+                losses['l_theta2_nl'] = l_theta2_nl
+
         l_theta1 = l_theta1 / len(self.opt.scales)
         l_theta2 = l_theta2 / len(self.opt.scales)
 
