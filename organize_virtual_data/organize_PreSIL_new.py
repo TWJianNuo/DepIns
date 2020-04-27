@@ -79,8 +79,8 @@ def cvt_png2depth_PreSIL(tsv_depth):
     depthIm = (tsv_depth[:,:,0] * 255 * 255 + tsv_depth[:,:,1] * 255 + tsv_depth[:,:,2]) / sMax * maxM
     return depthIm
 
-def resize_arr_depth(depthIm):
-    depthIm_torch = torch.from_numpy(depthIm).unsqueeze(0).unsqueeze(0)
+def resize_arr_depth(din):
+    depthIm_torch = torch.from_numpy(din).unsqueeze(0).unsqueeze(0)
     depthIm_torch = F.interpolate(depthIm_torch, [h, w], mode = 'bilinear', align_corners = True)
     depthIm_resized = depthIm_torch[0,0].numpy()
     depthIm_resized = depthIm_resized[32 * cut::, :]
@@ -101,10 +101,15 @@ def resize_arr_ins(ins_label):
 import time
 st = time.time()
 target_dir = '/home/shengjie/Documents/Data/PreSIL_organized'
-for img_idx in range(51050, 51075):
+
+import matlab
+import matlab.engine
+eng = matlab.engine.start_matlab()
+for img_idx in range(51075):
+    img_idx = 29
     file_path = depth_dir + '/{:06d}.bin'.format(img_idx)
     fd = open(file_path, 'rb')
-    f = np.fromfile(fd, dtype=np.float32,count=rows*cols)
+    f = np.fromfile(fd, dtype=np.float32, count=rows*cols)
     im = f.reshape((rows, cols))
 
     depthMap = 0.1 / (im + 1e-6)
@@ -112,8 +117,115 @@ for img_idx in range(51050, 51075):
     # tensor2disp(torch.from_numpy(depthMap).unsqueeze(0).unsqueeze(0), percentile=93, ind=0).show()
     # tensor2disp(torch.from_numpy(depthIm).unsqueeze(0).unsqueeze(0), percentile=93, ind=0).show()
 
+    Tr_velo_to_cam = np.array([
+        [0, -1, 0],
+        [0, 0, -1],
+        [1, 0, 0]
+    ])
+
+    intrinsic = np.array([
+        [960, 0, 960],
+        [0, 960, 540],
+        [0, 0, 1]
+    ])
+    depthMap_clip = np.clip(depthMap, a_min=0, a_max=100)
+    # tensor2disp(torch.from_numpy(depthMap_clip).unsqueeze(0).unsqueeze(0), percentile=93, ind=0).show()
+
+    xx, yy = np.meshgrid(range(1920), range(1080), indexing='xy')
+    ons = np.ones_like(xx)
+    pts2dr = np.stack([xx, yy, ons], axis=2)
+
+    pts2dr = torch.from_numpy(pts2dr).float().unsqueeze(3)
+    intrinsic = torch.from_numpy(intrinsic).float()
+    Tr_velo_to_cam = torch.from_numpy(Tr_velo_to_cam).float()
+
+    pts3dr = torch.matmul(torch.inverse(intrinsic @ Tr_velo_to_cam), pts2dr)
+    pts3d = pts3dr * torch.from_numpy(depthMap_clip).float().unsqueeze(2).unsqueeze(3).expand([-1,-1,3,-1])
+
+
+    sampleR = 50
+    dx = pts3d[:, :, 0, 0].numpy().flatten()[::sampleR]
+    dy = pts3d[:, :, 1, 0].numpy().flatten()[::sampleR]
+    dz = pts3d[:, :, 2, 0].numpy().flatten()[::sampleR]
+
+    dx = matlab.double(dx.tolist())
+    dy = matlab.double(dy.tolist())
+    dz = matlab.double(dz.tolist())
+
+    eng.eval('close all', nargout=0)
+    eng.eval('figure()', nargout=0)
+    eng.eval('hold on', nargout=0)
+    eng.scatter3(dx, dy, dz, 5, 'filled', 'g', nargout=0)
+    eng.eval('axis equal', nargout=0)
+    eng.eval('grid off', nargout=0)
+    eng.eval('xlabel(\'X\')', nargout=0)
+    eng.eval('ylabel(\'Y\')', nargout=0)
+    eng.eval('zlabel(\'Z\')', nargout=0)
+    eng.eval('xlim([0 50])', nargout=0)
+    eng.eval('ylim([-40 40])', nargout=0)
+    eng.eval('zlim([-3 10])', nargout=0)
+
 
     depthIm = resize_arr_depth(depthMap)
+    # tensor2disp(torch.from_numpy(depthIm).unsqueeze(0).unsqueeze(0), vmax=100, ind=0).show()
+    # tensor2disp(torch.from_numpy(depthMap).unsqueeze(0).unsqueeze(0), vmax=100, ind=0).show()
+
+    scaleM = np.array([
+        [1024 / 1920, 0, 0],
+        [0, 576 / 1080, -128],
+        [0, 0, 1]
+    ])
+
+    Tr_velo_to_cam = np.array([
+        [0, -1, 0],
+        [0, 0, -1],
+        [1, 0, 0]
+    ])
+
+    intrinsic = np.array([
+        [960, 0, 960],
+        [0, 960, 540],
+        [0, 0, 1]
+    ])
+    xx, yy = np.meshgrid(range(1024), range(448), indexing='xy')
+    ons = np.ones_like(xx)
+    pts2dr = np.stack([xx, yy, ons], axis=2)
+    pts2dr = torch.from_numpy(pts2dr).float().unsqueeze(3)
+    intrinsic = torch.from_numpy(intrinsic).float()
+    scaleM = torch.from_numpy(scaleM).float()
+    Tr_velo_to_cam = torch.from_numpy(Tr_velo_to_cam).float()
+
+
+    pts3dr = torch.matmul(torch.inverse(scaleM @ intrinsic @ Tr_velo_to_cam), pts2dr)
+    pts3d = pts3dr * torch.from_numpy(depthIm).float().unsqueeze(2).unsqueeze(3).expand([-1,-1,3,-1])
+
+
+    sampleR = 5
+    dx = pts3d[:, :, 0, 0].numpy().flatten()[::sampleR]
+    dy = pts3d[:, :, 1, 0].numpy().flatten()[::sampleR]
+    dz = pts3d[:, :, 2, 0].numpy().flatten()[::sampleR]
+
+    dx = matlab.double(dx.tolist())
+    dy = matlab.double(dy.tolist())
+    dz = matlab.double(dz.tolist())
+
+    # eng.eval('close all', nargout=0)
+    eng.eval('figure()', nargout=0)
+    eng.eval('hold on', nargout=0)
+    eng.scatter3(dx, dy, dz, 5, 'filled', 'g', nargout=0)
+    eng.eval('axis equal', nargout=0)
+    eng.eval('grid off', nargout=0)
+    eng.eval('xlabel(\'X\')', nargout=0)
+    eng.eval('ylabel(\'Y\')', nargout=0)
+    eng.eval('zlabel(\'Z\')', nargout=0)
+    eng.eval('xlim([0 50])', nargout=0)
+    eng.eval('ylim([-40 40])', nargout=0)
+    eng.eval('zlim([-3 10])', nargout=0)
+
+
+
+
+
     tsv_depth, depthIm_clipped = cvt_depth2png_PreSIL(depthIm)
     recon_di = cvt_png2depth_PreSIL(tsv_depth)
 

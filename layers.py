@@ -515,8 +515,353 @@ class ComputeSurfaceNormal(nn.Module):
         surfnorm = F.normalize(surfnorm, dim = 1)
         return surfnorm
 
+class localGeomDesp(nn.Module):
+    def __init__(self, height, width, batch_size, ptspair):
+        super(localGeomDesp, self).__init__()
+        self.height = height
+        self.width = width
+        self.batch_size = batch_size
+        self.ptspair = ptspair
+
+        # Init grid points
+        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        self.xx = torch.from_numpy(xx).unsqueeze(0).unsqueeze(3).expand([self.batch_size, -1, -1, 1]).float()
+        self.yy = torch.from_numpy(yy).unsqueeze(0).unsqueeze(3).expand([self.batch_size, -1, -1, 1]).float()
+        self.pixelLocs = nn.Parameter(torch.cat([self.xx, self.yy, torch.ones_like(self.xx)], dim=3), requires_grad=False)
+
+        self.interestedLocs = torch.cat([self.xx, self.yy, torch.ones_like(self.xx)], dim=3).clone().view(self.batch_size, 1, 1, self.height, self.width, 3).repeat([1, len(self.ptspair), 2, 1,1, 1])
+
+        for i in range(len(self.ptspair)):
+            for j in range(2):
+                self.interestedLocs[:,i,j,:,:,:] = self.interestedLocs[:,i,j,:,:,:] + torch.from_numpy(np.array(self.ptspair[i][j])).float().view([1,1,1,3]).expand([self.batch_size, self.height, self.width, -1])
+
+        self.interestedLocs = nn.Parameter(self.interestedLocs, requires_grad = False)
+
+        w = 4
+        weight = np.zeros([len(self.ptspair) * 2, 1, int(w * 2 + 1), int(w * 2 + 1)])
+        for i in range(len(self.ptspair)):
+            for j in range(2):
+                weight[i * 2 + j, 0, -self.ptspair[i][j][1] + w, -self.ptspair[i][j][0] + w] = 1
+        self.copyConv = torch.nn.Conv2d(len(self.ptspair) * 2, len(self.ptspair) * 2, int(w * 2 + 1), stride=1, padding=w, bias=False, groups = len(self.ptspair) * 2)
+        self.copyConv.weight = torch.nn.Parameter(torch.from_numpy(weight.astype(np.float32)), requires_grad=False)
+    def forward(self, predNorm, depthmap, invIn):
+        predNorm_ = predNorm.view(self.batch_size, len(self.ptspair), 3, self.height, self.width).permute([0,1,3,4,2]).unsqueeze(4)
+        intrinsic_c = invIn[:,0:3,0:3].view(self.batch_size,1,1,1,3,3)
+        normIn = torch.matmul(predNorm_, intrinsic_c)
+
+        p2d_ex = self.pixelLocs.unsqueeze(1).unsqueeze(5).expand([-1, len(self.ptspair), -1, -1, -1, -1])
+        k = -torch.matmul(normIn, p2d_ex).squeeze(4).squeeze(4) * depthmap.expand([-1, len(self.ptspair), -1, -1])
+
+        predDepth = normIn.unsqueeze(2).expand([-1,-1,2,-1,-1,-1,-1]) @ self.interestedLocs.unsqueeze(6)
+        predDepth = predDepth.squeeze(5).squeeze(5)
+        predDepth = -k.unsqueeze(2).expand([-1,-1,2,-1,-1]) / (predDepth)
+        # ptspred3d = predDepth.unsqueeze(5).expand([-1,-1,-1,-1,-1,3]) * (intrinsic_c.unsqueeze(2).expand([-1, len(self.pixelLocs), 2, self.height, self.width, -1, -1]) @ self.interestedLocs.unsqueeze(6)).squeeze(6)
+        # ck = torch.sum(ptspred3d * predNorm_.squeeze(4).unsqueeze(2).expand([-1,-1,2,-1,-1,-1]), axis = [5])
+        # ck = ck + k.unsqueeze(2).expand([-1,-1,2,-1,-1])
+        # torch.abs(ck).max()
+        predDepth_ = predDepth.view(self.batch_size, len(self.ptspair) * 2, self.height, self.width)
+        predDepth_ = self.copyConv(predDepth_)
+
+        # import random
+        # for i in range(100):
+        #     bz = random.randint(0, self.batch_size - 1)
+        #     chn = random.randint(0, 2 * len(self.ptspair) - 1)
+        #     hn = random.randint(0, self.height - 1)
+        #     wn = random.randint(0, self.width - 1)
+        #
+        #     dpval = predDepth_[bz, chn, hn, wn]
+        #     sPts2d = torch.Tensor([wn, hn, 1]).float().cuda()
+        #     sPts3d = invIn[bz,0:3,0:3] @ sPts2d.unsqueeze(1) * dpval
+        #
+        #     deltax = self.ptspair[int(chn / 2)][chn % 2][0]
+        #     deltay = self.ptspair[int(chn / 2)][chn % 2][1]
+        #     planeDir = predNorm_[bz, int(chn / 2), hn - deltay, wn - deltax, :, :]
+        #     sk = k[bz, int(chn / 2), hn - deltay, wn - deltax]
+        #
+        #     val = (planeDir @ sPts3d)[0][0] + sk
+        #
+        #     print(val)
 
 
+
+
+
+        # depthmap = torch.clamp(depthmap, min=0, max=100)
+        # pts3d = invIn[:,0:3,0:3].view(self.batch_size,1,1,3,3).expand([-1, self.height, self.width, 3, 3]) @ self.pixelLocs.unsqueeze(4)
+        # pts3d = pts3d * depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1, -1, -1, 3, 1])
+        # pts3d = pts3d.squeeze(4).permute(0,3,1,2).contiguous()
+        #
+        # ck_p = torch.sum(predNorm.view(self.batch_size, len(self.ptspair), 3, self.height, self.width) * pts3d.unsqueeze(1).expand([-1,len(self.ptspair),-1,-1,-1]), axis = [2])
+        # ck_p = ck_p + k
+        # torch.abs(ck_p).max()
+        #
+        # tensor2disp((torch.abs(ck_p) > 100)[:,0:1,:,:], vmax = 1, ind = 0).show()
+        # import matlab
+        # import matlab.engine
+        # eng = matlab.engine.start_matlab()
+        #
+        # sampleR = 5
+        # viewIndex = 0
+        # dx = pts3d[viewIndex, 0, :, :].cpu().detach().numpy().flatten()[::sampleR]
+        # dy = pts3d[viewIndex, 1, :, :].cpu().detach().numpy().flatten()[::sampleR]
+        # dz = pts3d[viewIndex, 2, :, :].cpu().detach().numpy().flatten()[::sampleR]
+        #
+        # dx = matlab.double(dx.tolist())
+        # dy = matlab.double(dy.tolist())
+        # dz = matlab.double(dz.tolist())
+        #
+        # eng.eval('close all', nargout=0)
+        # eng.eval('figure()', nargout=0)
+        # eng.eval('hold on', nargout=0)
+        # eng.scatter3(dx, dy, dz, 5, 'filled', 'g', nargout=0)
+        # eng.eval('axis equal', nargout=0)
+        # eng.eval('grid off', nargout=0)
+        # eng.eval('xlabel(\'X\')', nargout=0)
+        # eng.eval('ylabel(\'Y\')', nargout=0)
+        # eng.eval('zlabel(\'Z\')', nargout=0)
+        # eng.eval('xlim([0 50])', nargout=0)
+        # eng.eval('ylim([-40 40])', nargout=0)
+        # eng.eval('zlim([-3 10])', nargout=0)
+        return predDepth_
+
+
+class LinGeomDesp(nn.Module):
+    def __init__(self, height, width, batch_size, ptspair, invIn):
+        super(LinGeomDesp, self).__init__()
+        self.height = height
+        self.width = width
+        self.batch_size = batch_size
+        self.ptspair = ptspair
+
+        # Init grid points
+        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        self.xx = torch.from_numpy(xx).unsqueeze(0).unsqueeze(3).expand([self.batch_size, -1, -1, 1]).float()
+        self.yy = torch.from_numpy(yy).unsqueeze(0).unsqueeze(3).expand([self.batch_size, -1, -1, 1]).float()
+        self.pixelLocs = nn.Parameter(torch.cat([self.xx, self.yy, torch.ones_like(self.xx)], dim=3), requires_grad=False)
+
+        self.interestedLocs = torch.cat([self.xx, self.yy, torch.ones_like(self.xx)], dim=3).clone().view(self.batch_size, 1, 1, self.height, self.width, 3).repeat([1, len(self.ptspair), 3, 1,1, 1])
+
+        for i in range(len(self.ptspair)):
+            for j in range(3):
+                if j != 0:
+                    self.interestedLocs[:,i,j,:,:,:] = self.interestedLocs[:,i,j,:,:,:] + torch.from_numpy(np.array(self.ptspair[i][j-1])).float().view([1,1,1,3]).expand([self.batch_size, self.height, self.width, -1])
+
+        # x_dir = list()
+        # for i in range(len(self.ptspair)):
+        #     tmp = np.array(self.ptspair[i][1]) - np.array(self.ptspair[i][0])
+        #     tmp = tmp / np.sqrt(np.sum(tmp ** 2))
+        #     x_dir.append(tmp)
+        # x_dir = np.stack(x_dir, axis=0)
+        # x_dir = torch.from_numpy(x_dir).float().view(1, len(self.ptspair), 1, 1, 3).expand(
+        #     [self.batch_size, -1, self.height, self.width, -1])
+        # # Compute vertical direction
+        # vert_dir_tmp = torch.from_numpy(invIn).view(1,1,1,1,1,3,3).expand([self.batch_size, len(self.ptspair), 3, self.height, self.width, -1, -1]).float() @ self.interestedLocs.unsqueeze(6)
+        # vert_dir = torch.cross(vert_dir_tmp[:,:,1,:,:,:,0], vert_dir_tmp[:,:,2,:,:,:,0], dim=4)
+        # z_dir = vert_dir / torch.norm(vert_dir, keepdim = True, dim = 4).expand([-1,-1,-1,-1,3])
+        # y_dir = torch.cross(z_dir, x_dir, dim = 4)
+
+        y_dir = list()
+        for i in range(len(self.ptspair)):
+            tmp = np.array(self.ptspair[i][1]) - np.array(self.ptspair[i][0])
+            tmp = tmp / np.sqrt(np.sum(tmp ** 2))
+            y_dir.append(tmp)
+        y_dir = np.stack(y_dir, axis=0)
+        y_dir = torch.from_numpy(y_dir).float().view(1, len(self.ptspair), 1, 1, 3).expand(
+            [self.batch_size, -1, self.height, self.width, -1])
+        # Compute vertical direction
+        vert_dir_tmp = torch.from_numpy(invIn).view(1,1,1,1,1,3,3).expand([self.batch_size, len(self.ptspair), 3, self.height, self.width, -1, -1]).float() @ self.interestedLocs.unsqueeze(6)
+        vert_dir = torch.cross(vert_dir_tmp[:,:,1,:,:,:,0], vert_dir_tmp[:,:,2,:,:,:,0], dim=4)
+        z_dir = vert_dir / torch.norm(vert_dir, keepdim = True, dim = 4).expand([-1,-1,-1,-1,3])
+        x_dir = torch.cross(z_dir, y_dir, dim = 4)
+
+        self.x_dir = torch.nn.Parameter(x_dir, requires_grad=False)
+        self.z_dir = torch.nn.Parameter(z_dir, requires_grad=False)
+        self.y_dir = torch.nn.Parameter(y_dir, requires_grad=False)
+        self.invIn = torch.nn.Parameter(torch.from_numpy(invIn).float(), requires_grad=False)
+
+        # self.interestedLocs = nn.Parameter(self.interestedLocs, requires_grad = False)
+
+        w = 4
+        weightl = np.zeros([len(self.ptspair), 1, int(w * 2 + 1), int(w * 2 + 1)])
+        for i in range(len(self.ptspair)):
+            weightl[i, 0, self.ptspair[i][0][1] + w, self.ptspair[i][0][0] + w] = 1
+        self.copyConv_thetal = torch.nn.Conv2d(len(self.ptspair), len(self.ptspair), int(w * 2 + 1), stride=1, padding=w, bias=False, groups=len(self.ptspair))
+        self.copyConv_thetal.weight = torch.nn.Parameter(torch.from_numpy(weightl.astype(np.float32)), requires_grad=False)
+
+        weightr = np.zeros([len(self.ptspair), 1, int(w * 2 + 1), int(w * 2 + 1)])
+        for i in range(len(self.ptspair)):
+            weightr[i, 0, self.ptspair[i][1][1] + w, self.ptspair[i][1][0] + w] = 1
+        self.copyConv_thetar = torch.nn.Conv2d(len(self.ptspair), len(self.ptspair), int(w * 2 + 1), stride=1, padding=w, bias=False, groups=len(self.ptspair))
+        self.copyConv_thetar.weight = torch.nn.Parameter(torch.from_numpy(weightr.astype(np.float32)), requires_grad=False)
+    def get_theta(self, depthmap):
+        # depthmap = torch.clamp(depthmap, min=0.1, max = 80)
+        with torch.no_grad():
+            invIn_ex = self.invIn.view(1,1,1,3,3).expand([self.batch_size, self.height, self.width, -1, -1])
+            pts3d = (invIn_ex @ self.pixelLocs.unsqueeze(4)) * depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1])
+            pts3d_ex = pts3d.unsqueeze(1).squeeze(5).expand([-1,len(self.ptspair),-1,-1,-1])
+            pts3d_nx = torch.sum(pts3d_ex * self.x_dir, dim=[4])
+            pts3d_ny = torch.sum(pts3d_ex * self.y_dir,dim=[4])
+            pts3d_nz = torch.sum(pts3d_ex * self.z_dir,dim=[4])
+
+            pts3d_nxl = self.copyConv_thetal(pts3d_nx)
+            pts3d_nyl = self.copyConv_thetal(pts3d_ny)
+            pts3d_nzl = self.copyConv_thetal(pts3d_nz)
+
+            pts3d_nxr = self.copyConv_thetar(pts3d_nx)
+            pts3d_nyr = self.copyConv_thetar(pts3d_ny)
+            pts3d_nzr = self.copyConv_thetar(pts3d_nz)
+
+            pts3d_n = torch.stack([pts3d_nx, pts3d_ny, pts3d_nz], dim=4)
+            pts3d_l = torch.stack([pts3d_nxl, pts3d_nyl, pts3d_nzl], dim=4)
+            pts3d_r = torch.stack([pts3d_nxr, pts3d_nyr, pts3d_nzr], dim=4)
+            theta1 = (pts3d_nxl - pts3d_nx) / (torch.norm(pts3d_n - pts3d_l, dim=4))
+            theta1 = torch.clamp(theta1, min=-1, max=1)
+            theta1 = torch.acos(theta1)
+
+            theta2 = (pts3d_nx - pts3d_nxr) / (torch.norm(pts3d_n - pts3d_r, dim=4))
+            theta2 = torch.clamp(theta2, min=-1, max=1)
+            theta2 = torch.acos(theta2)
+            theta2 = theta2 - theta1
+
+            # counts, bins = np.histogram(theta1[:,0,:,:].detach().cpu().numpy().flatten())
+            # plt.hist(bins[:-1], bins, weights=counts)
+            # counts, bins = np.histogram(theta1[:,1,:,:].detach().cpu().numpy().flatten())
+            # plt.hist(bins[:-1], bins, weights=counts)
+            # tensor2disp(theta1[:,1:2,:,:], vmax = 3.14, ind = 0).show()
+            # tensor2disp(theta1[:, 0:1, :, :], vmax=3.14, ind=0).show()
+            # import random
+            # bz = random.randint(0, self.batch_size-1)
+            # ch = random.randint(0, len(self.ptspair)-1)
+            # h = random.randint(0, self.height-1)
+            # w = random.randint(0, self.width - 1)
+            #
+            # target_lx = pts3d_nx[bz,ch,h + self.ptspair[ch][0][1],w + self.ptspair[ch][0][0]]
+            # lx = pts3d_nxl[bz,ch,h,w]
+            #
+            # target_ly = pts3d_ny[bz,ch,h + self.ptspair[ch][0][1],w + self.ptspair[ch][0][0]]
+            # ly = pts3d_nyl[bz,ch,h,w]
+            #
+            # target_lz = pts3d_nz[bz,ch,h + self.ptspair[ch][0][1],w + self.ptspair[ch][0][0]]
+            # lz = pts3d_nzl[bz,ch,h,w]
+            #
+            # target_rx = pts3d_nx[bz,ch,h + self.ptspair[ch][1][1],w + self.ptspair[ch][1][0]]
+            # rx = pts3d_nxr[bz,ch,h,w]
+            #
+            # target_ry = pts3d_ny[bz,ch,h + self.ptspair[ch][1][1],w + self.ptspair[ch][1][0]]
+            # ry = pts3d_nyr[bz,ch,h,w]
+            #
+            # target_rz = pts3d_nz[bz,ch,h + self.ptspair[ch][1][1],w + self.ptspair[ch][1][0]]
+            # rz = pts3d_nzr[bz,ch,h,w]
+            #
+            # assert (torch.abs(target_lx - lx) + torch.abs(target_ly - ly) + torch.abs(target_lz - lz)) + (torch.abs(target_rx - rx) + torch.abs(target_ry - ry) + torch.abs(target_rz - rz)) < 1e-3
+
+        # import matlab
+        # import matlab.engine
+        # eng = matlab.engine.start_matlab()
+        #
+        # sampleR = 5
+        # viewIndex = 0
+        # dx = pts3d[viewIndex, :, :, 0, 0].cpu().detach().numpy().flatten()[::sampleR]
+        # dy = pts3d[viewIndex, :, :, 1, 0].cpu().detach().numpy().flatten()[::sampleR]
+        # dz = pts3d[viewIndex, :, :, 2, 0].cpu().detach().numpy().flatten()[::sampleR]
+        #
+        # dx = matlab.double(dx.tolist())
+        # dy = matlab.double(dy.tolist())
+        # dz = matlab.double(dz.tolist())
+        #
+        # eng.eval('close all', nargout=0)
+        # eng.eval('figure()', nargout=0)
+        # eng.eval('hold on', nargout=0)
+        # eng.scatter3(dx, dy, dz, 5, 'filled', 'g', nargout=0)
+        # eng.eval('axis equal', nargout=0)
+        # eng.eval('grid off', nargout=0)
+        # eng.eval('xlabel(\'X\')', nargout=0)
+        # eng.eval('ylabel(\'Y\')', nargout=0)
+        # eng.eval('zlabel(\'Z\')', nargout=0)
+        # # eng.eval('xlim([0 50])', nargout=0)
+        # # eng.eval('ylim([-40 40])', nargout=0)
+        # # eng.eval('zlim([-3 10])', nargout=0)
+        # tensor2disp(depthmap, vmax=80, ind=0).show()
+        return theta1, theta2
+    def forward(self, predNorm, depthmap, invIn):
+        predNorm_ = predNorm.view(self.batch_size, len(self.ptspair), 3, self.height, self.width).permute([0,1,3,4,2]).unsqueeze(4)
+        intrinsic_c = invIn[:,0:3,0:3].view(self.batch_size,1,1,1,3,3)
+        normIn = torch.matmul(predNorm_, intrinsic_c)
+
+        p2d_ex = self.pixelLocs.unsqueeze(1).unsqueeze(5).expand([-1, len(self.ptspair), -1, -1, -1, -1])
+        k = -torch.matmul(normIn, p2d_ex).squeeze(4).squeeze(4) * depthmap.expand([-1, len(self.ptspair), -1, -1])
+
+        predDepth = normIn.unsqueeze(2).expand([-1,-1,2,-1,-1,-1,-1]) @ self.interestedLocs.unsqueeze(6)
+        predDepth = predDepth.squeeze(5).squeeze(5)
+        predDepth = -k.unsqueeze(2).expand([-1,-1,2,-1,-1]) / (predDepth)
+        # ptspred3d = predDepth.unsqueeze(5).expand([-1,-1,-1,-1,-1,3]) * (intrinsic_c.unsqueeze(2).expand([-1, len(self.pixelLocs), 2, self.height, self.width, -1, -1]) @ self.interestedLocs.unsqueeze(6)).squeeze(6)
+        # ck = torch.sum(ptspred3d * predNorm_.squeeze(4).unsqueeze(2).expand([-1,-1,2,-1,-1,-1]), axis = [5])
+        # ck = ck + k.unsqueeze(2).expand([-1,-1,2,-1,-1])
+        # torch.abs(ck).max()
+        predDepth_ = predDepth.view(self.batch_size, len(self.ptspair) * 2, self.height, self.width)
+        predDepth_ = self.copyConv(predDepth_)
+
+        # import random
+        # for i in range(100):
+        #     bz = random.randint(0, self.batch_size - 1)
+        #     chn = random.randint(0, 2 * len(self.ptspair) - 1)
+        #     hn = random.randint(0, self.height - 1)
+        #     wn = random.randint(0, self.width - 1)
+        #
+        #     dpval = predDepth_[bz, chn, hn, wn]
+        #     sPts2d = torch.Tensor([wn, hn, 1]).float().cuda()
+        #     sPts3d = invIn[bz,0:3,0:3] @ sPts2d.unsqueeze(1) * dpval
+        #
+        #     deltax = self.ptspair[int(chn / 2)][chn % 2][0]
+        #     deltay = self.ptspair[int(chn / 2)][chn % 2][1]
+        #     planeDir = predNorm_[bz, int(chn / 2), hn - deltay, wn - deltax, :, :]
+        #     sk = k[bz, int(chn / 2), hn - deltay, wn - deltax]
+        #
+        #     val = (planeDir @ sPts3d)[0][0] + sk
+        #
+        #     print(val)
+
+
+
+
+
+        # depthmap = torch.clamp(depthmap, min=0, max=100)
+        # pts3d = invIn[:,0:3,0:3].view(self.batch_size,1,1,3,3).expand([-1, self.height, self.width, 3, 3]) @ self.pixelLocs.unsqueeze(4)
+        # pts3d = pts3d * depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1, -1, -1, 3, 1])
+        # pts3d = pts3d.squeeze(4).permute(0,3,1,2).contiguous()
+        #
+        # ck_p = torch.sum(predNorm.view(self.batch_size, len(self.ptspair), 3, self.height, self.width) * pts3d.unsqueeze(1).expand([-1,len(self.ptspair),-1,-1,-1]), axis = [2])
+        # ck_p = ck_p + k
+        # torch.abs(ck_p).max()
+        #
+        # tensor2disp((torch.abs(ck_p) > 100)[:,0:1,:,:], vmax = 1, ind = 0).show()
+        # import matlab
+        # import matlab.engine
+        # eng = matlab.engine.start_matlab()
+        #
+        # sampleR = 5
+        # viewIndex = 0
+        # dx = pts3d[viewIndex, 0, :, :].cpu().detach().numpy().flatten()[::sampleR]
+        # dy = pts3d[viewIndex, 1, :, :].cpu().detach().numpy().flatten()[::sampleR]
+        # dz = pts3d[viewIndex, 2, :, :].cpu().detach().numpy().flatten()[::sampleR]
+        #
+        # dx = matlab.double(dx.tolist())
+        # dy = matlab.double(dy.tolist())
+        # dz = matlab.double(dz.tolist())
+        #
+        # eng.eval('close all', nargout=0)
+        # eng.eval('figure()', nargout=0)
+        # eng.eval('hold on', nargout=0)
+        # eng.scatter3(dx, dy, dz, 5, 'filled', 'g', nargout=0)
+        # eng.eval('axis equal', nargout=0)
+        # eng.eval('grid off', nargout=0)
+        # eng.eval('xlabel(\'X\')', nargout=0)
+        # eng.eval('ylabel(\'Y\')', nargout=0)
+        # eng.eval('zlabel(\'Z\')', nargout=0)
+        # eng.eval('xlim([0 50])', nargout=0)
+        # eng.eval('ylim([-40 40])', nargout=0)
+        # eng.eval('zlim([-3 10])', nargout=0)
+        return predDepth_
 class BackProj3D(nn.Module):
     def __init__(self, height, width, batch_size):
         super(BackProj3D, self).__init__()

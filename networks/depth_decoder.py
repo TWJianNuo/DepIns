@@ -48,7 +48,7 @@ class DepthDecoder(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
 
-    def forward(self, input_features):
+    def forward(self, input_features, trainOrder = False):
         self.outputs = {}
 
         # decoder
@@ -61,6 +61,10 @@ class DepthDecoder(nn.Module):
             x = torch.cat(x, 1)
             x = self.convs[("upconv", i, 1)](x)
             if i in self.scales:
-                self.outputs[("disp", i)] = self.sigmoid(self.convs[("dispconv", i)](x))
+                if trainOrder:
+                    if i == 0:
+                        self.outputs[("disp", i)] = self.sigmoid(self.convs[("dispconv", i)](x))
+                else:
+                    self.outputs[("disp", i)] = self.sigmoid(self.convs[("dispconv", i)](x))
 
         return self.outputs

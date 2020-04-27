@@ -199,6 +199,9 @@ class MonodepthOptions:
         self.parser.add_argument("--synloss_w",
                                  type=float,
                                  default=1)
+        self.parser.add_argument("--kitti_gt_path",
+                                 type=str,
+                                 default='None')
 
 
         # ABLATION options

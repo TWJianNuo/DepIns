@@ -62,7 +62,8 @@ class MonoDataset(data.Dataset):
                  load_syn = False,
                  syn_filenames = None,
                  syn_root = '',
-                 PreSIL_root = None
+                 PreSIL_root = None,
+                 kitti_gt_path = None
                  ):
         super(MonoDataset, self).__init__()
 
@@ -127,6 +128,11 @@ class MonoDataset(data.Dataset):
         self.prsil_h = 448
         self.prsil_cw = 32 * 10
         self.prsil_ch = 32 * 8
+
+        if kitti_gt_path is not 'None':
+            self.kitti_gt_path = kitti_gt_path
+        else:
+            self.kitti_gt_path = None
     def preprocess(self, inputs, color_aug):
         """Resize colour images to the required scales and augment if required
 
@@ -262,7 +268,10 @@ class MonoDataset(data.Dataset):
             del inputs[("color_aug", i, -1)]
 
         if self.load_depth:
-            depth_gt = self.get_depth(folder, frame_index, side, do_flip)
+            if self.kitti_gt_path is None:
+                depth_gt = self.get_depth(folder, frame_index, side, do_flip)
+            else:
+                depth_gt = self.get_depth_fromfile(folder, frame_index, side, do_flip)
             inputs["depth_gt"] = np.expand_dims(depth_gt, 0)
             inputs["depth_gt"] = torch.from_numpy(inputs["depth_gt"].astype(np.float32))
 
@@ -277,7 +286,9 @@ class MonoDataset(data.Dataset):
         inputs.update(self.get_camK(folder, frame_index, side, do_flip))
 
         if self.load_seman:
-            inputs['semanLabel'] = self.get_seman(folder, frame_index, side, do_flip)
+            semanLabel, semantic_catmask = self.get_seman(folder, frame_index, side, do_flip)
+            inputs['semanLabel'] = semanLabel
+            inputs['semantic_catmask'] = semantic_catmask
 
         if self.load_pose:
             inputs['poseM'] = self.get_pose(folder, frame_index)
@@ -293,10 +304,12 @@ class MonoDataset(data.Dataset):
         inputs['indicesRec'] = index
 
         if self.PreSIL_root is not None:
-            pSIL_rgb, pSIL_depth, pSIL_insMask = self.get_PreSIL()
+            pSIL_rgb, pSIL_depth, pSIL_insMask, preSilIn, preSilEx = self.get_PreSIL()
             inputs["pSIL_rgb"] = pSIL_rgb
             inputs["pSIL_depth"] = pSIL_depth
             inputs["pSIL_insMask"] = pSIL_insMask
+            inputs["preSilIn"] = preSilIn
+            inputs["preSilEx"] = preSilEx
         return inputs
 
     def get_color(self, folder, frame_index, side, do_flip):
@@ -333,4 +346,7 @@ class MonoDataset(data.Dataset):
         raise NotImplementedError
 
     def get_PreSIL(self):
+        raise NotImplementedError
+
+    def get_depth_fromfile(self, folder, frame_index, side, do_flip):
         raise NotImplementedError

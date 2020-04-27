@@ -61,6 +61,16 @@ class KITTIRAWDataset(KITTIDataset):
     def __init__(self, *args, **kwargs):
         super(KITTIRAWDataset, self).__init__(*args, **kwargs)
 
+    def get_depth_fromfile(self, folder, frame_index, side, do_flip):
+        rgb_path = os.path.join(self.kitti_gt_path, folder, "image_0{}".format(self.side_map[side]), "{:010d}.png".format(frame_index))
+        depthmap = pil.open(rgb_path)
+        depthmap = depthmap.resize(self.full_res_shape, pil.NEAREST)
+        if do_flip:
+            depthmap = depthmap.transpose(Image.FLIP_LEFT_RIGHT)
+        depthmap = np.array(depthmap).astype(np.uint16)
+
+        return depthmap
+
     def crop_PreSIL(self, xmax, xmin, ymax, ymin):
         padding = 32
         xmax = xmax + padding
@@ -108,8 +118,7 @@ class KITTIRAWDataset(KITTIDataset):
         return depthIm
 
     def get_PreSIL(self):
-
-
+        do_crop = False
         while True:
             index = int(np.random.randint(100, size=1)[0])
             seq = int(index / 5000)
@@ -141,33 +150,67 @@ class KITTIRAWDataset(KITTIDataset):
             ins = ins.transpose(Image.FLIP_LEFT_RIGHT)
             boxlabel = [boxlabel[0], self.prsil_w - boxlabel[2], self.prsil_w - boxlabel[1], boxlabel[3], boxlabel[4]]
 
-        lx, rx, uy, by = self.crop_PreSIL(xmax = boxlabel[2], xmin = boxlabel[1], ymax = boxlabel[4], ymin = boxlabel[3])
-        rgb = np.array(rgb)[uy: by, lx: rx, :]
-        ins = np.array(ins)[uy: by, lx: rx, :]
-        depth = np.array(depth)[uy: by, lx: rx, :]
+        if do_crop:
+            lx, rx, uy, by = self.crop_PreSIL(xmax = boxlabel[2], xmin = boxlabel[1], ymax = boxlabel[4], ymin = boxlabel[3])
+            rgb = np.array(rgb)[uy: by, lx: rx, :]
+            ins = np.array(ins)[uy: by, lx: rx, :]
+            depth = np.array(depth)[uy: by, lx: rx, :]
 
-        # Decode Depth Map
-        depth = self.cvt_png2depth_PreSIL(depth)
+            # Decode Depth Map
+            depth = self.cvt_png2depth_PreSIL(depth)
 
-        # Decode Instance Map
-        ins = np.array(ins).astype(np.int)
-        ins = ins[:,:,0] * 255 * 255 + ins[:,:,1] * 255 + ins[:,:,2]
-        insMask = ins == boxlabel[0]
+            # Decode Instance Map
+            ins = np.array(ins).astype(np.int)
+            ins = ins[:,:,0] * 255 * 255 + ins[:,:,1] * 255 + ins[:,:,2]
+            insMask = ins == boxlabel[0]
 
-        # fig1 = tensor2rgb(torch.from_numpy(rgb).float().permute([2,0,1]).unsqueeze(0) / 255, ind=0)
-        # fig2 = tensor2disp(torch.from_numpy(depth).float().unsqueeze(0).unsqueeze(0), ind=0, percentile=95)
-        # fig3 = tensor2disp(torch.from_numpy(insMask).float().unsqueeze(0).unsqueeze(0), ind=0, vmax=1)
-        # fig = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0)
-        # pil.fromarray(fig).save(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/preSIL_cropp_check', str(i) + '.png'))
+            # fig1 = tensor2rgb(torch.from_numpy(rgb).float().permute([2,0,1]).unsqueeze(0) / 255, ind=0)
+            # fig2 = tensor2disp(torch.from_numpy(depth).float().unsqueeze(0).unsqueeze(0), ind=0, percentile=95)
+            # fig3 = tensor2disp(torch.from_numpy(insMask).float().unsqueeze(0).unsqueeze(0), ind=0, vmax=1)
+            # fig = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0)
+            # pil.fromarray(fig).save(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/visualization/preSIL_cropp_check', str(i) + '.png'))
 
-        # fig, ax = plt.subplots(1)
-        # ax.imshow(np.array(rgb))
-        # rect = patches.Rectangle((boxlabel[1], boxlabel[3]), boxlabel[2] - boxlabel[1], boxlabel[4] - boxlabel[3], linewidth=1, edgecolor='r', facecolor='none')
-        # ax.add_patch(rect)
-        # plt.show()
-        # tensor2disp(torch.from_numpy(insMask).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
+            # fig, ax = plt.subplots(1)
+            # ax.imshow(np.array(rgb))
+            # rect = patches.Rectangle((boxlabel[1], boxlabel[3]), boxlabel[2] - boxlabel[1], boxlabel[4] - boxlabel[3], linewidth=1, edgecolor='r', facecolor='none')
+            # ax.add_patch(rect)
+            # plt.show()
+            # tensor2disp(torch.from_numpy(insMask).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
+        else:
+            depth = self.cvt_png2depth_PreSIL(np.array(depth))
 
-        return self.to_tensor(rgb), torch.from_numpy(depth).unsqueeze(0).float(), torch.from_numpy(insMask).float().unsqueeze(0)
+            ins = np.array(ins).astype(np.int)
+            ins = ins[:,:,0] * 255 * 255 + ins[:,:,1] * 255 + ins[:,:,2]
+            insMask = np.zeros_like(ins)
+            for l in lines:
+                insMask = insMask + (ins == int(l.split(' ')[0]))
+            insMask = insMask > 0
+            # tensor2disp(torch.from_numpy(insMask).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
+
+        scaleM = np.array([
+            [1024 / 1920, 0, 0, 0],
+            [0, 576 / 1080, -128, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
+
+        Tr_velo_to_cam = np.array([
+            [0, -1, 0, 0],
+            [0, 0, -1, 0],
+            [1, 0, 0, 0],
+            [0, 0, 0, 1]
+        ])
+
+        intrinsic = np.array([
+            [960, 0, 960, 0],
+            [0, 960, 540, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
+
+        preSilIn = scaleM @ intrinsic
+        preSilEx = Tr_velo_to_cam
+        return self.to_tensor(rgb), torch.from_numpy(depth).unsqueeze(0).float(), torch.from_numpy(insMask).float().unsqueeze(0), torch.from_numpy(preSilIn).float(), torch.from_numpy(preSilEx).float()
 
     def get_image_path(self, folder, frame_index, side):
         f_str = "{:010d}{}".format(frame_index, self.img_ext)
@@ -311,9 +354,18 @@ class KITTIRAWDataset(KITTIDataset):
         semantic_label_copy = np.array(semantic_label.copy())
         for k in np.unique(semantic_label):
             semantic_label_copy[semantic_label_copy == k] = labels[k].trainId
-
+        semantic_label_copy_gtsize = pil.fromarray(semantic_label_copy).resize(self.full_res_shape, pil.NEAREST)
         semantic_label_copy = np.expand_dims(semantic_label_copy, axis=0)
-        return semantic_label_copy
+        semantic_label_copy_gtsize = np.expand_dims(np.array(semantic_label_copy_gtsize), axis=0)
+
+        semantic_catmask = np.zeros_like(semantic_label_copy_gtsize)
+        cats = [11, 12, 13, 14, 15, 16, 17, 18]
+        for c in cats:
+            semantic_catmask = semantic_catmask + (semantic_label_copy_gtsize == c).astype(np.uint8)
+        semantic_catmask = (semantic_catmask > 0).astype(np.float32)
+        # semantic_catmask = np.expand_dims(semantic_catmask, axis=0)
+        # tensor2disp(torch.from_numpy(semantic_catmask).unsqueeze(0), ind = 0, vmax = 1).show()
+        return semantic_label_copy, semantic_catmask
 
     def get_bundlePose(self, folder, frame_index):
         poseM = list()
