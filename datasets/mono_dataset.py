@@ -63,7 +63,8 @@ class MonoDataset(data.Dataset):
                  syn_filenames = None,
                  syn_root = '',
                  PreSIL_root = None,
-                 kitti_gt_path = None
+                 kitti_gt_path = None,
+                 theta_gt_path=None
                  ):
         super(MonoDataset, self).__init__()
 
@@ -133,6 +134,13 @@ class MonoDataset(data.Dataset):
             self.kitti_gt_path = kitti_gt_path
         else:
             self.kitti_gt_path = None
+
+        if kitti_gt_path is not 'None':
+            self.theta_gt_path = theta_gt_path
+        else:
+            self.theta_gt_path = None
+
+
     def preprocess(self, inputs, color_aug):
         """Resize colour images to the required scales and augment if required
 
@@ -261,7 +269,10 @@ class MonoDataset(data.Dataset):
         # Read The Entry tag
         comps = self.filenames[index].split(' ')
         inputs['entry_tag'] = str(comps[0] + ' ' + comps[1].zfill(10) + ' ' + comps[2])
-
+        if do_flip:
+            inputs['entry_tag'] = inputs['entry_tag'] + ' fly'
+        else:
+            inputs['entry_tag'] = inputs['entry_tag'] + ' fln'
 
         for i in self.frame_idxs:
             del inputs[("color", i, -1)]
@@ -310,6 +321,9 @@ class MonoDataset(data.Dataset):
             inputs["pSIL_insMask"] = pSIL_insMask
             inputs["preSilIn"] = preSilIn
             inputs["preSilEx"] = preSilEx
+
+        if self.theta_gt_path is not None:
+            inputs["thetagt"] = self.get_theta_fromfile(folder, frame_index, side, do_flip)
         return inputs
 
     def get_color(self, folder, frame_index, side, do_flip):
@@ -349,4 +363,7 @@ class MonoDataset(data.Dataset):
         raise NotImplementedError
 
     def get_depth_fromfile(self, folder, frame_index, side, do_flip):
+        raise NotImplementedError
+
+    def get_theta_fromfile(self, folder, frame_index, side, do_flip):
         raise NotImplementedError

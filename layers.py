@@ -695,65 +695,68 @@ class LinGeomDesp(nn.Module):
         self.copyConv_thetar.weight = torch.nn.Parameter(torch.from_numpy(weightr.astype(np.float32)), requires_grad=False)
     def get_theta(self, depthmap):
         # depthmap = torch.clamp(depthmap, min=0.1, max = 80)
-        with torch.no_grad():
-            invIn_ex = self.invIn.view(1,1,1,3,3).expand([self.batch_size, self.height, self.width, -1, -1])
-            pts3d = (invIn_ex @ self.pixelLocs.unsqueeze(4)) * depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1])
-            pts3d_ex = pts3d.unsqueeze(1).squeeze(5).expand([-1,len(self.ptspair),-1,-1,-1])
-            pts3d_nx = torch.sum(pts3d_ex * self.x_dir, dim=[4])
-            pts3d_ny = torch.sum(pts3d_ex * self.y_dir,dim=[4])
-            pts3d_nz = torch.sum(pts3d_ex * self.z_dir,dim=[4])
 
-            pts3d_nxl = self.copyConv_thetal(pts3d_nx)
-            pts3d_nyl = self.copyConv_thetal(pts3d_ny)
-            pts3d_nzl = self.copyConv_thetal(pts3d_nz)
+        invIn_ex = self.invIn.view(1,1,1,3,3).expand([self.batch_size, self.height, self.width, -1, -1])
+        pts3d = (invIn_ex @ self.pixelLocs.unsqueeze(4)) * depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1])
+        pts3d_ex = pts3d.unsqueeze(1).squeeze(5).expand([-1,len(self.ptspair),-1,-1,-1])
+        pts3d_nx = torch.sum(pts3d_ex * self.x_dir, dim=[4])
+        pts3d_ny = torch.sum(pts3d_ex * self.y_dir,dim=[4])
+        pts3d_nz = torch.sum(pts3d_ex * self.z_dir,dim=[4])
 
-            pts3d_nxr = self.copyConv_thetar(pts3d_nx)
-            pts3d_nyr = self.copyConv_thetar(pts3d_ny)
-            pts3d_nzr = self.copyConv_thetar(pts3d_nz)
 
-            pts3d_n = torch.stack([pts3d_nx, pts3d_ny, pts3d_nz], dim=4)
-            pts3d_l = torch.stack([pts3d_nxl, pts3d_nyl, pts3d_nzl], dim=4)
-            pts3d_r = torch.stack([pts3d_nxr, pts3d_nyr, pts3d_nzr], dim=4)
-            theta1 = (pts3d_nxl - pts3d_nx) / (torch.norm(pts3d_n - pts3d_l, dim=4))
-            theta1 = torch.clamp(theta1, min=-1, max=1)
-            theta1 = torch.acos(theta1)
 
-            theta2 = (pts3d_nx - pts3d_nxr) / (torch.norm(pts3d_n - pts3d_r, dim=4))
-            theta2 = torch.clamp(theta2, min=-1, max=1)
-            theta2 = torch.acos(theta2)
-            theta2 = theta2 - theta1
+        pts3d_nxl = self.copyConv_thetal(pts3d_nx)
+        pts3d_nyl = self.copyConv_thetal(pts3d_ny)
+        pts3d_nzl = self.copyConv_thetal(pts3d_nz)
 
-            # counts, bins = np.histogram(theta1[:,0,:,:].detach().cpu().numpy().flatten())
-            # plt.hist(bins[:-1], bins, weights=counts)
-            # counts, bins = np.histogram(theta1[:,1,:,:].detach().cpu().numpy().flatten())
-            # plt.hist(bins[:-1], bins, weights=counts)
-            # tensor2disp(theta1[:,1:2,:,:], vmax = 3.14, ind = 0).show()
-            # tensor2disp(theta1[:, 0:1, :, :], vmax=3.14, ind=0).show()
-            # import random
-            # bz = random.randint(0, self.batch_size-1)
-            # ch = random.randint(0, len(self.ptspair)-1)
-            # h = random.randint(0, self.height-1)
-            # w = random.randint(0, self.width - 1)
-            #
-            # target_lx = pts3d_nx[bz,ch,h + self.ptspair[ch][0][1],w + self.ptspair[ch][0][0]]
-            # lx = pts3d_nxl[bz,ch,h,w]
-            #
-            # target_ly = pts3d_ny[bz,ch,h + self.ptspair[ch][0][1],w + self.ptspair[ch][0][0]]
-            # ly = pts3d_nyl[bz,ch,h,w]
-            #
-            # target_lz = pts3d_nz[bz,ch,h + self.ptspair[ch][0][1],w + self.ptspair[ch][0][0]]
-            # lz = pts3d_nzl[bz,ch,h,w]
-            #
-            # target_rx = pts3d_nx[bz,ch,h + self.ptspair[ch][1][1],w + self.ptspair[ch][1][0]]
-            # rx = pts3d_nxr[bz,ch,h,w]
-            #
-            # target_ry = pts3d_ny[bz,ch,h + self.ptspair[ch][1][1],w + self.ptspair[ch][1][0]]
-            # ry = pts3d_nyr[bz,ch,h,w]
-            #
-            # target_rz = pts3d_nz[bz,ch,h + self.ptspair[ch][1][1],w + self.ptspair[ch][1][0]]
-            # rz = pts3d_nzr[bz,ch,h,w]
-            #
-            # assert (torch.abs(target_lx - lx) + torch.abs(target_ly - ly) + torch.abs(target_lz - lz)) + (torch.abs(target_rx - rx) + torch.abs(target_ry - ry) + torch.abs(target_rz - rz)) < 1e-3
+        pts3d_nxr = self.copyConv_thetar(pts3d_nx)
+        pts3d_nyr = self.copyConv_thetar(pts3d_ny)
+        pts3d_nzr = self.copyConv_thetar(pts3d_nz)
+
+
+        pts3d_n = torch.stack([pts3d_nx, pts3d_ny, pts3d_nz], dim=4)
+        pts3d_l = torch.stack([pts3d_nxl, pts3d_nyl, pts3d_nzl], dim=4)
+        pts3d_r = torch.stack([pts3d_nxr, pts3d_nyr, pts3d_nzr], dim=4)
+        theta1 = (pts3d_nxl - pts3d_nx) / (torch.norm(pts3d_n - pts3d_l, dim=4))
+        theta1 = torch.clamp(theta1, min=-0.999, max=0.999)
+        theta1 = torch.acos(theta1)
+        theta2 = (pts3d_nx - pts3d_nxr) / (torch.norm(pts3d_n - pts3d_r, dim=4))
+        theta2 = torch.clamp(theta2, min=-1, max=1)
+        theta2 = torch.acos(theta2)
+        theta2 = theta2 - theta1
+        return theta1, theta1
+
+        # counts, bins = np.histogram(theta1[:,0,:,:].detach().cpu().numpy().flatten())
+        # plt.hist(bins[:-1], bins, weights=counts)
+        # counts, bins = np.histogram(theta1[:,1,:,:].detach().cpu().numpy().flatten())
+        # plt.hist(bins[:-1], bins, weights=counts)
+        # tensor2disp(theta1[:,1:2,:,:], vmax = 3.14, ind = 0).show()
+        # tensor2disp(theta1[:, 0:1, :, :], vmax=3.14, ind=0).show()
+        # import random
+        # bz = random.randint(0, self.batch_size-1)
+        # ch = random.randint(0, len(self.ptspair)-1)
+        # h = random.randint(0, self.height-1)
+        # w = random.randint(0, self.width - 1)
+        #
+        # target_lx = pts3d_nx[bz,ch,h + self.ptspair[ch][0][1],w + self.ptspair[ch][0][0]]
+        # lx = pts3d_nxl[bz,ch,h,w]
+        #
+        # target_ly = pts3d_ny[bz,ch,h + self.ptspair[ch][0][1],w + self.ptspair[ch][0][0]]
+        # ly = pts3d_nyl[bz,ch,h,w]
+        #
+        # target_lz = pts3d_nz[bz,ch,h + self.ptspair[ch][0][1],w + self.ptspair[ch][0][0]]
+        # lz = pts3d_nzl[bz,ch,h,w]
+        #
+        # target_rx = pts3d_nx[bz,ch,h + self.ptspair[ch][1][1],w + self.ptspair[ch][1][0]]
+        # rx = pts3d_nxr[bz,ch,h,w]
+        #
+        # target_ry = pts3d_ny[bz,ch,h + self.ptspair[ch][1][1],w + self.ptspair[ch][1][0]]
+        # ry = pts3d_nyr[bz,ch,h,w]
+        #
+        # target_rz = pts3d_nz[bz,ch,h + self.ptspair[ch][1][1],w + self.ptspair[ch][1][0]]
+        # rz = pts3d_nzr[bz,ch,h,w]
+        #
+        # assert (torch.abs(target_lx - lx) + torch.abs(target_ly - ly) + torch.abs(target_lz - lz)) + (torch.abs(target_rx - rx) + torch.abs(target_ry - ry) + torch.abs(target_rz - rz)) < 1e-3
 
         # import matlab
         # import matlab.engine
@@ -782,7 +785,7 @@ class LinGeomDesp(nn.Module):
         # # eng.eval('ylim([-40 40])', nargout=0)
         # # eng.eval('zlim([-3 10])', nargout=0)
         # tensor2disp(depthmap, vmax=80, ind=0).show()
-        return theta1, theta2
+        # return theta1, theta2
     def forward(self, predNorm, depthmap, invIn):
         predNorm_ = predNorm.view(self.batch_size, len(self.ptspair), 3, self.height, self.width).permute([0,1,3,4,2]).unsqueeze(4)
         intrinsic_c = invIn[:,0:3,0:3].view(self.batch_size,1,1,1,3,3)

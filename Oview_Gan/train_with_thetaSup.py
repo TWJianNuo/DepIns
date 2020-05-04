@@ -47,12 +47,7 @@ class Trainer:
 
         self.num_scales = len(self.opt.scales)
         self.num_input_frames = len(self.opt.frame_ids)
-
-        self.ptspair = [
-            [[-1, 0, 0], [1, 0, 0]],
-            [[0, -1, 0], [0, 1, 0]]
-        ]
-
+        self.sfx = nn.Softmax()
         assert self.opt.frame_ids[0] == 0, "frame_ids must start with 0"
         if self.opt.use_stereo:
             self.opt.frame_ids.append("s")
@@ -61,7 +56,7 @@ class Trainer:
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
         self.models["depth"] = networks.DepthDecoder(
-            self.models["encoder"].num_ch_enc, self.opt.scales, num_output_channels = 2 * len(self.ptspair))
+            self.models["encoder"].num_ch_enc, self.opt.scales)
         self.models["depth"].to(self.device)
 
         self.parameters_to_train += list(self.models["depth"].parameters())
@@ -95,8 +90,6 @@ class Trainer:
 
         self.prsil_cw = 32 * 10
         self.prsil_ch = 32 * 8
-        self.prsil_w = 1024
-        self.prsil_h = 448
 
         # Define Shrink Conv
         weights = torch.tensor([[1., 1., 1.],
@@ -108,25 +101,26 @@ class Trainer:
         self.shrinkConv.weight = nn.Parameter(weights, requires_grad=False)
         self.shrinkConv = self.shrinkConv.cuda()
 
-        # self.bp3d = BackProj3D(height=self.prsil_ch, width=self.prsil_cw, batch_size=self.opt.batch_size).cuda()
-        self.bp3d = BackProj3D(height=self.prsil_h, width=self.prsil_w, batch_size=self.opt.batch_size).cuda()
+        self.bp3d = BackProj3D(height=self.prsil_ch, width=self.prsil_cw, batch_size=self.opt.batch_size).cuda()
 
-        invIn = np.linalg.inv(
+        self.ptspair = [
+            [[-1, 0, 0], [1, 0, 0]],
+            [[0, -1, 0], [0, 1, 0]]
+        ]
+        invIn2 = np.linalg.inv(
             np.array([
-                [512., 0., 512.],
-                [0., 512., 160.],
+                [594.8910, 0., 502.5674],
+                [0., 615.7122, 147.5021],
                 [0., 0.,   1.]])
         )
-        self.linGeomDesp = LinGeomDesp(height=self.prsil_h, width=self.prsil_w, batch_size=self.opt.batch_size, ptspair = self.ptspair, invIn=invIn).cuda()
-
-        # w = 4
-        # weightl = np.zeros([len(self.ptspair), 1, int(w * 2 + 1), int(w * 2 + 1)])
-        # for i in range(len(self.ptspair)):
-        #     weightl[i * 2 + j, 0, self.ptspair[i][j][1] + w, self.ptspair[i][j][0] + w] = 1
-        #     weightl[i * 2 + j, 0, w, w] = -1
-        # self.compareConv = torch.nn.Conv2d(1, len(self.ptspair) * 2, int(w * 2 + 1), stride=1, padding=w, bias=False)
-        # self.compareConv.weight = torch.nn.Parameter(torch.from_numpy(weightl.astype(np.float32)), requires_grad=False)
-        # self.compareConv = self.compareConv.cuda()
+        self.linGeomDesp = LinGeomDesp(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size, ptspair = self.ptspair, invIn=invIn2).cuda()
+        invIn2 = np.linalg.inv(
+            np.array([
+                [-594.8910, 0., 502.5674],
+                [0., 615.7122, 147.5021],
+                [0., 0.,   1.]])
+        )
+        self.linGeomDesp_flip = LinGeomDesp(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size, ptspair = self.ptspair, invIn=invIn2).cuda()
     def set_layers(self):
         """properly handle layer initialization under multiple dataset situation
         """
@@ -172,15 +166,11 @@ class Trainer:
 
         train_dataset = datasets.KITTIRAWDataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, is_train=True, load_seman = True, load_hints = self.opt.load_hints, hints_path = self.opt.hints_path, PreSIL_root = self.opt.PreSIL_path,
-            kitti_gt_path = self.opt.kitti_gt_path
-        )
+            self.opt.frame_ids, 4, is_train=True, load_seman = True, load_hints = self.opt.load_hints, hints_path = self.opt.hints_path, theta_gt_path=self.opt.theta_gt_path)
 
         val_dataset = datasets.KITTIRAWDataset(
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, is_train=False, load_seman = True, load_hints = self.opt.load_hints, hints_path = self.opt.hints_path, PreSIL_root = self.opt.PreSIL_path,
-            kitti_gt_path=self.opt.kitti_gt_path
-        )
+            self.opt.frame_ids, 4, is_train=False, load_seman = True, load_hints = self.opt.load_hints, hints_path = self.opt.hints_path, theta_gt_path=self.opt.theta_gt_path)
 
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, shuffle=True,
@@ -230,6 +220,77 @@ class Trainer:
             if (self.epoch + 1) % self.opt.save_frequency == 0:
                 self.save_model()
 
+    def supervised_with_morph(self, inputs):
+
+        outputs, losses = self.process_batch(inputs)
+
+        thetaloss = 0
+        for i in range(len(self.opt.scales)):
+            theta1_unflip, _ = self.linGeomDesp.get_theta(outputs[('depth', 0, i)] * 5.4)
+            theta1_flip, _ = self.linGeomDesp_flip.get_theta(outputs[('depth', 0, i)] * 5.4)
+
+            theta1 = list()
+            for k in range(self.opt.batch_size):
+                if inputs['entry_tag'][k].split(' ')[-1] == 'fly':
+                    theta1.append(theta1_flip[k:k+1, 0:1,:,:])
+                else:
+                    theta1.append(theta1_unflip[k:k + 1, 0:1, :, :])
+            theta1 = torch.cat(theta1, dim=0).contiguous()
+            thetaloss = thetaloss + torch.mean(torch.abs(theta1 - inputs['thetagt']))
+            if i == 0:
+                outputs['theta1'] = theta1
+        thetaloss = thetaloss / 4
+
+        losses['thetaloss'] = thetaloss
+        losses['totLoss'] = losses['totLoss'] + thetaloss * self.opt.theta_scale
+        self.model_optimizer.zero_grad()
+        losses['totLoss'].backward()
+        self.model_optimizer.step()
+
+
+
+        # viewIndex = 1
+        # fig1 = tensor2disp(outputs['theta1'], ind = viewIndex, vmax = 3.1415)
+        # fig2 = tensor2disp(inputs['thetagt'], ind = viewIndex, vmax = 3.1415)
+        # fig3 = tensor2rgb(inputs[('color', 0, 0)], ind = viewIndex)
+        # fig4 = tensor2disp(outputs['disp', 0], ind = viewIndex, vmax=0.1)
+        #
+        # figup = np.concatenate([np.array(fig2), np.array(fig3)], axis=1)
+        # figdown = np.concatenate([np.array(fig1), np.array(fig4)], axis=1)
+        # fig = np.concatenate([np.array(figup), np.array(figdown)], axis=0)
+        # pil.fromarray(fig).show()
+        # stable_disp = outputs['disp', 0].detach()
+        # disparity_grad_bin = self.tool.get_disparityEdge(outputs['disp', 0])
+        # semantics_grad_bin = self.tool.get_semanticsEdge(inputs['semanLabel'])
+        #
+        # morphedx, morphedy, ocoeff = self.bnmorph.bnmorph(disparity_grad_bin, semantics_grad_bin)
+        # morphedx = (morphedx / (self.opt.width - 1) - 0.5) * 2
+        # morphedy = (morphedy / (self.opt.height - 1) - 0.5) * 2
+        # grid = torch.cat([morphedx, morphedy], dim=1).permute(0, 2, 3, 1)
+        # dispMaps_morphed = F.grid_sample(stable_disp, grid, padding_mode="border")
+        # outputs['dispMaps_morphed'] = dispMaps_morphed
+        #
+        # with torch.no_grad():
+        #     th = 1.05
+        #     ssim_val_predict = self.compute_reprojection_loss(outputs[('color', 's', 0)], inputs[('color', 0, 0)])
+        #     scaledDisp, depth = disp_to_depth(dispMaps_morphed, self.opt.min_depth, self.opt.max_depth)
+        #     frame_id = "s"
+        #     T = inputs["stereo_T"]
+        #     cam_points = self.backproject_depth[0](depth, inputs[("inv_K", 0)])
+        #     pix_coords = self.project_3d[0](cam_points, inputs[("K", 0)], T)
+        #     morphed_rgb = F.grid_sample(inputs[("color", frame_id, 0)], pix_coords, padding_mode="border")
+        #     ssim_val_morph = self.compute_reprojection_loss(morphed_rgb, inputs[('color', 0, 0)])
+        #     selector_mask = (ssim_val_predict - th * ssim_val_morph > 0).float() * outputs['grad_proj_msak']
+        #     texture_measure = torch.mean(self.textureMeasure(inputs[('color', 0, 0)]), dim=1, keepdim=True)
+
+        # losses["similarity_loss"] = 100 * torch.sum(torch.log(1 + torch.abs(dispMaps_morphed - outputs['disp', 0]) * texture_measure) * selector_mask) / (torch.sum(selector_mask) + 1)
+        # losses['totLoss'] = losses["similarity_loss"] * self.opt.bnMorphLoss_w + losses['totLoss']
+
+
+
+        return outputs, losses
+
+
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -241,11 +302,7 @@ class Trainer:
 
             before_op_time = time.time()
 
-            outputs, losses = self.process_batch(inputs)
-
-            self.model_optimizer.zero_grad()
-            losses['totLoss'].backward()
-            self.model_optimizer.step()
+            outputs, losses = self.supervised_with_morph(inputs)
 
             duration = time.time() - before_op_time
 
@@ -253,163 +310,28 @@ class Trainer:
                 self.record_img(inputs, outputs)
 
             if self.step % 100 == 0:
-                self.log_time(batch_idx, duration, losses["totLoss"])
+                self.log_time(batch_idx, duration, losses['loss_depth/0'], losses["totLoss"])
 
             if self.step % 2 == 0:
                 self.log("train", inputs, outputs, losses, writeImage=False)
 
-            # if self.step % 100 == 0:
-            #     self.val()
+            if self.step % 15 == 0:
+                self.val()
 
             self.step += 1
-            # print(self.step)
 
-    def process_batch(self, inputs, isval = False):
+    def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
         """
         for key, ipt in inputs.items():
             if not (key == 'entry_tag' or key == 'syn_tag'):
                 inputs[key] = ipt.to(self.device)
 
+        features = self.models["encoder"](inputs["color_aug", 0, 0])
         outputs = dict()
-        losses = dict()
-        # outputs.update(self.models['depth'](self.models['encoder'](inputs['pSIL_rgb'])))
-        outputs.update(self.models['depth'](self.models['encoder'](inputs[('color', 0, 0)])))
-        theta1, theta2 = self.linGeomDesp.get_theta(depthmap = inputs['pSIL_depth'])
-        mask_theta2 = (torch.abs(theta2) < 0.1).float()
-        outputs['theta1'] = theta1
-        outputs['theta2'] = theta2
-        # tensor2disp(mask_theta2[:,0:1,:,:], ind = 0, vmax=1).show()
-
-        # mask = inputs['pSIL_insMask']
-        # mask = (self.shrinkConv(mask) > self.shrinkbar).float().expand([-1, len(self.ptspair) * 2, -1, -1]) * (self.compareConv(mask) == 0).float()
-        # tensor2disp(mask, ind=0, vmax=1).show()
-
-        l_theta1 = 0
-        l_theta2 = 0
-        for i in range(len(self.opt.scales)):
-            pred_theta = outputs[('disp', i)]
-            pred_theta = F.interpolate(pred_theta, [self.prsil_h, self.prsil_w], mode='bilinear', align_corners=True)
-            pred_theta1 = pred_theta[:,0::2,:,:] * 3.1415
-            pred_theta2 = (pred_theta[:, 1::2, :, :] - 0.5) * 2 * 3.1415
-
-            # l_theta1 = l_theta1 + torch.sum(torch.abs(pred_theta1 - theta1) * mask) / (torch.sum(mask) + 1)
-            #
-            # l_theta2_l = torch.sum(torch.abs(pred_theta2 - theta2) * mask * mask_theta2) / (torch.sum(mask * mask_theta2) + 1)
-            # l_theta2_nl = torch.sum(torch.abs(pred_theta2 - theta2) * mask * (1-mask_theta2)) / (torch.sum(mask * (1-mask_theta2)) + 1)
-
-            l_theta1 = l_theta1 + torch.mean(torch.abs(pred_theta1 - theta1))
-            l_theta2_l = torch.sum(torch.abs(pred_theta2 - theta2) * mask_theta2) / (torch.sum(mask_theta2) + 1)
-            l_theta2_nl = torch.sum(torch.abs(pred_theta2 - theta2) * (1-mask_theta2)) / (torch.sum((1-mask_theta2)) + 1)
-            l_theta2 = l_theta2 + (l_theta2_l + l_theta2_nl) / 2
-            if i == 0:
-                losses['l_theta1'] = l_theta1
-                losses['l_theta2'] = l_theta2
-                losses['l_theta2_l'] = l_theta2_l
-                losses['l_theta2_nl'] = l_theta2_nl
-
-        l_theta1 = l_theta1 / len(self.opt.scales)
-        l_theta2 = l_theta2 / len(self.opt.scales)
-
-        l_theta = (l_theta1 + l_theta2)
-        losses['totLoss'] = l_theta
-
-        # self.model_optimizer.zero_grad()
-        # losses['totLoss'].backward()
-        # print(losses['totLoss'])
-        # self.model_optimizer.step()
-
-        # vind = 0
-        # figs = list()
-        # for m in range(len(self.ptspair) * 2):
-        #     if m % 2 == 0:
-        #         figs.append(np.array(tensor2disp(outputs[('disp', 0)][:,m:m+1,:,:], vmax = 1, ind = vind)))
-        #     else:
-        #         figs.append(np.array(tensor2disp(torch.abs(outputs[('disp', 0)][:, m:m + 1, :, :] - 1/2) * 2, vmax=1, ind=vind)))
-        # figs = np.concatenate(figs, axis=0)
-        # pil.fromarray(figs).show()
-        #
-        # figsgt = list()
-        # figsgt.append(np.array(tensor2disp(theta1[:,0:1,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 0:1, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt.append(np.array(tensor2disp(theta1[:,1:2,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 1:2, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt = np.concatenate(figsgt, axis=0)
-        # pil.fromarray(figsgt).show()
-        #
-        #
-        # dencoder = networks.ResnetEncoder(
-        #     50, self.opt.weights_init == "pretrained")
-        # dencoder.to(self.device)
-        # ddecoder = networks.DepthDecoder(
-        #     dencoder.num_ch_enc, self.opt.scales)
-        # ddecoder.to(self.device)
-        #
-        #
-        # path = '/home/shengjie/Documents/Project_SemanticDepth/tmp/2fenf_bs_occ_lp15_res50_ft/models/weights_3/encoder.pth'
-        # model_dict = dencoder.state_dict()
-        # pretrained_dict = torch.load(path)
-        # pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-        # model_dict.update(pretrained_dict)
-        # dencoder.load_state_dict(model_dict)
-        #
-        # path = '/home/shengjie/Documents/Project_SemanticDepth/tmp/2fenf_bs_occ_lp15_res50_ft/models/weights_3/depth.pth'
-        # model_dict = ddecoder.state_dict()
-        # pretrained_dict = torch.load(path)
-        # pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-        # model_dict.update(pretrained_dict)
-        # ddecoder.load_state_dict(model_dict)
-        #
-        # outputs2 = dict()
-        # outputs2.update(ddecoder(dencoder(inputs[('color', 0, 0)])))
-        # _, depth_pred = disp_to_depth(outputs2['disp', 0], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
-        # depth_pred = depth_pred  * 5.4
-        # invIn2 = np.linalg.inv(
-        #     np.array([
-        #         [594.8910, 0., 502.5674],
-        #         [0., 615.7122, 147.5021],
-        #         [0., 0.,   1.]])
-        # )
-        # linGeomDesp2 = LinGeomDesp(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size, ptspair = self.ptspair, invIn=invIn2).cuda()
-        # theta1, theta2 = linGeomDesp2.get_theta(depthmap = depth_pred)
-        #
-        # figsgt = list()
-        # figsgt.append(np.array(tensor2disp(theta1[:,0:1,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 0:1, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt.append(np.array(tensor2disp(theta1[:,1:2,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 1:2, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt = np.concatenate(figsgt, axis=0)
-        # pil.fromarray(figsgt).show()
-        #
-        # sup_depth_path = os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Bts_Pred/result_bts_eigen/raw', '2011_09_26_drive_0002_sync_0000000000.png')
-        # # sup_depth_path = '/home/shengjie/Desktop/dep_completion.png'
-        # depth_gt = pil.open(sup_depth_path)
-        # depth_gt = depth_gt.resize([self.opt.width, self.opt.height], pil.LANCZOS)
-        # depth_gt = np.array(depth_gt).astype(np.uint16).astype(np.float32)
-        # depth_gt = depth_gt / 256
-        # depth_gt = torch.from_numpy(depth_gt).unsqueeze(0).unsqueeze(0).float().cuda()
-        # depth_gt = depth_gt.expand([self.opt.batch_size, -1, -1, -1]).contiguous()
-        # theta1, theta2 = linGeomDesp2.get_theta(depthmap = depth_gt)
-        #
-        # rgba = '/home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data/2011_09_26/2011_09_26_drive_0001_sync/image_02/data/0000000005.png'
-        # rgba = pil.open(rgba)
-        # rgba = rgba.resize([self.opt.width, self.opt.height], pil.LANCZOS)
-        # rgba = np.array(rgba).astype(np.float32)
-        # rgba = rgba / 255
-        # rgba = torch.from_numpy(rgba).unsqueeze(0).permute([0,3,1,2]).cuda()
-        # rgba = rgba.expand([self.opt.batch_size, -1, -1, -1]).contiguous()
-        # outputs.update(self.models['depth'](self.models['encoder'](rgba)))
-        #
-        # figsgt = list()
-        # figsgt.append(np.array(tensor2disp(theta1[:,0:1,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 0:1, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt.append(np.array(tensor2disp(theta1[:,1:2,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 1:2, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt = np.concatenate(figsgt, axis=0)
-        # pil.fromarray(figsgt).show()
-        # tensor2disp(1 / depth_gt, percentile=95, ind = 0).show()
-
-        # campos = torch.inverse(inputs['realEx'][0]) @ torch.from_numpy(np.array([[0], [0], [0], [1]], dtype=np.float32)).cuda()
+        outputs.update(self.models["depth"](features))
+        self.generate_images_pred(inputs, outputs)
+        losses = self.compute_losses(inputs, outputs)
         return outputs, losses
 
     def val(self):
@@ -423,7 +345,8 @@ class Trainer:
             inputs = self.val_iter.next()
 
         with torch.no_grad():
-            outputs, losses = self.process_batch(inputs, isval=True)
+            outputs, losses = self.process_batch(inputs)
+            self.compute_depth_losses(inputs, outputs, losses)
             self.log("val", inputs, outputs, losses, False)
             del inputs, outputs, losses
         self.set_train()
@@ -567,57 +490,36 @@ class Trainer:
             losses[metric] = np.array(depth_errors[i].cpu())
         return depth_errors
 
-    def log_time(self, batch_idx, duration, loss_tot):
+    def log_time(self, batch_idx, duration, loss_depth, loss_tot):
         """Print a logging statement to the terminal
         """
         samples_per_sec = self.opt.batch_size / duration
         time_sofar = time.time() - self.start_time
-        training_time_left = (self.num_total_steps / self.step - 1.0) * time_sofar if self.step > 0 else 0
-        print_string = "epoch {:>3} | batch {:>6} | examples/s: {:5.1f}\nloss_tot: {:.5f} | time elapsed: {} | time left: {}"
-        print(print_string.format(self.epoch, batch_idx, samples_per_sec, loss_tot, sec_to_hm_str(time_sofar), sec_to_hm_str(training_time_left)))
+        training_time_left = (
+                                     self.num_total_steps / self.step - 1.0) * time_sofar if self.step > 0 else 0
+        print_string = "epoch {:>3} | batch {:>6} | examples/s: {:5.1f}\nloss_depth: {:.5f} | loss_tot: {:.5f} | time elapsed: {} | time left: {}"
+        print(print_string.format(self.epoch, batch_idx, samples_per_sec, loss_depth, loss_tot, sec_to_hm_str(time_sofar), sec_to_hm_str(training_time_left)))
 
     def record_img(self, inputs, outputs):
-        # viewIndex = 0
-        # fig_sil_rgb = tensor2rgb(inputs['pSIL_rgb'], ind=viewIndex)
-        # fig_sil_disp = tensor2disp(outputs['syn_pred'][('disp', 0)], ind = viewIndex, vmax=0.1)
-        # fig_sil = np.concatenate([np.array(fig_sil_rgb), np.array(fig_sil_disp)], axis=0)
-        # self.writers['train'].add_image('sil', torch.from_numpy(fig_sil).float() / 255, dataformats='HWC',global_step=self.step)
-        #
-        # fig_disp = tensor2disp(outputs[('disp', 0)], ind=viewIndex, vmax=0.1)
-        # fig_rgb = tensor2rgb(inputs[('color', 0, 0)], ind=viewIndex)
-        #
-        # combined1 = np.concatenate([np.array(fig_disp), np.array(fig_rgb)], axis=0)
-        #
-        # self.writers['train'].add_image('kitti', torch.from_numpy(combined1).float() / 255, dataformats = 'HWC', global_step = self.step)
+        viewIndex = 0
+        fig1 = tensor2disp(outputs['theta1'], ind = viewIndex, vmax = 3.1415)
+        fig2 = tensor2disp(inputs['thetagt'], ind = viewIndex, vmax = 3.1415)
+        fig3 = tensor2rgb(inputs[('color', 0, 0)], ind = viewIndex)
+        fig4 = tensor2disp(outputs['disp', 0], ind = viewIndex, vmax=0.1)
 
-        vind = 0
-        figs = list()
-        for m in range(len(self.ptspair) * 2):
-            if m % 2 == 0:
-                figs.append(np.array(tensor2disp(outputs[('disp', 0)][:,m:m+1,:,:], vmax = 1, ind = vind)))
-            else:
-                figs.append(np.array(tensor2disp(torch.abs(outputs[('disp', 0)][:, m:m + 1, :, :] - 1/2) * 2, vmax=1, ind=vind)))
-        figs = np.concatenate(figs, axis=0)
-        # pil.fromarray(figs).show()
-        self.writers['train'].add_image('pred', torch.from_numpy(figs).float() / 255, dataformats='HWC',global_step=self.step)
+        figup = np.concatenate([np.array(fig2), np.array(fig3)], axis=1)
+        figdown = np.concatenate([np.array(fig1), np.array(fig4)], axis=1)
+        fig = np.concatenate([np.array(figup), np.array(figdown)], axis=0)
 
-        theta1 = outputs['theta1']
-        theta2 = outputs['theta2']
-        figsgt = list()
-        figsgt.append(np.array(tensor2disp(theta1[:,0:1,:,:] / 3.14, vmax = 1, ind = vind)))
-        figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 0:1, :, :]) / 3.14, vmax=1, ind=vind)))
-        figsgt.append(np.array(tensor2disp(theta1[:,1:2,:,:] / 3.14, vmax = 1, ind = vind)))
-        figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 1:2, :, :]) / 3.14, vmax=1, ind=vind)))
-        figsgt = np.concatenate(figsgt, axis=0)
-        # pil.fromarray(figsgt).show()
-        self.writers['train'].add_image('gt', torch.from_numpy(figsgt).float() / 255, dataformats='HWC',global_step=self.step)
+        self.writers['train'].add_image('vls', torch.from_numpy(fig).float() / 255, dataformats='HWC',global_step=self.step)
 
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
         """
         writer = self.writers[mode]
         for l, v in losses.items():
-            writer.add_scalar("{}".format(l), v, self.step)
+            if l != 'totLoss':
+                writer.add_scalar("{}".format(l), v, self.step)
 
     def save_opts(self):
         """Save options to disk so we know what we ran this experiment with

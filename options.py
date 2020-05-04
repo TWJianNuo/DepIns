@@ -202,6 +202,16 @@ class MonodepthOptions:
         self.parser.add_argument("--kitti_gt_path",
                                  type=str,
                                  default='None')
+        self.parser.add_argument("--output_dir",
+                                 type=str,
+                                 default='None')
+        self.parser.add_argument("--theta_gt_path",
+                                 type=str,
+                                 default='None')
+        self.parser.add_argument("--theta_scale",
+                                 type=float,
+                                 default=1)
+
 
 
         # ABLATION options
