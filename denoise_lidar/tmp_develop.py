@@ -7,9 +7,6 @@ from kitti_utils import *
 import matplotlib.pyplot as plt
 import scipy.io as sio
 import numba
-import matlab
-import matlab.engine
-eng = matlab.engine.start_matlab()
 
 
 from numba import jit, prange
@@ -42,13 +39,36 @@ def occlusion_detection(nvelo_projected_img, noocc_mask, sxx, syy, w, h2, verRan
                                 noocc_mask[yy, xx] = 0
 
 
+@jit(nopython=True, parallel=True)
+def init_searchRange(searchM, sxx, syy, w, h2, verRange, horRange):
+    for xx in range(w):
+        for yy in range(h2):
+            depthCount = 0
+            for tt in range(len(sxx)):
+                curloc = np.array([xx, yy])
+                curdir = epp - curloc
+                curLen = np.sqrt(np.sum(curdir * curdir))
+                lookx = xx + sxx[tt]
+                looky = yy + syy[tt]
+                if (lookx >= 0) and (lookx < w) and (looky >= 0) and (looky < h2) and depthCount < maxSearchDepth:
+                    # Check if inside the eppl range
+                    refvec = (np.array([lookx, looky]) - curloc)
+                    projvec = np.sum(refvec * curdir) / curLen / curLen * curdir
+                    verl = np.sqrt(np.sum(projvec * projvec))
+                    horl = np.sqrt(np.sum((refvec - projvec) * (refvec - projvec)))
+                    if verl < verRange and horl < horRange and np.sum(curdir * projvec) > 0 and (
+                            np.sqrt(np.sum(projvec * projvec)) < curLen):
+                        searchM[yy, xx, depthCount + 1] = tt
+                        depthCount = depthCount + 1
+            searchM[yy, xx, 0] = depthCount
+
+
 lrMapping = {2:'image_02', 3:'image_03'}
 root_path = '/home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data'
 dayc = '2011_09_26'
 seqc = '2011_09_26_drive_0005_sync'
 frameind = 10
 cam = 2
-
 
 # Read RGB
 rgb_path = os.path.join(root_path, dayc, seqc, lrMapping[cam], 'data', str(frameind).zfill(10) + '.png')
@@ -132,6 +152,88 @@ itnum = len(sxx)
 
 verRange = 30
 horRange = 3
+maxSearchDepth = 200
+
+# Define Search matrix
+searchM = np.zeros([h2, w, maxSearchDepth + 1]).astype(np.int)
+# init_searchRange(searchM, sxx, syy, w, h2, verRange, horRange)
+for xx in range(w):
+    for yy in range(h2):
+        depthCount = 0
+        for tt in range(len(sxx)):
+            curloc = np.array([xx, yy])
+            curdir = epp - curloc
+            curLen = np.sqrt(np.sum(curdir * curdir))
+            lookx = xx + sxx[tt]
+            looky = yy + syy[tt]
+            if (lookx >= 0) and (lookx < w) and (looky >= 0) and (looky < h2) and depthCount < maxSearchDepth:
+                # Check if inside the eppl range
+                refvec = (np.array([lookx, looky]) - curloc)
+                projvec = np.sum(refvec * curdir) / curLen / curLen * curdir
+                verl = np.sqrt(np.sum(projvec * projvec))
+                horl = np.sqrt(np.sum((refvec - projvec) * (refvec - projvec)))
+                if verl < verRange and horl < horRange and np.sum(curdir * projvec) > 0 and (np.sqrt(np.sum(projvec * projvec)) < curLen):
+                    searchM[yy, xx, depthCount + 1] = tt
+                    depthCount = depthCount + 1
+        searchM[yy, xx, 0] = depthCount
+
+# xx = 798
+# yy = 266
+
+xx = 826
+yy = 207
+fig, ax = plt.subplots()
+ax.set_xlim(0, w)  # decreasing time
+ax.set_ylim(h2, 0)  # decreasing time
+ax.axis('equal')
+plt.scatter([xx], [yy], s=25, marker='.', c = 'r')
+curCount = searchM[yy, xx, 0]
+searchRangex = xx + sxx[searchM[yy, xx, 1 : 1 + curCount]]
+searchRangey = yy + syy[searchM[yy, xx, 1 : 1 + curCount]]
+plt.scatter(searchRangex, searchRangey, s=25, marker='.', c = 'g')
+
+
+
+filtered_pixels = list()
+occ_pixels = list()
+for xx in range(w):
+    for yy in range(h2):
+        if nvelo_projected_img[yy, xx, 2] > 0:
+            curloc = nvelo_projected_img[yy, xx, 0:2]
+            curdir = epp - curloc
+            curLen = np.sqrt(np.sum(curdir * curdir))
+            oviewloc = nvelo_projected_img[yy, xx, 3:5]
+            for tt in range(searchM[yy,xx,0]):
+                lookx = xx + sxx[searchM[yy,xx,tt+1]]
+                looky = yy + syy[searchM[yy,xx,tt+1]]
+                if nvelo_projected_img[looky, lookx, 2] > 0:
+                    filtered_pixels.append(nvelo_projected_img[looky, lookx, 0:2])
+                    oview_refvec1 = (nvelo_projected_img[looky, lookx, 3:5] - oviewloc)
+                    oview_refvec2 = (nvelo_projected_img[looky, lookx, 3:5] - epp)
+                    if np.sum(oview_refvec1 * (epp - oviewloc)) < 0 or np.sum(oview_refvec2 * (oviewloc - epp)) < 0:
+                        noocc_mask[yy, xx] = 0
+                        occ_pixels.append(nvelo_projected_img[looky, lookx, :])
+
+drawx = nvelo_projected[onimgSelector, 0]
+drawy = nvelo_projected[onimgSelector, 1]
+z = velo_projected[onimgSelector, 2]
+z = z / 40
+cm = plt.get_cmap('magma')
+z = cm(z)
+fig, ax = plt.subplots()
+ax.set_xlim(0, w)  # decreasing time
+ax.set_ylim(h2, 0)  # decreasing time
+ax.axis('equal')
+plt.scatter(drawx, drawy, s=5, marker='.', c = z[:,0:3])
+plt.scatter(nvelo_projected_img[yy, xx, 0], nvelo_projected_img[yy, xx, 1], s=50, marker='.', c = 'r')
+if len(filtered_pixels) > 0:
+    filtered_pixels = np.stack(filtered_pixels, axis=0)
+    plt.scatter(filtered_pixels[:, 0], filtered_pixels[:, 1], s=25, marker='.', c = 'b')
+if len(occ_pixels) > 0:
+    occ_pixels = np.stack(occ_pixels, axis=0)
+    plt.scatter(occ_pixels[:, 0], occ_pixels[:, 1], s=25, marker='.', c = 'k')
+
+
 
 
 occlusion_detection(nvelo_projected_img, noocc_mask, sxx, syy, w, h2, verRange, horRange)
@@ -241,107 +343,3 @@ if len(filtered_pixels) > 0:
 if len(occ_pixels) > 0:
     occ_pixels = np.stack(occ_pixels, axis=0)
     plt.scatter(occ_pixels[:, 0], occ_pixels[:, 1], s=25, marker='.', c = 'k')
-
-# fig, ax = plt.subplots()
-# ax.set_xlim(0, w)  # decreasing time
-# ax.set_ylim(h2, 0)  # d
-# ax.axis('equal')
-# plt.scatter(nvelo_projected_img[yy, xx, 3], nvelo_projected_img[yy, xx, 4], s=50, marker='.', c = 'r')
-# plt.scatter(recorded_pixels[:, 3], recorded_pixels[:, 4], s=25, marker='.', c = 'g')
-# plt.scatter(filtered_pixels[:, 3], filtered_pixels[:, 4], s=25, marker='.', c = 'b')
-# plt.scatter(occ_pixels[:, 3], occ_pixels[:, 4], s=25, marker='.', c = 'k')
-
-
-# xx = 767
-# yy = 221
-# ck_list = list()
-# fail_list = list()
-# curloc = nvelo_projected_img[yy, xx, 0:2]
-# curdir = epp - curloc
-# curLen = np.sqrt(np.sum(curdir * curdir))
-# for tt in range(itnum):
-#     lookx = xx + sxx[tt]
-#     looky = yy + syy[tt]
-#
-#     refvec = (np.array([lookx, looky]) - curloc)
-#     projvec = np.sum(refvec * curdir) / curLen / curLen * curdir
-#     verl = np.sqrt(np.sum(projvec * projvec))
-#     horl = np.sqrt(np.sum((refvec - projvec) * (refvec - projvec)))
-#     if verl < verRange and horl < horRange and np.sum(curdir * projvec) > 0 and (np.sqrt(np.sum(projvec * projvec)) < curLen):
-#         ck_list.append(np.array([lookx, looky]))
-#     else:
-#         fail_list.append(np.array([lookx, looky]))
-# fail_list = np.stack(fail_list, axis = 0)
-# ck_list = np.stack(ck_list, axis = 0)
-# plt.figure()
-# plt.scatter([xx], [yy], 3, 'r')
-# plt.scatter(ck_list[:,0], ck_list[:,1], 3, 'g')
-# plt.scatter(fail_list[:,0], fail_list[:,1], 3, 'b')
-
-
-# for xx in range(w):
-#     for yy in range(h2):
-#         if nvelo_projected_img[yy, xx, 2] > 0:
-#             curloc = nvelo_projected_img[yy, xx, 0:2]
-#             curdir = epp - curloc
-#             curLen = np.sqrt(np.sum(curdir * curdir))
-#             oviewloc = nvelo_projected_img[yy, xx, 3:5]
-#             for tt in range(itnum):
-#                 lookx = xx + sxx[tt]
-#                 looky = yy + syy[tt]
-#
-#                 if (lookx >= 0) and (lookx < w) and (looky >= 0) and (looky < h2) and nvelo_projected_img[looky, lookx, 2] > 0:
-#                     # Check if inside the eppl range
-#                     refvec = (nvelo_projected_img[looky, lookx, 0:2] - curloc)
-#                     projvec = np.sum(refvec * curdir) / curLen / curLen * curdir
-#                     verl = np.sqrt(np.sum(projvec * projvec))
-#                     horl = np.sqrt(np.sum((refvec - projvec) * (refvec - projvec)))
-#                     if verl < verRange and horl < horRange and np.sum(curdir * projvec) > 0 and (np.sqrt(np.sum(projvec * projvec)) < curLen):
-#                         # ck_list.append(np.array([lookx, looky]))
-#                         # after movement, if it is outside the epp line
-#                         oview_refvec1 = (nvelo_projected_img[looky, lookx, 3:5] - oviewloc)
-#                         oview_refvec2 = (nvelo_projected_img[looky, lookx, 3:5] - epp)
-#                         if np.sum(oview_refvec1 * (epp - oviewloc)) > 0 and np.sum(oview_refvec2 * (oviewloc - epp)) > 0:
-#                             noocc_mask[yy, xx] = 0
-
-
-
-#
-#
-# drawx = velo[:,0]
-# drawy = velo[:,1]
-# drawz = velo[:,2]
-# drawx = matlab.double(drawx.tolist())
-# drawy = matlab.double(drawy.tolist())
-# drawz = matlab.double(drawz.tolist())
-#
-# drawcx = camPos[0:1,:]
-# drawcy = camPos[1:2,:]
-# drawcz = camPos[2:3,:]
-# drawcx = matlab.double(drawcx.tolist())
-# drawcy = matlab.double(drawcy.tolist())
-# drawcz = matlab.double(drawcz.tolist())
-#
-# drawlx = camPos[0:1,:]
-# drawly = camPos[1:2,:]
-# drawlz = camPos[2:3,:]
-# drawlx = matlab.double(drawlx.tolist())
-# drawly = matlab.double(drawly.tolist())
-# drawlz = matlab.double(drawlz.tolist())
-#
-#
-# eng.scatter3(drawx, drawy, drawz, 5, '.', nargout=0)
-# eng.eval('hold on', nargout=0)
-# eng.scatter3(drawcx, drawcy, drawcz, 50, 'r.', nargout=0)
-# eng.eval('axis equal', nargout=0)
-# eng.scatter3(drawlx, drawly, drawlz, 50, 'g.', nargout=0)
-# eng.eval('axis equal', nargout=0)
-# xlim = matlab.double([0, 50])
-# ylim = matlab.double([-10, 10])
-# zlim = matlab.double([-5, 5])
-# eng.xlim(xlim, nargout=0)
-# eng.ylim(ylim, nargout=0)
-# eng.zlim(zlim, nargout=0)
-# eng.eval('view([-79 17])', nargout=0)
-# eng.eval('camzoom(1.2)', nargout=0)
-# eng.eval('grid off', nargout=0)
