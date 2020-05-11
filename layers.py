@@ -2120,3 +2120,98 @@ class MulScaleBCELoss(nn.Module):
             else:
                 l += torch.sum(self.bcel(F.interpolate(pred_real[('syn_prob', i)], [height, width], mode="bilinear",align_corners=False), torch.zeros_like(pred_real[('syn_prob', 0)])) * pred_real['mask'][-1]) / torch.sum(pred_real['mask'][-1] + 1e-3)
         return l
+
+
+
+
+
+class LocalThetaDesp(nn.Module):
+    def __init__(self, height, width, batch_size, ptspair, invIn):
+        super(LocalThetaDesp, self).__init__()
+        self.height = height
+        self.width = width
+        self.batch_size = batch_size
+        self.ptspair = ptspair
+
+        # Init grid points
+        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        self.xx = torch.from_numpy(xx).unsqueeze(0).unsqueeze(3).expand([self.batch_size, -1, -1, 1]).float()
+        self.yy = torch.from_numpy(yy).unsqueeze(0).unsqueeze(3).expand([self.batch_size, -1, -1, 1]).float()
+        self.pixelLocs = nn.Parameter(torch.cat([self.xx, self.yy, torch.ones_like(self.xx)], dim=3), requires_grad=False)
+
+        self.interestedLocs = torch.cat([self.xx, self.yy, torch.ones_like(self.xx)], dim=3).clone().view(self.batch_size, 1, 1, self.height, self.width, 3).repeat([1, len(self.ptspair), 3, 1,1, 1])
+
+        for i in range(len(self.ptspair)):
+            for j in range(3):
+                if j != 0:
+                    self.interestedLocs[:,i,j,:,:,:] = self.interestedLocs[:,i,j,:,:,:] + torch.from_numpy(np.array(self.ptspair[i][j-1])).float().view([1,1,1,3]).expand([self.batch_size, self.height, self.width, -1])
+
+        y_dir = list()
+        for i in range(len(self.ptspair)):
+            tmp = np.array(self.ptspair[i][1]) - np.array(self.ptspair[i][0])
+            tmp = tmp / np.sqrt(np.sum(tmp ** 2))
+            y_dir.append(tmp)
+        y_dir = np.stack(y_dir, axis=0)
+        y_dir = torch.from_numpy(y_dir).float().view(1, len(self.ptspair), 1, 1, 3).expand(
+            [self.batch_size, -1, self.height, self.width, -1])
+        # Compute vertical direction
+        vert_dir_tmp = torch.from_numpy(invIn).view(1,1,1,1,1,3,3).expand([self.batch_size, len(self.ptspair), 3, self.height, self.width, -1, -1]).float() @ self.interestedLocs.unsqueeze(6)
+        vert_dir = torch.cross(vert_dir_tmp[:,:,1,:,:,:,0], vert_dir_tmp[:,:,2,:,:,:,0], dim=4)
+        z_dir = vert_dir / torch.norm(vert_dir, keepdim = True, dim = 4).expand([-1,-1,-1,-1,3])
+        x_dir = torch.cross(z_dir, y_dir, dim = 4)
+
+        self.x_dir = torch.nn.Parameter(x_dir, requires_grad=False)
+        self.z_dir = torch.nn.Parameter(z_dir, requires_grad=False)
+        self.y_dir = torch.nn.Parameter(y_dir, requires_grad=False)
+        self.invIn = torch.nn.Parameter(torch.from_numpy(invIn).float(), requires_grad=False)
+
+        w = 4
+        weightl = np.zeros([len(self.ptspair), 1, int(w * 2 + 1), int(w * 2 + 1)])
+        for i in range(len(self.ptspair)):
+            weightl[i, 0, self.ptspair[i][0][1] + w, self.ptspair[i][0][0] + w] = 1
+        self.copyConv_thetal = torch.nn.Conv2d(len(self.ptspair), len(self.ptspair), int(w * 2 + 1), stride=1, padding=w, bias=False, groups=len(self.ptspair))
+        self.copyConv_thetal.weight = torch.nn.Parameter(torch.from_numpy(weightl.astype(np.float32)), requires_grad=False)
+
+        weightr = np.zeros([len(self.ptspair), 1, int(w * 2 + 1), int(w * 2 + 1)])
+        for i in range(len(self.ptspair)):
+            weightr[i, 0, self.ptspair[i][1][1] + w, self.ptspair[i][1][0] + w] = 1
+        self.copyConv_thetar = torch.nn.Conv2d(len(self.ptspair), len(self.ptspair), int(w * 2 + 1), stride=1, padding=w, bias=False, groups=len(self.ptspair))
+        self.copyConv_thetar.weight = torch.nn.Parameter(torch.from_numpy(weightr.astype(np.float32)), requires_grad=False)
+    def get_theta(self, depthmap):
+        invIn_ex = self.invIn.view(1,1,1,3,3).expand([self.batch_size, self.height, self.width, -1, -1])
+        pts3d = (invIn_ex @ self.pixelLocs.unsqueeze(4)) * depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1])
+        pts3d_ex = pts3d.unsqueeze(1).squeeze(5).expand([-1,len(self.ptspair),-1,-1,-1])
+        pts3d_nx = torch.sum(pts3d_ex * self.x_dir, dim=[4])
+        pts3d_ny = torch.sum(pts3d_ex * self.y_dir,dim=[4])
+        pts3d_nz = torch.sum(pts3d_ex * self.z_dir,dim=[4])
+
+        pts3d_nxl = self.copyConv_thetal(pts3d_nx)
+        pts3d_nyl = self.copyConv_thetal(pts3d_ny)
+        pts3d_nzl = self.copyConv_thetal(pts3d_nz)
+
+
+        pts3d_n = torch.stack([pts3d_nx, pts3d_ny, pts3d_nz], dim=4)
+        pts3d_l = torch.stack([pts3d_nxl, pts3d_nyl, pts3d_nzl], dim=4)
+        theta1 = (pts3d_nxl - pts3d_nx) / (torch.norm(pts3d_n - pts3d_l, dim=4))
+        theta1 = torch.clamp(theta1, min=-0.999, max=0.999)
+        theta1 = torch.acos(theta1)
+
+        return theta1
+    def forward(self, predNorm, depthmap, invIn):
+        predNorm_ = predNorm.view(self.batch_size, len(self.ptspair), 3, self.height, self.width).permute([0,1,3,4,2]).unsqueeze(4)
+        intrinsic_c = invIn[:,0:3,0:3].view(self.batch_size,1,1,1,3,3)
+        normIn = torch.matmul(predNorm_, intrinsic_c)
+
+        p2d_ex = self.pixelLocs.unsqueeze(1).unsqueeze(5).expand([-1, len(self.ptspair), -1, -1, -1, -1])
+        k = -torch.matmul(normIn, p2d_ex).squeeze(4).squeeze(4) * depthmap.expand([-1, len(self.ptspair), -1, -1])
+
+        predDepth = normIn.unsqueeze(2).expand([-1,-1,2,-1,-1,-1,-1]) @ self.interestedLocs.unsqueeze(6)
+        predDepth = predDepth.squeeze(5).squeeze(5)
+        predDepth = -k.unsqueeze(2).expand([-1,-1,2,-1,-1]) / (predDepth)
+        # ptspred3d = predDepth.unsqueeze(5).expand([-1,-1,-1,-1,-1,3]) * (intrinsic_c.unsqueeze(2).expand([-1, len(self.pixelLocs), 2, self.height, self.width, -1, -1]) @ self.interestedLocs.unsqueeze(6)).squeeze(6)
+        # ck = torch.sum(ptspred3d * predNorm_.squeeze(4).unsqueeze(2).expand([-1,-1,2,-1,-1,-1]), axis = [5])
+        # ck = ck + k.unsqueeze(2).expand([-1,-1,2,-1,-1])
+        # torch.abs(ck).max()
+        predDepth_ = predDepth.view(self.batch_size, len(self.ptspair) * 2, self.height, self.width)
+        predDepth_ = self.copyConv(predDepth_)
+        return predDepth_

@@ -441,9 +441,10 @@ imgCount = 0
 startind = 0
 
 import random
-
-
-
+from datetime import datetime
+random.seed(datetime.now())
+candidate_date = ['2011_09_26', '2011_09_29', '2011_09_30', '2011_10_03']
+args.day_seq = random.choice(candidate_date)
 random.shuffle(lines)
 for kk in range(startind, len(lines)):
     line = lines[kk]
@@ -468,7 +469,8 @@ for kk in range(startind, len(lines)):
 
     if dayc not in [args.day_seq]:
         continue
-
+    if os.path.isfile(os.path.join(os.path.join(depth_path, folder, lrMapping[direction]), str(frameind).zfill(10) + '.png')):
+        continue
     velo_filename = os.path.join(root_path, dayc, seqc, 'velodyne_points', 'data', "{:010d}.bin".format(frameind))
     if not os.path.isfile(velo_filename):
         continue
@@ -615,4 +617,5 @@ for kk in range(startind, len(lines)):
 
     dr = time.time() - st
     imgCount = imgCount + 1
-    print("%d finished, %f hours left" % (kk, (dr) / imgCount * (len(lines) - imgCount - startind) / 60 / 60))
+    # print("%d finished, %f hours left" % (kk, (dr) / imgCount * (len(lines) - imgCount - startind) / 60 / 60))
+    print("%s finished, %f hours left" % (os.path.join(os.path.join(folder, lrMapping[direction]), str(frameind).zfill(10) + '.png'), ((dr) / imgCount * (len(lines) - imgCount - startind) / 60 / 60)))
