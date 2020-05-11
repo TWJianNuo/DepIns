@@ -405,6 +405,7 @@ parser.add_argument('--vls_path', type=str)
 parser.add_argument('--depth_path', type=str)
 parser.add_argument('--interpolated_root', type=str)
 parser.add_argument('--day_seq', type=str)
+parser.add_argument('--nextrinsic_path', type=str)
 args = parser.parse_args()
 
 
@@ -489,7 +490,8 @@ for kk in range(startind, len(lines)):
     P_rect_ex[0:3, :] = P_rect
     tmp_ex = np.linalg.inv(intrinsic) @ P_rect_ex
     extrinsic = tmp_ex @ R_cam2rect @ velo2cam
-    siol = sio.loadmat(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/raytrace_ptc/matlab', 'nextrinsic.mat'))
+    # siol = sio.loadmat(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/raytrace_ptc/matlab', 'nextrinsic.mat'))
+    siol = sio.loadmat(args.nextrinsic_path)
     nextrinsic = np.array(siol['nextrinsic'])
 
     interp_depth = pil.open(os.path.join(interpolated_root, dayc, seqc, "{:010d}.png".format(frameind)))
