@@ -262,7 +262,7 @@ class Trainer:
         losses = dict()
         # outputs.update(self.models['depth'](self.models['encoder'](inputs['pSIL_rgb'])))
         outputs.update(self.models['depth'](self.models['encoder'](inputs[('color', 0, 0)])))
-        theta1, theta2 = self.linGeomDesp.get_theta(depthmap = inputs['pSIL_depth'])
+        theta1, theta2 = self.localthetadesp.get_theta(depthmap = inputs['pSIL_depth'])
         mask_theta2 = (torch.abs(theta2) < 0.1).float()
         outputs['theta1'] = theta1
         outputs['theta2'] = theta2

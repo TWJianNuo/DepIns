@@ -443,7 +443,7 @@ startind = 0
 import random
 from datetime import datetime
 random.seed(datetime.now())
-candidate_date = ['2011_09_26', '2011_09_30', '2011_10_03']
+candidate_date = ['2011_09_26', '2011_10_03']
 args.day_seq = random.choice(candidate_date)
 random.shuffle(lines)
 for kk in range(startind, len(lines)):

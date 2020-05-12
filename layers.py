@@ -2146,48 +2146,79 @@ class LocalThetaDesp(nn.Module):
         hdir3 = torch.cross(hdir1, hdir2)
         hdir3 = hdir3 / torch.norm(hdir3, dim=2, keepdim=True)
 
-        # torch.sum(hdir1[0,0,:,0] * hdir3[0,0,:,0])
-        # torch.sum(hdir3[0,0,:,0] * hdir3[0,0,:,0])
+        # Compute horizontal x axis
+        hxd = torch.Tensor([0,0,1]).unsqueeze(1) - torch.sum(hdir3 * torch.Tensor([0,0,1]).unsqueeze(1), dim=[2,3], keepdim=True) * hdir3
+        hxd = hxd / torch.norm(hxd, dim=2, keepdim=True)
+        hyd = torch.cross(hxd, hdir3)
+        hM = torch.stack([hxd.squeeze(3), hyd.squeeze(3)], dim=2)
+        self.hM = nn.Parameter(hM, requires_grad = False)
 
-        self.interestedLocs = torch.cat([self.xx, self.yy, torch.ones_like(self.xx)], dim=3).clone().view(self.batch_size, 1, 1, self.height, self.width, 3).repeat([1, len(self.ptspair), 3, 1,1, 1])
+        # Compute Vertical Direciton
+        vdir1 = self.invIn.unsqueeze(0).unsqueeze(0).expand([self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(3)
+        vdir2 = self.invIn.unsqueeze(0).unsqueeze(0).expand([self.height, self.width, -1, -1]) @ (self.pixelLocs + torch.Tensor([0,1,0])).unsqueeze(3)
+        vdir3 = torch.cross(vdir1, vdir2)
+        vdir3 = vdir3 / torch.norm(vdir3, dim=2, keepdim=True)
 
-        for i in range(len(self.ptspair)):
-            for j in range(3):
-                if j != 0:
-                    self.interestedLocs[:,i,j,:,:,:] = self.interestedLocs[:,i,j,:,:,:] + torch.from_numpy(np.array(self.ptspair[i][j-1])).float().view([1,1,1,3]).expand([self.batch_size, self.height, self.width, -1])
+        # Compute vertical x axis
+        vxd = torch.Tensor([0,0,1]).unsqueeze(1) - torch.sum(vdir3 * torch.Tensor([0,0,1]).unsqueeze(1), dim=[2,3], keepdim=True) * vdir3
+        vxd = vxd / torch.norm(vxd, dim=2, keepdim=True)
+        vyd = torch.cross(vxd, vdir3)
+        vM = torch.stack([vxd.squeeze(3), vyd.squeeze(3)], dim=2)
+        self.vM = nn.Parameter(vM, requires_grad = False)
 
-        y_dir = list()
-        for i in range(len(self.ptspair)):
-            tmp = np.array(self.ptspair[i][1]) - np.array(self.ptspair[i][0])
-            tmp = tmp / np.sqrt(np.sum(tmp ** 2))
-            y_dir.append(tmp)
-        y_dir = np.stack(y_dir, axis=0)
-        y_dir = torch.from_numpy(y_dir).float().view(1, len(self.ptspair), 1, 1, 3).expand(
-            [self.batch_size, -1, self.height, self.width, -1])
-        # Compute vertical direction
-        vert_dir_tmp = torch.from_numpy(invIn).view(1,1,1,1,1,3,3).expand([self.batch_size, len(self.ptspair), 3, self.height, self.width, -1, -1]).float() @ self.interestedLocs.unsqueeze(6)
-        vert_dir = torch.cross(vert_dir_tmp[:,:,1,:,:,:,0], vert_dir_tmp[:,:,2,:,:,:,0], dim=4)
-        z_dir = vert_dir / torch.norm(vert_dir, keepdim = True, dim = 4).expand([-1,-1,-1,-1,3])
-        x_dir = torch.cross(z_dir, y_dir, dim = 4)
+        weightl = torch.Tensor(
+            [[0,0,0],
+            [0,-1,1],
+            [0,0,0]]
+        )
+        self.hdiffConv = torch.nn.Conv2d(1, 1, 3, padding=1, bias=False)
+        self.hdiffConv.weight = torch.nn.Parameter(weightl.unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
 
-        self.x_dir = torch.nn.Parameter(x_dir, requires_grad=False)
-        self.z_dir = torch.nn.Parameter(z_dir, requires_grad=False)
-        self.y_dir = torch.nn.Parameter(y_dir, requires_grad=False)
-        self.invIn = torch.nn.Parameter(torch.from_numpy(invIn).float(), requires_grad=False)
 
-        w = 4
-        weightl = np.zeros([len(self.ptspair), 1, int(w * 2 + 1), int(w * 2 + 1)])
-        for i in range(len(self.ptspair)):
-            weightl[i, 0, self.ptspair[i][0][1] + w, self.ptspair[i][0][0] + w] = 1
-        self.copyConv_thetal = torch.nn.Conv2d(len(self.ptspair), len(self.ptspair), int(w * 2 + 1), stride=1, padding=w, bias=False, groups=len(self.ptspair))
-        self.copyConv_thetal.weight = torch.nn.Parameter(torch.from_numpy(weightl.astype(np.float32)), requires_grad=False)
-
-        weightr = np.zeros([len(self.ptspair), 1, int(w * 2 + 1), int(w * 2 + 1)])
-        for i in range(len(self.ptspair)):
-            weightr[i, 0, self.ptspair[i][1][1] + w, self.ptspair[i][1][0] + w] = 1
-        self.copyConv_thetar = torch.nn.Conv2d(len(self.ptspair), len(self.ptspair), int(w * 2 + 1), stride=1, padding=w, bias=False, groups=len(self.ptspair))
-        self.copyConv_thetar.weight = torch.nn.Parameter(torch.from_numpy(weightr.astype(np.float32)), requires_grad=False)
+        # self.interestedLocs = torch.cat([self.xx, self.yy, torch.ones_like(self.xx)], dim=3).clone().view(self.batch_size, 1, 1, self.height, self.width, 3).repeat([1, len(self.ptspair), 3, 1,1, 1])
+        #
+        # for i in range(len(self.ptspair)):
+        #     for j in range(3):
+        #         if j != 0:
+        #             self.interestedLocs[:,i,j,:,:,:] = self.interestedLocs[:,i,j,:,:,:] + torch.from_numpy(np.array(self.ptspair[i][j-1])).float().view([1,1,1,3]).expand([self.batch_size, self.height, self.width, -1])
+        #
+        # y_dir = list()
+        # for i in range(len(self.ptspair)):
+        #     tmp = np.array(self.ptspair[i][1]) - np.array(self.ptspair[i][0])
+        #     tmp = tmp / np.sqrt(np.sum(tmp ** 2))
+        #     y_dir.append(tmp)
+        # y_dir = np.stack(y_dir, axis=0)
+        # y_dir = torch.from_numpy(y_dir).float().view(1, len(self.ptspair), 1, 1, 3).expand(
+        #     [self.batch_size, -1, self.height, self.width, -1])
+        # # Compute vertical direction
+        # vert_dir_tmp = torch.from_numpy(invIn).view(1,1,1,1,1,3,3).expand([self.batch_size, len(self.ptspair), 3, self.height, self.width, -1, -1]).float() @ self.interestedLocs.unsqueeze(6)
+        # vert_dir = torch.cross(vert_dir_tmp[:,:,1,:,:,:,0], vert_dir_tmp[:,:,2,:,:,:,0], dim=4)
+        # z_dir = vert_dir / torch.norm(vert_dir, keepdim = True, dim = 4).expand([-1,-1,-1,-1,3])
+        # x_dir = torch.cross(z_dir, y_dir, dim = 4)
+        #
+        # self.x_dir = torch.nn.Parameter(x_dir, requires_grad=False)
+        # self.z_dir = torch.nn.Parameter(z_dir, requires_grad=False)
+        # self.y_dir = torch.nn.Parameter(y_dir, requires_grad=False)
+        # self.invIn = torch.nn.Parameter(torch.from_numpy(invIn).float(), requires_grad=False)
+        #
+        # w = 4
+        # weightl = np.zeros([len(self.ptspair), 1, int(w * 2 + 1), int(w * 2 + 1)])
+        # for i in range(len(self.ptspair)):
+        #     weightl[i, 0, self.ptspair[i][0][1] + w, self.ptspair[i][0][0] + w] = 1
+        # self.copyConv_thetal = torch.nn.Conv2d(len(self.ptspair), len(self.ptspair), int(w * 2 + 1), stride=1, padding=w, bias=False, groups=len(self.ptspair))
+        # self.copyConv_thetal.weight = torch.nn.Parameter(torch.from_numpy(weightl.astype(np.float32)), requires_grad=False)
+        #
+        # weightr = np.zeros([len(self.ptspair), 1, int(w * 2 + 1), int(w * 2 + 1)])
+        # for i in range(len(self.ptspair)):
+        #     weightr[i, 0, self.ptspair[i][1][1] + w, self.ptspair[i][1][0] + w] = 1
+        # self.copyConv_thetar = torch.nn.Conv2d(len(self.ptspair), len(self.ptspair), int(w * 2 + 1), stride=1, padding=w, bias=False, groups=len(self.ptspair))
+        # self.copyConv_thetar.weight = torch.nn.Parameter(torch.from_numpy(weightr.astype(np.float32)), requires_grad=False)
     def get_theta(self, depthmap):
+        projHor = depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,2,-1]) * self.hM.unsqueeze(0).expand([self.batch_size,-1,-1,-1,-1]) @ self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1])
+        htheta = self.hdiffConv(projHor[:,:,:,1,0].unsqueeze(1)) / self.hdiffConv(projHor[:,:,:,0,0].unsqueeze(1))
+        htheta = torch.atan(htheta)
+        tensor2disp(htheta, percentile=95, ind=0).show()
+
         invIn_ex = self.invIn.view(1,1,1,3,3).expand([self.batch_size, self.height, self.width, -1, -1])
         pts3d = (invIn_ex @ self.pixelLocs.unsqueeze(4)) * depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1])
         pts3d_ex = pts3d.unsqueeze(1).squeeze(5).expand([-1,len(self.ptspair),-1,-1,-1])
