@@ -2126,18 +2126,28 @@ class MulScaleBCELoss(nn.Module):
 
 
 class LocalThetaDesp(nn.Module):
-    def __init__(self, height, width, batch_size, ptspair, invIn):
+    def __init__(self, height, width, batch_size, intrinsic):
         super(LocalThetaDesp, self).__init__()
         self.height = height
         self.width = width
         self.batch_size = batch_size
-        self.ptspair = ptspair
+        self.invIn = nn.Parameter(torch.from_numpy(np.linalg.inv(intrinsic)).float(), requires_grad = False)
+        # self.ptspair = ptspair
 
         # Init grid points
         xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
-        self.xx = torch.from_numpy(xx).unsqueeze(0).unsqueeze(3).expand([self.batch_size, -1, -1, 1]).float()
-        self.yy = torch.from_numpy(yy).unsqueeze(0).unsqueeze(3).expand([self.batch_size, -1, -1, 1]).float()
-        self.pixelLocs = nn.Parameter(torch.cat([self.xx, self.yy, torch.ones_like(self.xx)], dim=3), requires_grad=False)
+        self.xx = torch.from_numpy(xx).float()
+        self.yy = torch.from_numpy(yy).float()
+        self.pixelLocs = nn.Parameter(torch.stack([self.xx, self.yy, torch.ones_like(self.xx)], dim=2), requires_grad=False)
+
+        # Compute Horizontal Direciton
+        hdir1 = self.invIn.unsqueeze(0).unsqueeze(0).expand([self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(3)
+        hdir2 = self.invIn.unsqueeze(0).unsqueeze(0).expand([self.height, self.width, -1, -1]) @ (self.pixelLocs + torch.Tensor([1,0,0])).unsqueeze(3)
+        hdir3 = torch.cross(hdir1, hdir2)
+        hdir3 = hdir3 / torch.norm(hdir3, dim=2, keepdim=True)
+
+        # torch.sum(hdir1[0,0,:,0] * hdir3[0,0,:,0])
+        # torch.sum(hdir3[0,0,:,0] * hdir3[0,0,:,0])
 
         self.interestedLocs = torch.cat([self.xx, self.yy, torch.ones_like(self.xx)], dim=3).clone().view(self.batch_size, 1, 1, self.height, self.width, 3).repeat([1, len(self.ptspair), 3, 1,1, 1])
 
