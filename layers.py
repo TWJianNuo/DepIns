@@ -18,7 +18,7 @@ import math
 
 import copy
 from Oview_Gan import eppl_render, eppl_render_l2, eppl_render_l1, eppl_render_l1_sfgrad
-
+from torch import autograd
 def disp_to_depth(disp, min_depth, max_depth):
     """Convert network's sigmoid output into depth prediction
     The formula for this conversion is given in the 'additional considerations'
@@ -2146,12 +2146,40 @@ class LocalThetaDesp(nn.Module):
         hdir3 = torch.cross(hdir1, hdir2)
         hdir3 = hdir3 / torch.norm(hdir3, dim=2, keepdim=True)
 
+        # # Compute horizontal x axis
+        # hxd = torch.Tensor([0,0,1]).unsqueeze(1) - torch.sum(hdir3 * torch.Tensor([0,0,1]).unsqueeze(1), dim=[2,3], keepdim=True) * hdir3
+        # hxd = hxd / torch.norm(hxd, dim=2, keepdim=True)
+        # hyd = torch.cross(hxd, hdir3)
+        # hM = torch.stack([hxd.squeeze(3), hyd.squeeze(3)], dim=2)
+        # self.hM = nn.Parameter(hM, requires_grad = False)
+
         # Compute horizontal x axis
         hxd = torch.Tensor([0,0,1]).unsqueeze(1) - torch.sum(hdir3 * torch.Tensor([0,0,1]).unsqueeze(1), dim=[2,3], keepdim=True) * hdir3
         hxd = hxd / torch.norm(hxd, dim=2, keepdim=True)
         hyd = torch.cross(hxd, hdir3)
         hM = torch.stack([hxd.squeeze(3), hyd.squeeze(3)], dim=2)
         self.hM = nn.Parameter(hM, requires_grad = False)
+
+        hdir1p = self.hM @ (hdir1 / torch.norm(hdir1, keepdim=True, dim = 2))
+        hdir2p = self.hM @ (hdir2 / torch.norm(hdir2, keepdim=True, dim=2))
+
+        lowerboundh = torch.atan2(hdir1p[:,:,1,0], hdir1p[:,:,0,0])
+        lowerboundh = self.convert_htheta(lowerboundh) - float(np.pi)
+        upperboundh = torch.atan2(hdir2p[:,:,1,0], hdir2p[:,:,0,0])
+        upperboundh = self.convert_htheta(upperboundh)
+        middeltargeth = (lowerboundh + upperboundh) / 2
+        self.lowerboundh = nn.Parameter(lowerboundh.unsqueeze(0).unsqueeze(0).expand([self.batch_size,-1,-1,-1]), requires_grad = False)
+        self.upperboundh = nn.Parameter(upperboundh.unsqueeze(0).unsqueeze(0).expand([self.batch_size,-1,-1,-1]), requires_grad=False)
+        self.middeltargeth = nn.Parameter(middeltargeth.unsqueeze(0).unsqueeze(0).expand([self.batch_size,-1,-1,-1]), requires_grad=False)
+
+
+        # # Compute horizontal x axis
+        # hxd = hdir2
+        # hxd = hxd / torch.norm(hxd, dim=2, keepdim=True)
+        # hyd = torch.cross(hxd, hdir3)
+        # # ck = torch.sum(hxd * hyd, dim = [2,3])
+        # hM = torch.stack([hxd.squeeze(3), hyd.squeeze(3)], dim=2)
+        # self.hM = nn.Parameter(hM, requires_grad = False)
 
         # Compute Vertical Direciton
         vdir1 = self.invIn.unsqueeze(0).unsqueeze(0).expand([self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(3)
@@ -2166,6 +2194,19 @@ class LocalThetaDesp(nn.Module):
         vM = torch.stack([vxd.squeeze(3), vyd.squeeze(3)], dim=2)
         self.vM = nn.Parameter(vM, requires_grad = False)
 
+        vdir1p = self.vM @ (vdir1 / torch.norm(vdir1, keepdim=True, dim = 2))
+        vdir2p = self.vM @ (vdir2 / torch.norm(vdir2, keepdim=True, dim=2))
+
+        lowerboundv = torch.atan2(vdir1p[:,:,1,0], vdir1p[:,:,0,0])
+        lowerboundv = self.convert_htheta(lowerboundv) - float(np.pi)
+        upperboundv = torch.atan2(vdir2p[:,:,1,0], vdir2p[:,:,0,0])
+        upperboundv = self.convert_htheta(upperboundv)
+        middeltargetv = (lowerboundv + upperboundv) / 2
+        self.lowerboundv = nn.Parameter(lowerboundv.unsqueeze(0).unsqueeze(0).expand([self.batch_size,-1,-1,-1]), requires_grad = False)
+        self.upperboundv = nn.Parameter(upperboundv.unsqueeze(0).unsqueeze(0).expand([self.batch_size,-1,-1,-1]), requires_grad=False)
+        self.middeltargetv = nn.Parameter(middeltargetv.unsqueeze(0).unsqueeze(0).expand([self.batch_size,-1,-1,-1]), requires_grad=False)
+
+
         weightl = torch.Tensor(
             [[0,0,0],
             [0,-1,1],
@@ -2175,84 +2216,430 @@ class LocalThetaDesp(nn.Module):
         self.hdiffConv.weight = torch.nn.Parameter(weightl.unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
 
 
-        # self.interestedLocs = torch.cat([self.xx, self.yy, torch.ones_like(self.xx)], dim=3).clone().view(self.batch_size, 1, 1, self.height, self.width, 3).repeat([1, len(self.ptspair), 3, 1,1, 1])
-        #
-        # for i in range(len(self.ptspair)):
-        #     for j in range(3):
-        #         if j != 0:
-        #             self.interestedLocs[:,i,j,:,:,:] = self.interestedLocs[:,i,j,:,:,:] + torch.from_numpy(np.array(self.ptspair[i][j-1])).float().view([1,1,1,3]).expand([self.batch_size, self.height, self.width, -1])
-        #
-        # y_dir = list()
-        # for i in range(len(self.ptspair)):
-        #     tmp = np.array(self.ptspair[i][1]) - np.array(self.ptspair[i][0])
-        #     tmp = tmp / np.sqrt(np.sum(tmp ** 2))
-        #     y_dir.append(tmp)
-        # y_dir = np.stack(y_dir, axis=0)
-        # y_dir = torch.from_numpy(y_dir).float().view(1, len(self.ptspair), 1, 1, 3).expand(
-        #     [self.batch_size, -1, self.height, self.width, -1])
-        # # Compute vertical direction
-        # vert_dir_tmp = torch.from_numpy(invIn).view(1,1,1,1,1,3,3).expand([self.batch_size, len(self.ptspair), 3, self.height, self.width, -1, -1]).float() @ self.interestedLocs.unsqueeze(6)
-        # vert_dir = torch.cross(vert_dir_tmp[:,:,1,:,:,:,0], vert_dir_tmp[:,:,2,:,:,:,0], dim=4)
-        # z_dir = vert_dir / torch.norm(vert_dir, keepdim = True, dim = 4).expand([-1,-1,-1,-1,3])
-        # x_dir = torch.cross(z_dir, y_dir, dim = 4)
-        #
-        # self.x_dir = torch.nn.Parameter(x_dir, requires_grad=False)
-        # self.z_dir = torch.nn.Parameter(z_dir, requires_grad=False)
-        # self.y_dir = torch.nn.Parameter(y_dir, requires_grad=False)
-        # self.invIn = torch.nn.Parameter(torch.from_numpy(invIn).float(), requires_grad=False)
-        #
-        # w = 4
-        # weightl = np.zeros([len(self.ptspair), 1, int(w * 2 + 1), int(w * 2 + 1)])
-        # for i in range(len(self.ptspair)):
-        #     weightl[i, 0, self.ptspair[i][0][1] + w, self.ptspair[i][0][0] + w] = 1
-        # self.copyConv_thetal = torch.nn.Conv2d(len(self.ptspair), len(self.ptspair), int(w * 2 + 1), stride=1, padding=w, bias=False, groups=len(self.ptspair))
-        # self.copyConv_thetal.weight = torch.nn.Parameter(torch.from_numpy(weightl.astype(np.float32)), requires_grad=False)
-        #
-        # weightr = np.zeros([len(self.ptspair), 1, int(w * 2 + 1), int(w * 2 + 1)])
-        # for i in range(len(self.ptspair)):
-        #     weightr[i, 0, self.ptspair[i][1][1] + w, self.ptspair[i][1][0] + w] = 1
-        # self.copyConv_thetar = torch.nn.Conv2d(len(self.ptspair), len(self.ptspair), int(w * 2 + 1), stride=1, padding=w, bias=False, groups=len(self.ptspair))
-        # self.copyConv_thetar.weight = torch.nn.Parameter(torch.from_numpy(weightr.astype(np.float32)), requires_grad=False)
+        weightv = torch.Tensor(
+            [[0,0,0],
+            [0,-1,0],
+            [0,1,0]]
+        )
+        self.vdiffConv = torch.nn.Conv2d(1, 1, 3, padding=1, bias=False)
+        self.vdiffConv.weight = torch.nn.Parameter(weightv.unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
+
+
+        copyl = torch.Tensor(
+            [[0,0,0],
+            [0,0,1],
+            [0,0,0]]
+        )
+        self.copylConv = torch.nn.Conv2d(1, 1, 3, padding=1, bias=False)
+        self.copylConv.weight = torch.nn.Parameter(copyl.unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
+
+        copyv = torch.Tensor(
+            [[0,0,0],
+            [0,0,0],
+            [0,1,0]]
+        )
+        self.copyvConv = torch.nn.Conv2d(1, 1, 3, padding=1, bias=False)
+        self.copyvConv.weight = torch.nn.Parameter(copyv.unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
+
+        self.mink = -150
+        self.maxk = 150
+
+
+        npts3d = (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
+
+        npts3d_shifted_h = (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ (self.pixelLocs + torch.Tensor([1,0,0])).unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
+        npts3d_p_h = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ npts3d
+        npts3d_p_shifted_h = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ npts3d_shifted_h
+        self.npts3d_p_h = nn.Parameter(npts3d_p_h, requires_grad=False)
+        self.npts3d_p_shifted_h = nn.Parameter(npts3d_p_shifted_h, requires_grad=False)
+
+        npts3d_shifted_v = (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ (self.pixelLocs + torch.Tensor([0,1,0])).unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
+        npts3d_p_v = self.vM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ npts3d
+        npts3d_p_shifted_v = self.vM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ npts3d_shifted_v
+        self.npts3d_p_v = nn.Parameter(npts3d_p_v, requires_grad=False)
+        self.npts3d_p_shifted_v = nn.Parameter(npts3d_p_shifted_v, requires_grad=False)
+
+        lossh = torch.Tensor(
+            [[0,1,1,0,0],
+             [1, 1, 1, 1, 0],
+            ]
+        )
+        gth = torch.Tensor(
+            [[0,-1,0,1,0],
+             [-1, 0, 0, 0, 1],
+            ]
+        )
+        self.lossh = torch.nn.Conv2d(1, 2, [1,5], padding=[0,2], bias=False)
+        self.lossh.weight = torch.nn.Parameter(lossh.unsqueeze(1).unsqueeze(1).float(), requires_grad=False)
+        self.gth = torch.nn.Conv2d(1, 2, [1,5], padding=[0,2], bias=False)
+        self.gth.weight = torch.nn.Parameter(gth.unsqueeze(1).unsqueeze(1).float(), requires_grad=False)
+
+
+        lossv = torch.Tensor(
+            [[0,1,1,0,0],
+             [1, 1, 1, 1, 0],
+            ]
+        )
+        gtv = torch.Tensor(
+            [[0,-1,0,1,0],
+             [-1, 0, 0, 0, 1],
+            ]
+        )
+        self.lossv = torch.nn.Conv2d(1, 2, [5,1], padding=[2,0], bias=False)
+        self.lossv.weight = torch.nn.Parameter(lossv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
+        self.gtv = torch.nn.Conv2d(1, 2, [5,1], padding=[2,0], bias=False)
+        self.gtv.weight = torch.nn.Parameter(gtv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
+
+    def get_loss_ratio(self, depthmap, ratiohl, ratiovl):
+        depthmap_shifth = torch.clamp(self.copylConv(depthmap), min = 1e-3)
+        gth = torch.log(depthmap_shifth) - torch.log(depthmap)
+        selector = ((depthmap_shifth > 1e-2) * (ratiohl > float(np.log(1e-3) + 1))).float()
+        hloss = torch.abs(gth - ratiohl)
+        # hloss = torch.sum(torch.abs(gth - ratiohl) * selector) / (torch.sum(selector) + 1)
+
+        depthmap_shiftv = torch.clamp(self.copyvConv(depthmap), min = 1e-3)
+        gtv = torch.log(depthmap_shiftv) - torch.log(depthmap)
+        selector = ((depthmap_shiftv > 1e-2) * (ratiovl > float(np.log(1e-3) + 1))).float()
+        vloss = torch.abs(gtv - ratiovl)
+        # vloss = torch.sum(torch.abs(gtv - ratiovl) * selector) / (torch.sum(selector) + 1)
+        # import random
+        # tx = random.randint(0, self.width)
+        # ty = random.randint(0, self.height)
+        # print(gth[0,0,ty,tx])
+        # print(lossh[0,0,ty,tx])
+        # print(gth[0,0,ty,tx])
+        # print(ratiohl[0,ty,tx])
+        return hloss, vloss
+
+
+    def convert_htheta(self, htheta):
+        htheta = htheta + float(np.pi) / 2 * 3
+        htheta = torch.fmod(htheta, float(np.pi) * 2)
+        return htheta
+    def backconvert_htheta(self, htheta):
+        htheta = htheta - float(np.pi) / 2 * 3
+        return htheta
+    def convert_vtheta(self, vtheta):
+        vtheta = vtheta + float(np.pi) / 2 * 3
+        vtheta = torch.fmod(vtheta, float(np.pi) * 2)
+        return vtheta
+    def backconvert_vtheta(self, vtheta):
+        vtheta = vtheta - float(np.pi) / 2 * 3
+        return vtheta
     def get_theta(self, depthmap):
-        projHor = depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,2,-1]) * self.hM.unsqueeze(0).expand([self.batch_size,-1,-1,-1,-1]) @ self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1])
-        htheta = self.hdiffConv(projHor[:,:,:,1,0].unsqueeze(1)) / self.hdiffConv(projHor[:,:,:,0,0].unsqueeze(1))
-        htheta = torch.atan(htheta)
-        tensor2disp(htheta, percentile=95, ind=0).show()
+        pts3d = depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
 
-        invIn_ex = self.invIn.view(1,1,1,3,3).expand([self.batch_size, self.height, self.width, -1, -1])
-        pts3d = (invIn_ex @ self.pixelLocs.unsqueeze(4)) * depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1])
-        pts3d_ex = pts3d.unsqueeze(1).squeeze(5).expand([-1,len(self.ptspair),-1,-1,-1])
-        pts3d_nx = torch.sum(pts3d_ex * self.x_dir, dim=[4])
-        pts3d_ny = torch.sum(pts3d_ex * self.y_dir,dim=[4])
-        pts3d_nz = torch.sum(pts3d_ex * self.z_dir,dim=[4])
+        hcord = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ pts3d
+        hdify = self.hdiffConv(hcord[:,:,:,1,0].unsqueeze(1))
+        hdifx = self.hdiffConv(hcord[:,:,:,0,0].unsqueeze(1))
 
-        pts3d_nxl = self.copyConv_thetal(pts3d_nx)
-        pts3d_nyl = self.copyConv_thetal(pts3d_ny)
-        pts3d_nzl = self.copyConv_thetal(pts3d_nz)
+        htheta = torch.atan2(hdify, hdifx)
+        htheta = self.convert_htheta(htheta)
+        htheta = torch.clamp(htheta, min = 1e-3, max = float(np.pi) * 2 - 1e-3)
+        # tensor2disp(htheta-htheta.min(), percentile=95, ind=0).show()
+        # plt.figure()
+        # dx = (torch.cos(self.backconvert_htheta(htheta))).cpu().numpy().flatten()
+        # dy = (torch.sin(self.backconvert_htheta(htheta))).cpu().numpy().flatten()
+        # plt.scatter(dx, dy, s = 0.1)
+        # plt.axis('equal')
+        # fig, ax = plt.subplots()
+        # n, bins, patches = ax.hist(htheta.cpu().numpy().flatten(), 200)
+
+        vcord = self.vM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ pts3d
+        vdify = self.vdiffConv(vcord[:,:,:,1,0].unsqueeze(1))
+        vdifx = self.vdiffConv(vcord[:,:,:,0,0].unsqueeze(1))
+
+        vtheta = torch.atan2(vdify, vdifx)
+        vtheta = self.convert_vtheta(vtheta)
+        vtheta = torch.clamp(vtheta, min=1e-3, max=float(np.pi) * 2 - 1e-3)
+        # fig, ax = plt.subplots()
+        # n, bins, patches = ax.hist(vtheta.cpu().numpy().flatten(), 200)
+        # tensor2disp(vtheta - vtheta.min(), ind=0, percentile=95).show()
+        #
+        # bk_htheta = self.backconvert_htheta(htheta)
+        # bk_k = torch.tan(bk_htheta)
+        # bk_k = torch.clamp(bk_k, min=self.mink, max=self.maxk)
+        #
+        # npts3d_pdiff_uph = self.npts3d_p_h[:,:,:,1,0] - bk_k.squeeze(1) * self.npts3d_p_h[:,:,:,0,0]
+        # npts3d_pdiff_downh = self.npts3d_p_shifted_h[:,:,:,1,0] - bk_k.squeeze(1) * self.npts3d_p_shifted_h[:,:,:,0,0]
+        # ratioh = npts3d_pdiff_uph / npts3d_pdiff_downh
+        # ratioh = torch.clamp(ratioh, min = 1e-3)
+        # ratiohl = torch.log(ratioh)
+        #
+        # depthmap_shift = torch.clamp(self.copylConv(depthmap), min = 1e-3)
+        # ratio_gt = (depthmap_shift / depthmap)
+        # ratio_gtl = torch.log(depthmap_shift) - torch.log(depthmap)
+        #
+        # import random
+        # tx = random.randint(0, self.width)
+        # ty = random.randint(0, self.height)
+        # print(depthmap[0, 0,ty, tx + 1] / depthmap[0, 0,ty, tx])
+        # print(ratioh[0, ty, tx])
+        # print(torch.exp(ratiohl[0, ty, tx]))
+        # print(torch.exp(ratio_gtl[0, 0, ty, tx]))
+        #
+        # lossh = self.lossh(ratiohl.unsqueeze(1))
+        # depthmapl = torch.log(depthmap)
+        # gth = self.gth(depthmapl)
+        # import random
+        # tx = random.randint(0, self.width)
+        # ty = random.randint(0, self.height)
+        # print(lossh[0, 1,ty, tx])
+        # print(gth[0, 1, ty, tx])
+        #
+        # bk_vtheta = self.backconvert_vtheta(vtheta)
+        # bk_kv = torch.tan(bk_vtheta)
+        # bk_kv = torch.clamp(bk_kv, min=self.mink, max=self.maxk)
+        #
+        # npts3d_pdiff_upv = self.npts3d_p_v[:,:,:,1,0] - bk_kv.squeeze(1) * self.npts3d_p_v[:,:,:,0,0]
+        # npts3d_pdiff_downv = self.npts3d_p_shifted_v[:,:,:,1,0] - bk_kv.squeeze(1) * self.npts3d_p_shifted_v[:,:,:,0,0]
+        # ratiov = npts3d_pdiff_upv / npts3d_pdiff_downv
+        # ratiov = torch.clamp(ratiov, min = 1e-3)
+        # ratiovl = torch.log(ratiov)
+        #
+        # depthmap_shift = torch.clamp(self.copyvConv(depthmap), min = 1e-3)
+        # ratio_gt = (depthmap_shift / depthmap)
+        #
+        # import random
+        # tx = random.randint(0, self.width)
+        # ty = random.randint(0, self.height)
+        # print(depthmap[0, 0,ty + 1, tx] / depthmap[0, 0,ty, tx])
+        # print(ratiov[0, ty, tx])
+        #
+        # lossv = self.lossv(ratiovl.unsqueeze(1))
+        # depthmapl = torch.log(depthmap)
+        # gtv = self.gtv(depthmapl)
+        # import random
+        # tx = random.randint(0, self.width)
+        # ty = random.randint(0, self.height)
+        # print(lossv[0, 1,ty, tx])
+        # print(gtv[0, 1, ty, tx])
+        return htheta, vtheta
+
+    def path_loss(self, depthmap, htheta, vtheta):
+        # depthmapl = torch.log(depthmap)
+        #
+        # lossh = self.lossh(ratiohl)
+        # gth = self.gth(depthmapl)
+        # indh = (self.gth((depthmap > 0).float()) == 0).float()
+        # slossh = torch.sum(torch.abs(gth - lossh) * indh) / (torch.sum(indh) + 1)
+        #
+        # lossv = self.lossv(ratiovl)
+        # gtv = self.gtv(depthmapl)
+        # indv = (self.gtv((depthmap > 0).float()) == 0).float()
+        # slossv = torch.sum(torch.abs(gtv - lossv) * indv) / (torch.sum(indv) + 1)
+        depthmapl = torch.log(depthmap)
+        inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)
+        inboundh = inboundh.float()
+        outboundh = 1 - inboundh
+
+        bk_htheta = self.backconvert_htheta(htheta)
+        npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:,:,:,1,0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_h[:,:,:,0,0].unsqueeze(1)
+        npts3d_pdiff_downh = torch.cos(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 0, 0].unsqueeze(1)
+        ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min = 1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downh), min = 1e-4))
 
 
-        pts3d_n = torch.stack([pts3d_nx, pts3d_ny, pts3d_nz], dim=4)
-        pts3d_l = torch.stack([pts3d_nxl, pts3d_nyl, pts3d_nzl], dim=4)
-        theta1 = (pts3d_nxl - pts3d_nx) / (torch.norm(pts3d_n - pts3d_l, dim=4))
-        theta1 = torch.clamp(theta1, min=-0.999, max=0.999)
-        theta1 = torch.acos(theta1)
+        # depthmap_shifth = torch.clamp(self.copylConv(depthmap), min = 1e-3)
+        # gth = torch.log(depthmap_shifth) - torch.log(depthmap)
+        # selector = ((depthmap_shifth > 1e-2) * (ratiohl.unsqueeze(1) > float(np.log(1e-3) + 1))).float()
+        lossh = self.lossh(ratiohl)
+        gth = self.gth(depthmapl)
+        indh = (self.gth((depthmap > 0).float()) == 0).float() * (self.lossh(outboundh) == 0).float()
+        hloss1 = torch.sum(torch.abs(gth - lossh) * indh * inboundh) / (torch.sum(indh * inboundh) + 1)
+        # hloss1 = torch.sum(torch.abs(gth - ratiohl.unsqueeze(1)) * inboundh * selector) / (torch.sum(inboundh * selector) + 1)
+        hloss2 = torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh) / (torch.sum(outboundh) + 1)
 
-        return theta1
-    def forward(self, predNorm, depthmap, invIn):
-        predNorm_ = predNorm.view(self.batch_size, len(self.ptspair), 3, self.height, self.width).permute([0,1,3,4,2]).unsqueeze(4)
-        intrinsic_c = invIn[:,0:3,0:3].view(self.batch_size,1,1,1,3,3)
-        normIn = torch.matmul(predNorm_, intrinsic_c)
+        return hloss1, hloss2
 
-        p2d_ex = self.pixelLocs.unsqueeze(1).unsqueeze(5).expand([-1, len(self.ptspair), -1, -1, -1, -1])
-        k = -torch.matmul(normIn, p2d_ex).squeeze(4).squeeze(4) * depthmap.expand([-1, len(self.ptspair), -1, -1])
+    def mixed_loss(self, depthmap, htheta, vtheta):
+        inboundh = (htheta < self.upperboundh.unsqueeze(0).unsqueeze(0).expand([self.batch_size,-1,-1,-1])) * (htheta > self.lowerboundh.unsqueeze(0).unsqueeze(0).expand([self.batch_size,-1,-1,-1]))
+        inboundh = inboundh.float()
+        outboundh = 1 - inboundh
 
-        predDepth = normIn.unsqueeze(2).expand([-1,-1,2,-1,-1,-1,-1]) @ self.interestedLocs.unsqueeze(6)
-        predDepth = predDepth.squeeze(5).squeeze(5)
-        predDepth = -k.unsqueeze(2).expand([-1,-1,2,-1,-1]) / (predDepth)
-        # ptspred3d = predDepth.unsqueeze(5).expand([-1,-1,-1,-1,-1,3]) * (intrinsic_c.unsqueeze(2).expand([-1, len(self.pixelLocs), 2, self.height, self.width, -1, -1]) @ self.interestedLocs.unsqueeze(6)).squeeze(6)
-        # ck = torch.sum(ptspred3d * predNorm_.squeeze(4).unsqueeze(2).expand([-1,-1,2,-1,-1,-1]), axis = [5])
-        # ck = ck + k.unsqueeze(2).expand([-1,-1,2,-1,-1])
-        # torch.abs(ck).max()
-        predDepth_ = predDepth.view(self.batch_size, len(self.ptspair) * 2, self.height, self.width)
-        predDepth_ = self.copyConv(predDepth_)
-        return predDepth_
+        bk_htheta = self.backconvert_htheta(htheta)
+        npts3d_pdiff_uph = torch.cos(bk_htheta).squeeze(1) * self.npts3d_p_h[:,:,:,1,0] - torch.sin(bk_htheta).squeeze(1) * self.npts3d_p_h[:,:,:,0,0]
+        npts3d_pdiff_downh = torch.cos(bk_htheta).squeeze(1) * self.npts3d_p_shifted_h[:, :, :, 1, 0] - torch.sin(bk_htheta).squeeze(1) * self.npts3d_p_shifted_h[:, :, :, 0, 0]
+        ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min = 1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downh), min = 1e-4))
+        # ratioh = npts3d_pdiff_uph / npts3d_pdiff_downh
+        # ratioh = torch.clamp(ratioh, min = 1e-4, max = 1e3)
+        # ratiohl = torch.log(ratioh)
+
+
+        depthmap_shifth = torch.clamp(self.copylConv(depthmap), min = 1e-3)
+        # depthmap_shifth = self.copylConv(depthmap)
+        gth = torch.log(depthmap_shifth) - torch.log(depthmap)
+        # selector = (depthmap_shifth > 1e-4).float()
+        # selector = ((depthmap_shifth > 1e-2) * (ratiohl.unsqueeze(1) > float(np.log(1e-3) + 1))).float()
+        selector = (depthmap_shifth > 1e-2).float()
+        hloss1 = torch.sum(torch.abs(gth - ratiohl.unsqueeze(1)) * inboundh * selector) / (torch.sum(inboundh * selector) + 1)
+        hloss2 = torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh * selector) / (torch.sum(outboundh * selector) + 1)
+        # hloss2 = torch.mean(torch.abs(self.middeltargeth - htheta))
+        # hloss = (hloss1 * 100 + hloss2) / 2
+        return hloss1, hloss2
+    def exp_ratio(self, htheta, vtheta):
+        hdir1 = self.invIn.unsqueeze(0).unsqueeze(0).expand([self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(3)
+        hdir2 = self.invIn.unsqueeze(0).unsqueeze(0).expand([self.height, self.width, -1, -1]) @ (self.pixelLocs + torch.Tensor([1,0,0]).cuda()).unsqueeze(3)
+        hdir3 = torch.cross(hdir1, hdir2)
+        hdir3 = hdir3 / torch.norm(hdir3, dim=2, keepdim=True)
+
+        # Compute horizontal x axis
+        hxd = torch.Tensor([0,0,1]).unsqueeze(1).cuda() - torch.sum(hdir3 * torch.Tensor([0,0,1]).unsqueeze(1).cuda(), dim=[2,3], keepdim=True) * hdir3
+        hxd = hxd / torch.norm(hxd, dim=2, keepdim=True)
+        hyd = torch.cross(hxd, hdir3)
+
+        hdir1p = self.hM @ (hdir1 / torch.norm(hdir1, keepdim=True, dim = 2))
+        hdir2p = self.hM @ (hdir2 / torch.norm(hdir2, keepdim=True, dim=2))
+
+        lowerboundh = torch.atan2(hdir1p[:,:,1,0], hdir1p[:,:,0,0])
+        lowerboundh = self.convert_htheta(lowerboundh) - float(np.pi)
+        upperboundh = torch.atan2(hdir2p[:,:,1,0], hdir2p[:,:,0,0])
+        upperboundh = self.convert_htheta(upperboundh)
+        middeltarget = (lowerboundh + upperboundh) / 2
+        inboundh = (htheta < upperboundh.unsqueeze(0).unsqueeze(0).expand([self.batch_size,-1,-1,-1])) * (htheta > lowerboundh.unsqueeze(0).unsqueeze(0).expand([self.batch_size,-1,-1,-1]))
+
+
+        import random
+        tx = random.randint(0, self.width)
+        ty = random.randint(0, self.height)
+        refdepth = 50
+        testdepth = np.linspace(0.1, 100, 300)
+
+
+        vec1 = hdir1p[ty, tx, :, 0].cpu().numpy()
+        vec2 = hdir2p[ty, tx, :, 0].cpu().numpy()
+
+        refvec = vec1 * refdepth
+        testvec = np.repeat(np.expand_dims(vec2, axis = 1), 300, 1) * np.repeat(np.expand_dims(testdepth, axis = 0), 2, 0)
+        dy = testvec[1,:] - refvec[1]
+        dx = testvec[0, :] - refvec[0]
+        testtheta = np.arctan2(dy, dx)
+        acttesttheta = testtheta + float(np.pi) / 2 * 3
+        acttesttheta = np.mod(acttesttheta, float(np.pi) * 2)
+        acttesttheta = acttesttheta / float(np.pi) / 2
+
+        vectheta1 = np.arctan2(vec1[1], vec1[0])
+        vectheta2 = np.arctan2(vec2[1], vec2[0])
+        # plt.figure()
+        # dx = (torch.cos(htheta)).cpu().numpy().flatten()
+        # dy = (torch.sin(htheta)).cpu().numpy().flatten()
+        # plt.scatter(dx, dy, s=0.1)
+        # plt.axis('equal')
+        plt.figure()
+        dx = (torch.cos(self.backconvert_htheta(htheta))).cpu().numpy().flatten()
+        dy = (torch.sin(self.backconvert_htheta(htheta))).cpu().numpy().flatten()
+
+        sthetaUp = self.backconvert_htheta(upperboundh).cpu().numpy()[ty,tx]
+        sthetaDown = self.backconvert_htheta(lowerboundh).cpu().numpy()[ty,tx]
+        plt.scatter(dx, dy, s=0.1  
+        plt.axis('equal')
+        plt.scatter(np.cos(testtheta), np.sin(testtheta), s=10, c='c')
+        plt.scatter(vec1[0], vec1[1], s=10, c = 'r')
+        plt.scatter(vec2[0], vec2[1], s=10, c='g')
+        plt.scatter(np.cos(sthetaUp), np.sin(sthetaUp), s=20, c='k')
+        plt.scatter(np.cos(sthetaDown), np.sin(sthetaDown), s=20, c='k')
+
+        depthratio = testdepth / refdepth
+        plt.figure()
+        plt.scatter(acttesttheta, depthratio)
+
+
+
+
+
+
+        vdir1 = self.invIn.unsqueeze(0).unsqueeze(0).expand([self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(3)
+        vdir2 = self.invIn.unsqueeze(0).unsqueeze(0).expand([self.height, self.width, -1, -1]) @ (self.pixelLocs + torch.Tensor([0,1,0]).cuda()).unsqueeze(3)
+        vdir3 = torch.cross(vdir1, vdir2)
+        vdir3 = vdir3 / torch.norm(vdir3, dim=2, keepdim=True)
+
+        # Compute vertical x axis
+        vxd = torch.Tensor([0,0,1]).unsqueeze(1).cuda() - torch.sum(vdir3 * torch.Tensor([0,0,1]).unsqueeze(1).cuda(), dim=[2,3], keepdim=True) * vdir3
+        vxd = vxd / torch.norm(vxd, dim=2, keepdim=True)
+        vyd = torch.cross(vxd, vdir3)
+
+        vdir1p = self.vM @ (vdir1 / torch.norm(vdir1, keepdim=True, dim = 2))
+        vdir2p = self.vM @ (vdir2 / torch.norm(vdir2, keepdim=True, dim=2))
+
+        import random
+        # tx = random.randint(0, self.width)
+        # ty = random.randint(0, self.height)
+        tx = 50
+        ty = 446
+        refdepth = 50
+        testdepth = np.linspace(0.1, 100, 300)
+
+
+        vec1 = vdir1p[ty, tx, :, 0].cpu().numpy()
+        vec2 = vdir2p[ty, tx, :, 0].cpu().numpy()
+
+        refvec = vec1 * refdepth
+        testvec = np.repeat(np.expand_dims(vec2, axis = 1), 300, 1) * np.repeat(np.expand_dims(testdepth, axis = 0), 2, 0)
+        dy = testvec[1,:] - refvec[1]
+        dx = testvec[0, :] - refvec[0]
+        testtheta = np.arctan2(dy, dx)
+        acttesttheta = testtheta + float(np.pi) / 2 * 3
+        acttesttheta = np.mod(acttesttheta, float(np.pi) * 2)
+        acttesttheta = acttesttheta / float(np.pi) / 2
+
+        vectheta1 = np.arctan2(vec1[1], vec1[0])
+        vectheta2 = np.arctan2(vec2[1], vec2[0])
+        # plt.figure()
+        # dx = (torch.cos(htheta)).cpu().numpy().flatten()
+        # dy = (torch.sin(htheta)).cpu().numpy().flatten()
+        # plt.scatter(dx, dy, s=0.1)
+        # plt.axis('equal')
+        plt.figure()
+        dx = (torch.cos(self.backconvert_htheta(vtheta))).cpu().numpy().flatten()
+        dy = (torch.sin(self.backconvert_htheta(vtheta))).cpu().numpy().flatten()
+
+        # sthetaUp = self.backconvert_htheta(upperboundh).cpu().numpy()[ty,tx]
+        # sthetaDown = self.backconvert_htheta(lowerboundh).cpu().numpy()[ty,tx]
+        plt.scatter(dx, dy, s=0.1)
+        plt.axis('equal')
+        plt.scatter(np.cos(testtheta), np.sin(testtheta), s=10, c='c')
+        plt.scatter(vec1[0], vec1[1], s=10, c = 'r')
+        plt.scatter(vec2[0], vec2[1], s=10, c='g')
+        # plt.scatter(np.cos(sthetaUp), np.sin(sthetaUp), s=20, c='k')
+        # plt.scatter(np.cos(sthetaDown), np.sin(sthetaDown), s=20, c='k')
+
+        depthratio = testdepth / refdepth
+        plt.figure()
+        plt.scatter(acttesttheta, depthratio)
+    def get_ratio(self, htheta, vtheta):
+        bk_htheta = self.backconvert_htheta(htheta)
+        # bk_k = torch.tan(bk_htheta)
+        # bk_k = torch.clamp(bk_k, min=self.mink, max=self.maxk)
+
+        # npts3d_pdiff_uph = self.npts3d_p_h[:,:,:,1,0] - bk_k.squeeze(1) * self.npts3d_p_h[:,:,:,0,0]
+        # npts3d_pdiff_downh = self.npts3d_p_shifted_h[:,:,:,1,0] - bk_k.squeeze(1) * self.npts3d_p_shifted_h[:,:,:,0,0]
+        npts3d_pdiff_uph = torch.cos(bk_htheta).squeeze(1) * self.npts3d_p_h[:,:,:,1,0] - torch.sin(bk_htheta).squeeze(1) * self.npts3d_p_h[:,:,:,0,0]
+        npts3d_pdiff_downh = torch.cos(bk_htheta).squeeze(1) * self.npts3d_p_shifted_h[:, :, :, 1, 0] - torch.sin(bk_htheta).squeeze(1) * self.npts3d_p_shifted_h[:, :, :, 0, 0]
+        ratioh = npts3d_pdiff_uph / npts3d_pdiff_downh
+        ratioh = torch.clamp(ratioh, min = 1e-3)
+        ratiohl = torch.log(ratioh)
+
+        # tnpts3d_pdiff_uph = torch.cos(bk_htheta).squeeze(1) * self.npts3d_p_h[:,:,:,1,0] - torch.sin(bk_htheta).squeeze(1) * self.npts3d_p_h[:,:,:,0,0]
+        # tnpts3d_pdiff_downh = torch.cos(bk_htheta).squeeze(1) * self.npts3d_p_shifted_h[:, :, :, 1, 0] - torch.sin(bk_htheta).squeeze(1) * self.npts3d_p_shifted_h[:, :, :, 0, 0]
+        # torch.mean(torch.abs(ratioh - tnpts3d_pdiff_uph/tnpts3d_pdiff_downh))
+
+        bk_vtheta = self.backconvert_vtheta(vtheta)
+        # bk_kv = torch.tan(bk_vtheta)
+        # bk_kv = torch.clamp(bk_kv, min=self.mink, max=self.maxk)
+
+        # npts3d_pdiff_upv = self.npts3d_p_v[:,:,:,1,0] - bk_kv.squeeze(1) * self.npts3d_p_v[:,:,:,0,0]
+        # npts3d_pdiff_downv = self.npts3d_p_shifted_v[:,:,:,1,0] - bk_kv.squeeze(1) * self.npts3d_p_shifted_v[:,:,:,0,0]
+        npts3d_pdiff_upv = torch.cos(bk_vtheta).squeeze(1) * self.npts3d_p_v[:,:,:,1,0] - torch.sin(bk_vtheta).squeeze(1) * self.npts3d_p_v[:,:,:,0,0]
+        npts3d_pdiff_downv = torch.cos(bk_vtheta).squeeze(1) * self.npts3d_p_shifted_v[:, :, :, 1, 0] - torch.sin(bk_vtheta).squeeze(1) * self.npts3d_p_shifted_v[:, :, :, 0, 0]
+        ratiov = npts3d_pdiff_upv / npts3d_pdiff_downv
+        ratiov = torch.clamp(ratiov, min = 1e-3)
+        ratiovl = torch.log(ratiov)
+
+        # tnpts3d_pdiff_upv = torch.cos(bk_vtheta).squeeze(1) * self.npts3d_p_v[:,:,:,1,0] - torch.sin(bk_vtheta).squeeze(1) * self.npts3d_p_v[:,:,:,0,0]
+        # tnpts3d_pdiff_downv = torch.cos(bk_vtheta).squeeze(1) * self.npts3d_p_shifted_v[:, :, :, 1, 0] - torch.sin(bk_vtheta).squeeze(1) * self.npts3d_p_shifted_v[:, :, :, 0, 0]
+        # torch.mean(torch.abs(ratiov - tnpts3d_pdiff_upv/tnpts3d_pdiff_downv))
+
+        ratioh = ratioh.unsqueeze(1)
+        ratiohl = ratiohl.unsqueeze(1)
+        ratiov = ratiov.unsqueeze(1)
+        ratiovl = ratiovl.unsqueeze(1)
+        return ratioh, ratiohl, ratiov, ratiovl
