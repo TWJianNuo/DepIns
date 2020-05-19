@@ -260,211 +260,83 @@ class Trainer:
             if not (key == 'entry_tag' or key == 'syn_tag'):
                 inputs[key] = ipt.to(self.device)
 
-        # Dummy theta prediciton
-        maxTurn = 200
+        outputs = dict()
+        losses = dict()
         htheta, vtheta = self.localthetadesp.get_theta(depthmap=inputs['pSIL_depth'])
         htheta = htheta.detach()
         vtheta = vtheta.detach()
 
-        # dummypredh3 = nn.Parameter(torch.rand_like(htheta), requires_grad = True)
-        # dummypredv3 = nn.Parameter(torch.rand_like(vtheta), requires_grad=True)
-        # opt3 = self.model_optimizer = optim.Adam([dummypredh3] + [dummypredv3], 1e-3)
-        # for i in range(40000):
-        #     dummypredh3_act = torch.sigmoid(dummypredh3) * 2 * float(np.pi)
-        #     dummypredv3_act = torch.sigmoid(dummypredv3) * 2 * float(np.pi)
-        #     hloss1, hloss2, vloss1, vloss2, scl = self.localthetadesp.path_loss(depthmap=inputs['pSIL_depth'], htheta = dummypredh3_act, vtheta = dummypredv3_act)
-        #     hloss = hloss1 + hloss2
-        #     vloss = vloss1 + vloss2
-        #     opt3.zero_grad()
-        #     (hloss + vloss + scl * 1e-1).backward()
-        #     # vloss2.backward()
-        #     # print(vloss2)
-        #     opt3.step()
-        #     print(i)
-        #     # print("hloss: %f, vloss: %f" % (hloss.detach().cpu().numpy(), vloss.detach().cpu().numpy()))
+        # tensor2rgb(inputs['pSIL_rgb'], ind=0).show()
         # tensor2disp(htheta - htheta.min(), percentile=95, ind=0).show()
-        # tensor2disp(dummypredh3_act - dummypredh3_act.min(), percentile=95, ind=0).show()
-        # tensor2disp(dummypredv3_act - dummypredv3_act.min(), percentile=95, ind=0).show()
 
-        dummypredh2 = nn.Parameter(torch.rand_like(htheta), requires_grad = True)
-        dummypredv2 = nn.Parameter(torch.rand_like(vtheta), requires_grad=True)
-        opt2 = self.model_optimizer = optim.Adam([dummypredh2] + [dummypredv2], 1e-3)
-        for i in range(40000):
-            dummypredh2_act = torch.sigmoid(dummypredh2) * 2 * float(np.pi)
-            dummypredv2_act = torch.sigmoid(dummypredv2) * 2 * float(np.pi)
-            hloss1, hloss2, vloss1, vloss2, hnum, vnum = self.localthetadesp.mixed_loss(depthmap=inputs['pSIL_depth'], htheta = dummypredh2_act, vtheta = dummypredv2_act)
-            hloss = hloss1 + hloss2
-            vloss = vloss1 + vloss2
-            opt2.zero_grad()
-            (hloss + vloss).backward()
-            opt2.step()
-            print("round: %d, hloss: %f, vloss: %f" % (i, hloss.detach().cpu().numpy(), vloss.detach().cpu().numpy()))
+        outputs['htheta'] = htheta
+        outputs['vtheta'] = vtheta
 
-        tensor2disp(htheta - htheta.min(), percentile=95, ind=0).show()
-        tensor2disp(dummypredh2_act - dummypredh2_act.min(), percentile=95, ind=0).show()
-        tensor2disp(dummypredv2_act - dummypredv2_act.min(), percentile=95, ind=0).show()
+        outputs.update(self.models['depth'](self.models['encoder'](inputs['pSIL_rgb'])))
 
-        dummypredh1 = nn.Parameter(torch.rand_like(htheta), requires_grad = True)
-        opt1 = self.model_optimizer = optim.Adam([dummypredh1], 1e-3)
-        for i in range(10000):
-            dummypredh1_act = torch.sigmoid(dummypredh1) * 2 * float(np.pi)
-            loss = torch.mean(torch.abs(dummypredh1_act - htheta))
-            opt1.zero_grad()
-            loss.backward()
-            opt1.step()
-            print(loss)
-        tensor2disp(htheta - htheta.min(), percentile=95, ind=0).show()
-        tensor2disp(dummypredh1_act - dummypredh1_act.min(), percentile=95, ind=0).show()
-        tensor2disp(dummypredh2_act - dummypredh2_act.min(), percentile=95, ind=0).show()
-
-
-
-
-        import random
-        tx = random.randint(0, self.opt.width)
-        ty = random.randint(0, self.opt.height)
-        for i in range(200):
-            outputs = dict()
-            losses = dict()
-            outputs.update(self.models['depth'](self.models['encoder'](inputs[('color', 0, 0)])))
-            htheta, vtheta = self.localthetadesp.get_theta(depthmap = inputs['pSIL_depth'])
-            outputs['htheta_gt'] = htheta
-            outputs['vtheta_gt'] = vtheta
-            outputs['htheta_pred'] = outputs[('disp', 0)][:,0:1,:,:] * float(np.pi) * 2
-            outputs['vtheta_pred'] = outputs[('disp', 0)][:,1:2,:,:] * float(np.pi) * 2
-            # tensor2disp(mask_theta2[:,0:1,:,:], ind = 0, vmax=1).show()
-            # mask = inputs['pSIL_insMask']
-            # mask = (self.shrinkConv(mask) > self.shrinkbar).float().expand([-1, len(self.ptspair) * 2, -1, -1]) * (self.compareConv(mask) == 0).float()
-            # tensor2disp(mask, ind=0, vmax=1).show()
-
-            # ltheta = 0
-            # for i in range(len(self.opt.scales)):
-            #     pred_theta = outputs[('disp', i)]
-            #     pred_theta = F.interpolate(pred_theta, [self.prsil_h, self.prsil_w], mode='bilinear', align_corners=True)
-            #     pred_theta = pred_theta * float(np.pi) * 2
-            #     ltheta = ltheta + torch.mean(torch.abs(pred_theta - torch.cat([htheta, vtheta], dim=1)))
-            # ltheta = ltheta / len(self.opt.scales)
-            # losses['totLoss'] = ltheta
-
+        if self.opt.localGeomMode == 'directSup':
             ltheta = 0
             for i in range(len(self.opt.scales)):
                 pred_theta = outputs[('disp', i)]
                 pred_theta = F.interpolate(pred_theta, [self.prsil_h, self.prsil_w], mode='bilinear', align_corners=True)
                 pred_theta = pred_theta * float(np.pi) * 2
-                htheta_pred = pred_theta[:,0:1,:,:]
-                vtheta_pred = pred_theta[:,1:2,:,:]
+                htheta_pred = pred_theta[:, 0:1, :, :]
+                vtheta_pred = pred_theta[:, 1:2, :, :]
+                ltheta = ltheta + (torch.mean(torch.abs(htheta_pred - htheta)) + torch.mean(torch.abs(vtheta_pred - vtheta))) / 2
+                if i == 0:
+                    outputs['htheta_pred'] = htheta_pred
+                    outputs['vtheta_pred'] = vtheta_pred
+                    losses['ltheta'] = ltheta
+            ltheta = ltheta / 4
+            losses['totLoss'] = ltheta * self.opt.theta_scale
+        elif self.opt.localGeomMode == 'ratioSup':
+            ltheta = 0
+            for i in range(len(self.opt.scales)):
+                pred_theta = outputs[('disp', i)]
+                pred_theta = F.interpolate(pred_theta, [self.prsil_h, self.prsil_w], mode='bilinear', align_corners=True)
+                pred_theta = pred_theta * float(np.pi) * 2
+                htheta_pred = pred_theta[:, 0:1, :, :]
+                vtheta_pred = pred_theta[:, 1:2, :, :]
+                hloss1, hloss2, vloss1, vloss2, hnum, vnum = self.localthetadesp.mixed_loss(depthmap=inputs['pSIL_depth'], htheta = htheta_pred, vtheta = vtheta_pred)
 
-                ratioh, ratiohl, ratiov, ratiovl = self.localthetadesp.get_ratio(htheta=htheta_pred, vtheta=vtheta_pred)
-                # slossh, slossv = self.localthetadesp.get_loss(depthmap=inputs['pSIL_depth'], ratiohl=ratiohl, ratiovl=ratiovl)
-                # ltheta = ltheta + (slossh + slossv) / 2
-                hloss, vloss = self.localthetadesp.get_loss_ratio(depthmap=inputs['pSIL_depth'], ratiohl=ratiohl, ratiovl=ratiovl)
-                ltheta = ltheta + (hloss[0,0,ty,tx] + vloss[0,0,ty,tx]) / 2
+                losses[('hloss1', i)] = hloss1
+                losses[('hloss2', i)] = hloss2
+                losses[('vloss1', i)] = vloss1
+                losses[('vloss2', i)] = vloss2
+                losses[('hnum', i)] = hnum
+                losses[('vnum', i)] = vnum
+                if i == 0:
+                    outputs['htheta_pred'] = htheta_pred
+                    outputs['vtheta_pred'] = vtheta_pred
+                ltheta = ltheta + (hloss1 + vloss1 + hloss2 * hnum / 1000 + vloss2 * vnum / 1000) / 2
+            ltheta = ltheta / 4
+            losses['totLoss'] = ltheta * self.opt.theta_scale
+        elif self.opt.localGeomMode == 'pathSup':
+            ltheta = 0
+            sclLoss = 0
+            for i in range(len(self.opt.scales)):
+                pred_theta = outputs[('disp', i)]
+                pred_theta = F.interpolate(pred_theta, [self.prsil_h, self.prsil_w], mode='bilinear', align_corners=True)
+                pred_theta = pred_theta * float(np.pi) * 2
+                htheta_pred = pred_theta[:, 0:1, :, :]
+                vtheta_pred = pred_theta[:, 1:2, :, :]
+                hloss1, hloss2, vloss1, vloss2, scl, hnum, vnum = self.localthetadesp.path_loss(depthmap=inputs['pSIL_depth'], htheta=htheta_pred, vtheta=vtheta_pred)
 
-            ltheta = ltheta / len(self.opt.scales)
-            losses['totLoss'] = ltheta * 10
-
-            self.model_optimizer.zero_grad()
-            losses['totLoss'].backward()
-            print(losses['totLoss'])
-            self.model_optimizer.step()
-
-        print(htheta[0,0,ty,tx])
-        print(htheta_pred[0, 0, ty, tx])
-        tensor2disp(htheta - htheta.min(), percentile = 95, ind=0).show()
-        tensor2disp(vtheta - vtheta.min(), ind=0, percentile=95).show()
-        tensor2disp(outputs['htheta_pred'] - outputs['htheta_pred'].min(), percentile = 95, ind=0).show()
-        tensor2disp(outputs['vtheta_pred'] - outputs['vtheta_pred'].min(), percentile = 95, ind=0).show()
-        # vind = 0
-        # figs = list()
-        # for m in range(len(self.ptspair) * 2):
-        #     if m % 2 == 0:
-        #         figs.append(np.array(tensor2disp(outputs[('disp', 0)][:,m:m+1,:,:], vmax = 1, ind = vind)))
-        #     else:
-        #         figs.append(np.array(tensor2disp(torch.abs(outputs[('disp', 0)][:, m:m + 1, :, :] - 1/2) * 2, vmax=1, ind=vind)))
-        # figs = np.concatenate(figs, axis=0)
-        # pil.fromarray(figs).show()
-        #
-        # figsgt = list()
-        # figsgt.append(np.array(tensor2disp(theta1[:,0:1,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 0:1, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt.append(np.array(tensor2disp(theta1[:,1:2,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 1:2, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt = np.concatenate(figsgt, axis=0)
-        # pil.fromarray(figsgt).show()
-        #
-        #
-        # dencoder = networks.ResnetEncoder(
-        #     50, self.opt.weights_init == "pretrained")
-        # dencoder.to(self.device)
-        # ddecoder = networks.DepthDecoder(
-        #     dencoder.num_ch_enc, self.opt.scales)
-        # ddecoder.to(self.device)
-        #
-        #
-        # path = '/home/shengjie/Documents/Project_SemanticDepth/tmp/2fenf_bs_occ_lp15_res50_ft/models/weights_3/encoder.pth'
-        # model_dict = dencoder.state_dict()
-        # pretrained_dict = torch.load(path)
-        # pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-        # model_dict.update(pretrained_dict)
-        # dencoder.load_state_dict(model_dict)
-        #
-        # path = '/home/shengjie/Documents/Project_SemanticDepth/tmp/2fenf_bs_occ_lp15_res50_ft/models/weights_3/depth.pth'
-        # model_dict = ddecoder.state_dict()
-        # pretrained_dict = torch.load(path)
-        # pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-        # model_dict.update(pretrained_dict)
-        # ddecoder.load_state_dict(model_dict)
-        #
-        # outputs2 = dict()
-        # outputs2.update(ddecoder(dencoder(inputs[('color', 0, 0)])))
-        # _, depth_pred = disp_to_depth(outputs2['disp', 0], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
-        # depth_pred = depth_pred  * 5.4
-        # invIn2 = np.linalg.inv(
-        #     np.array([
-        #         [594.8910, 0., 502.5674],
-        #         [0., 615.7122, 147.5021],
-        #         [0., 0.,   1.]])
-        # )
-        # linGeomDesp2 = LinGeomDesp(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size, ptspair = self.ptspair, invIn=invIn2).cuda()
-        # theta1, theta2 = linGeomDesp2.get_theta(depthmap = depth_pred)
-        #
-        # figsgt = list()
-        # figsgt.append(np.array(tensor2disp(theta1[:,0:1,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 0:1, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt.append(np.array(tensor2disp(theta1[:,1:2,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 1:2, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt = np.concatenate(figsgt, axis=0)
-        # pil.fromarray(figsgt).show()
-        #
-        # sup_depth_path = os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Bts_Pred/result_bts_eigen/raw', '2011_09_26_drive_0002_sync_0000000000.png')
-        # # sup_depth_path = '/home/shengjie/Desktop/dep_completion.png'
-        # depth_gt = pil.open(sup_depth_path)
-        # depth_gt = depth_gt.resize([self.opt.width, self.opt.height], pil.LANCZOS)
-        # depth_gt = np.array(depth_gt).astype(np.uint16).astype(np.float32)
-        # depth_gt = depth_gt / 256
-        # depth_gt = torch.from_numpy(depth_gt).unsqueeze(0).unsqueeze(0).float().cuda()
-        # depth_gt = depth_gt.expand([self.opt.batch_size, -1, -1, -1]).contiguous()
-        # theta1, theta2 = linGeomDesp2.get_theta(depthmap = depth_gt)
-        #
-        # rgba = '/home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data/2011_09_26/2011_09_26_drive_0001_sync/image_02/data/0000000005.png'
-        # rgba = pil.open(rgba)
-        # rgba = rgba.resize([self.opt.width, self.opt.height], pil.LANCZOS)
-        # rgba = np.array(rgba).astype(np.float32)
-        # rgba = rgba / 255
-        # rgba = torch.from_numpy(rgba).unsqueeze(0).permute([0,3,1,2]).cuda()
-        # rgba = rgba.expand([self.opt.batch_size, -1, -1, -1]).contiguous()
-        # outputs.update(self.models['depth'](self.models['encoder'](rgba)))
-        #
-        # figsgt = list()
-        # figsgt.append(np.array(tensor2disp(theta1[:,0:1,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 0:1, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt.append(np.array(tensor2disp(theta1[:,1:2,:,:] / 3.14, vmax = 1, ind = vind)))
-        # figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 1:2, :, :]) / 3.14, vmax=1, ind=vind)))
-        # figsgt = np.concatenate(figsgt, axis=0)
-        # pil.fromarray(figsgt).show()
-        # tensor2disp(1 / depth_gt, percentile=95, ind = 0).show()
-
-        # campos = torch.inverse(inputs['realEx'][0]) @ torch.from_numpy(np.array([[0], [0], [0], [1]], dtype=np.float32)).cuda()
+                losses[('hloss1', i)] = hloss1
+                losses[('hloss2', i)] = hloss2
+                losses[('vloss1', i)] = vloss1
+                losses[('vloss2', i)] = vloss2
+                losses[('scl', i)] = scl
+                losses[('hnum', i)] = hnum
+                losses[('vnum', i)] = vnum
+                if i == 0:
+                    outputs['htheta_pred'] = htheta_pred
+                    outputs['vtheta_pred'] = vtheta_pred
+                ltheta = ltheta + (hloss1 + vloss1 + hloss2 * hnum / 1000 + vloss2 * vnum / 1000) / 2
+                sclLoss = sclLoss + scl
+            ltheta = ltheta / 4
+            sclLoss = sclLoss / 4
+            losses['totLoss'] = ltheta * self.opt.theta_scale + sclLoss * self.opt.theta_constrain
         return outputs, losses
 
     def val(self):
@@ -632,41 +504,14 @@ class Trainer:
         print(print_string.format(self.epoch, batch_idx, samples_per_sec, loss_tot, sec_to_hm_str(time_sofar), sec_to_hm_str(training_time_left)))
 
     def record_img(self, inputs, outputs):
-        # viewIndex = 0
-        # fig_sil_rgb = tensor2rgb(inputs['pSIL_rgb'], ind=viewIndex)
-        # fig_sil_disp = tensor2disp(outputs['syn_pred'][('disp', 0)], ind = viewIndex, vmax=0.1)
-        # fig_sil = np.concatenate([np.array(fig_sil_rgb), np.array(fig_sil_disp)], axis=0)
-        # self.writers['train'].add_image('sil', torch.from_numpy(fig_sil).float() / 255, dataformats='HWC',global_step=self.step)
-        #
-        # fig_disp = tensor2disp(outputs[('disp', 0)], ind=viewIndex, vmax=0.1)
-        # fig_rgb = tensor2rgb(inputs[('color', 0, 0)], ind=viewIndex)
-        #
-        # combined1 = np.concatenate([np.array(fig_disp), np.array(fig_rgb)], axis=0)
-        #
-        # self.writers['train'].add_image('kitti', torch.from_numpy(combined1).float() / 255, dataformats = 'HWC', global_step = self.step)
-
         vind = 0
-        figs = list()
-        for m in range(len(self.ptspair) * 2):
-            if m % 2 == 0:
-                figs.append(np.array(tensor2disp(outputs[('disp', 0)][:,m:m+1,:,:], vmax = 1, ind = vind)))
-            else:
-                figs.append(np.array(tensor2disp(torch.abs(outputs[('disp', 0)][:, m:m + 1, :, :] - 1/2) * 2, vmax=1, ind=vind)))
-        figs = np.concatenate(figs, axis=0)
-        # pil.fromarray(figs).show()
-        self.writers['train'].add_image('pred', torch.from_numpy(figs).float() / 255, dataformats='HWC',global_step=self.step)
-
-        theta1 = outputs['theta1']
-        theta2 = outputs['theta2']
-        figsgt = list()
-        figsgt.append(np.array(tensor2disp(theta1[:,0:1,:,:] / 3.14, vmax = 1, ind = vind)))
-        figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 0:1, :, :]) / 3.14, vmax=1, ind=vind)))
-        figsgt.append(np.array(tensor2disp(theta1[:,1:2,:,:] / 3.14, vmax = 1, ind = vind)))
-        figsgt.append(np.array(tensor2disp(torch.abs(theta2[:, 1:2, :, :]) / 3.14, vmax=1, ind=vind)))
-        figsgt = np.concatenate(figsgt, axis=0)
-        # pil.fromarray(figsgt).show()
-        self.writers['train'].add_image('gt', torch.from_numpy(figsgt).float() / 255, dataformats='HWC',global_step=self.step)
-
+        figrgb = tensor2rgb(inputs['pSIL_rgb'], ind=vind)
+        figh = tensor2disp(outputs['htheta'] - outputs['htheta'].min(), percentile=95, ind=vind)
+        fighpred = tensor2disp(outputs['htheta_pred'] - outputs['htheta_pred'].min(), percentile=95, ind=vind)
+        figv = tensor2disp(outputs['vtheta'] - outputs['vtheta'].min(), percentile=95, ind=vind)
+        figvpred = tensor2disp(outputs['vtheta_pred'] - outputs['vtheta_pred'].min(), percentile=95, ind=vind)
+        figcombined = np.concatenate([np.array(figrgb), np.array(figh), np.array(fighpred), np.array(figv), np.array(figvpred)], axis=0)
+        self.writers['train'].add_image('rgb', torch.from_numpy(figcombined).float() / 255, dataformats='HWC', global_step=self.step)
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
         """

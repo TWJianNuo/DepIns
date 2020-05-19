@@ -211,6 +211,12 @@ class MonodepthOptions:
         self.parser.add_argument("--theta_scale",
                                  type=float,
                                  default=1)
+        self.parser.add_argument("--theta_constrain",
+                                 type=float,
+                                 default=1)
+        self.parser.add_argument("--localGeomMode",
+                                 type=str,
+                                 choices=["directSup", "ratioSup", "pathSup", "lidarSup"])
 
 
 

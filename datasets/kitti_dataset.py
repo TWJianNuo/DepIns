@@ -147,6 +147,7 @@ class KITTIRAWDataset(KITTIDataset):
 
         do_color_aug = self.is_train and random.random() > 0.5
         do_flip = self.is_train and random.random() > 0.5
+        # do_flip = True
 
         if do_color_aug:
             color_aug = transforms.ColorJitter.get_params(
