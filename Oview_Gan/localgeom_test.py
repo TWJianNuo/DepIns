@@ -8,8 +8,8 @@ import warnings
 
 import torch.optim as optim
 from torch.utils.data import DataLoader
-# from tensorboardX import SummaryWriter
-from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 writer = SummaryWriter('runs/fashion_mnist_experiment_1')
 
 from layers import *
