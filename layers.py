@@ -2499,11 +2499,9 @@ class LocalThetaDesp(nn.Module):
         lossh = self.lossh(ratiohl)
         gth = self.gth(depthmapl)
         indh = (self.gth((depthmap > 0).float()) == 0).float() * (self.lossh(outboundh) == 0).float()
-        hloss1 = torch.sum(torch.abs(gth - lossh) * indh * inboundh) / (torch.sum(indh * inboundh) + 1)
-        # hloss1 = torch.sum(torch.abs(gth - ratiohl.unsqueeze(1)) * inboundh * selector) / (torch.sum(inboundh * selector) + 1)
-        hloss2 = torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh) / (torch.sum(outboundh) + 1)
-
-
+        # hloss1 = torch.sum(torch.abs(gth - lossh) * indh * inboundh) / (torch.sum(indh * inboundh) + 1)
+        # hloss2 = torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh) / (torch.sum(outboundh) + 1)
+        hloss = (torch.sum(torch.abs(gth - lossh) * inboundh * indh) + torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh * indh) / 20) / (torch.sum(indh) + 1)
 
         inboundv = (vtheta < self.upperboundv) * (vtheta > self.lowerboundv)
         inboundv = inboundv.float()
@@ -2521,18 +2519,16 @@ class LocalThetaDesp(nn.Module):
         lossv = self.lossv(ratiovl)
         gtv = self.gtv(depthmapl)
         indv = (self.gtv((depthmap > 0).float()) == 0).float() * (self.lossv(outboundv) == 0).float()
-        vloss1 = torch.sum(torch.abs(gtv - lossv) * indv * inboundv) / (torch.sum(indv * inboundv) + 1)
-        # hloss1 = torch.sum(torch.abs(gth - ratiohl.unsqueeze(1)) * inboundh * selector) / (torch.sum(inboundh * selector) + 1)
-        vloss2 = torch.sum(torch.abs(self.middeltargetv - vtheta) * outboundv) / (torch.sum(outboundv) + 1)
-
+        # vloss1 = torch.sum(torch.abs(gtv - lossv) * indv * inboundv) / (torch.sum(indv * inboundv) + 1)
+        # vloss2 = torch.sum(torch.abs(self.middeltargetv - vtheta) * outboundv) / (torch.sum(outboundv) + 1)
+        vloss = (torch.sum(torch.abs(gtv - lossv) * indv * inboundv) + torch.sum(torch.abs(self.middeltargetv - vtheta) * indv * outboundv) / 20) / (torch.sum(indv) + 1)
 
         scl_pixelwise = self.selfconh(ratiohl) + self.selfconv(ratiovl)
         scl_mask = (self.selfconvInd(inboundv) == 2).float() * (self.selfconhInd(inboundh) == 2).float()
         scl = torch.sum(torch.abs(scl_pixelwise) * scl_mask) / (torch.sum(scl_mask) + 1)
 
-        hnum = torch.sum(outboundh)
-        vnum = torch.sum(outboundv)
-        return hloss1, hloss2, vloss1, vloss2, scl, hnum, vnum
+
+        return hloss, vloss, scl
 
     def mixed_loss(self, depthmap, htheta, vtheta):
         inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)

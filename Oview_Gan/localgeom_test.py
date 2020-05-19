@@ -325,39 +325,37 @@ class Trainer:
             # tensor2disp(outputs['vtheta_pred'] - vtheta_pred.min(), percentile=95, ind=0).show()
             # tensor2disp(vtheta - vtheta.min(), percentile=95, ind=0).show()
         elif self.opt.localGeomMode == 'pathSup':
-            for m in range(100):
-                outputs.update(self.models['depth'](self.models['encoder'](inputs['pSIL_rgb'])))
-                ltheta = 0
-                sclLoss = 0
-                # for i in range(len(self.opt.scales) - 1):
-                for i in range(1):
-                    pred_theta = outputs[('disp', i)]
-                    pred_theta = F.interpolate(pred_theta, [self.prsil_h, self.prsil_w], mode='bilinear', align_corners=True)
-                    pred_theta = pred_theta * float(np.pi) * 2
-                    htheta_pred = pred_theta[:, 0:1, :, :]
-                    vtheta_pred = pred_theta[:, 1:2, :, :]
-                    hloss1, hloss2, vloss1, vloss2, scl, hnum, vnum = self.localthetadesp.path_loss(depthmap=inputs['pSIL_depth'], htheta=htheta_pred, vtheta=vtheta_pred)
+            # for m in range(1000):
+            outputs.update(self.models['depth'](self.models['encoder'](inputs['pSIL_rgb'])))
+            ltheta = 0
+            sclLoss = 0
+            for i in range(len(self.opt.scales)):
+                pred_theta = outputs[('disp', i)]
+                pred_theta = F.interpolate(pred_theta, [self.prsil_h, self.prsil_w], mode='bilinear', align_corners=True)
+                pred_theta = pred_theta * float(np.pi) * 2
+                htheta_pred = pred_theta[:, 0:1, :, :]
+                vtheta_pred = pred_theta[:, 1:2, :, :]
+                hloss, vloss, scl = self.localthetadesp.path_loss(depthmap=inputs['pSIL_depth'], htheta=htheta_pred, vtheta=vtheta_pred)
 
-                    losses[('hloss1', i)] = hloss1
-                    losses[('hloss2', i)] = hloss2
-                    losses[('vloss1', i)] = vloss1
-                    losses[('vloss2', i)] = vloss2
-                    losses[('scl', i)] = scl
-                    losses[('hnum', i)] = hnum
-                    losses[('vnum', i)] = vnum
-                    if i == 0:
-                        outputs['htheta_pred'] = htheta_pred
-                        outputs['vtheta_pred'] = vtheta_pred
-                    ltheta = ltheta + (hloss1 + vloss1 + hloss2 * hnum / 1000 + vloss2 * vnum / 1000) / 2
-                    sclLoss = sclLoss + scl
-                ltheta = ltheta / 4
-                sclLoss = sclLoss / 4
-                losses['totLoss'] = ltheta * self.opt.theta_scale + sclLoss * self.opt.theta_constrain
-                self.model_optimizer.zero_grad()
-                losses['totLoss'].backward()
-                self.model_optimizer.step()
-                print(losses['totLoss'])
-            tensor2disp(pred_theta - pred_theta.min(), percentile=95, ind=0).show()
+                if i == 0:
+                    outputs['htheta_pred'] = htheta_pred
+                    outputs['vtheta_pred'] = vtheta_pred
+                    losses['hloss'] = hloss
+                    losses['vloss'] = vloss
+                    losses['scl'] = scl
+                ltheta = ltheta + (hloss + vloss) / 2
+                sclLoss = sclLoss + scl
+            ltheta = ltheta / 4
+            sclLoss = sclLoss / 4
+            losses['totLoss'] = ltheta * self.opt.theta_scale + sclLoss * self.opt.theta_constrain
+            # self.model_optimizer.zero_grad()
+            # losses['totLoss'].backward()
+            # self.model_optimizer.step()
+            # print(losses['totLoss'])
+            # tensor2disp(outputs['htheta_pred'] - htheta_pred.min(), percentile=95, ind=0).show()
+            # tensor2disp(htheta - htheta.min(), percentile=95, ind=0).show()
+            # tensor2disp(outputs['vtheta_pred'] - vtheta_pred.min(), percentile=95, ind=0).show()
+            # tensor2disp(vtheta - vtheta.min(), percentile=95, ind=0).show()
         return outputs, losses
 
     def val(self):
