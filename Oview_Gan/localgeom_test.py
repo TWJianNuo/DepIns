@@ -8,8 +8,8 @@ import warnings
 
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from tensorboardX import SummaryWriter
-# from torch.utils.tensorboard import SummaryWriter
+# from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 writer = SummaryWriter('runs/fashion_mnist_experiment_1')
 
 from layers import *
@@ -511,8 +511,8 @@ class Trainer:
         figv = tensor2disp(outputs['vtheta'] - outputs['vtheta'].min(), percentile=95, ind=vind)
         figvpred = tensor2disp(outputs['vtheta_pred'] - outputs['vtheta_pred'].min(), percentile=95, ind=vind)
         figcombined = np.concatenate([np.array(figrgb), np.array(figh), np.array(fighpred), np.array(figv), np.array(figvpred)], axis=0)
-        # self.writers['train'].add_image('rgb', torch.from_numpy(figcombined).float() / 255, dataformats='HWC', global_step=self.step)
-        self.writers['train'].add_image('rgb', torch.from_numpy(figcombined).float().permute([2,0,1]) / 255, self.step)
+        self.writers['train'].add_image('rgb', torch.from_numpy(figcombined).float() / 255, dataformats='HWC', global_step=self.step)
+        # self.writers['train'].add_image('rgb', torch.from_numpy(figcombined).float().permute([2,0,1]) / 255, self.step)
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
         """
