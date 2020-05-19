@@ -220,7 +220,7 @@ class KITTIRAWDataset(KITTIDataset):
 
         preSilIn = scaleM @ intrinsic
         preSilEx = Tr_velo_to_cam
-        return self.to_tensor(rgb), torch.from_numpy(depth).unsqueeze(0).float(), torch.from_numpy(insMask).float().unsqueeze(0), torch.from_numpy(preSilIn).float(), torch.from_numpy(preSilEx).float()
+        return self.to_tensor(rgb), torch.from_numpy(depth).unsqueeze(0).float(), torch.from_numpy(insMask.astype(np.float32)).float().unsqueeze(0), torch.from_numpy(preSilIn).float(), torch.from_numpy(preSilEx).float()
 
     def get_image_path(self, folder, frame_index, side):
         f_str = "{:010d}{}".format(frame_index, self.img_ext)
