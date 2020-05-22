@@ -135,10 +135,11 @@ class MonoDataset(data.Dataset):
         else:
             self.kitti_gt_path = None
 
-        if kitti_gt_path is not 'None':
-            self.theta_gt_path = theta_gt_path
-        else:
-            self.theta_gt_path = None
+        # if kitti_gt_path is not 'None':
+        #     self.theta_gt_path = theta_gt_path
+        # else:
+        #     self.theta_gt_path = None
+        self.theta_gt_path = None
 
 
     def preprocess(self, inputs, color_aug):
@@ -283,6 +284,11 @@ class MonoDataset(data.Dataset):
                 depth_gt = self.get_depth(folder, frame_index, side, do_flip)
             else:
                 depth_gt = self.get_depth_fromfile(folder, frame_index, side, do_flip)
+            # depth_gt = self.get_depth(folder, frame_index, side, do_flip)
+            # depth_gt_me = self.get_depth_fromfile(folder, frame_index, side, do_flip)
+            # tensor2disp(torch.from_numpy(depth_gt).float().unsqueeze(0).unsqueeze(0), vmax = 30, ind = 0).show()
+            # tensor2disp(torch.from_numpy(depth_gt_me).float().unsqueeze(0).unsqueeze(0), vmax=30, ind=0).show()
+            # tensor2disp(torch.abs(torch.from_numpy(depth_gt_me) - torch.from_numpy(depth_gt).float()).unsqueeze(0).unsqueeze(0), vmax=1, ind = 0).show()
             inputs["depth_gt"] = np.expand_dims(depth_gt, 0)
             inputs["depth_gt"] = torch.from_numpy(inputs["depth_gt"].astype(np.float32))
 
@@ -315,12 +321,13 @@ class MonoDataset(data.Dataset):
         inputs['indicesRec'] = index
 
         if self.PreSIL_root is not None:
-            pSIL_rgb, pSIL_depth, pSIL_insMask, preSilIn, preSilEx = self.get_PreSIL()
+            pSIL_rgb, pSIL_depth, pSIL_insMask, preSilIn, preSilEx, presil_projLidar = self.get_PreSIL()
             inputs["pSIL_rgb"] = pSIL_rgb
             inputs["pSIL_depth"] = pSIL_depth
             inputs["pSIL_insMask"] = pSIL_insMask
             inputs["preSilIn"] = preSilIn
             inputs["preSilEx"] = preSilEx
+            inputs["presil_projLidar"] = presil_projLidar
 
         if self.theta_gt_path is not None:
             inputs["thetagt"] = self.get_theta_fromfile(folder, frame_index, side, do_flip)

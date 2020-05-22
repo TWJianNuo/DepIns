@@ -216,7 +216,9 @@ class MonodepthOptions:
                                  default=1)
         self.parser.add_argument("--localGeomMode",
                                  type=str,
-                                 choices=["directSup", "ratioSup", "pathSup", "lidarSup"])
+                                 choices=["directSup", "ratioSup", "pathSup", "lidarSup", "lidarSupKitti"])
+        self.parser.add_argument("--addDepthBranch",
+                                 action="store_true")
 
 
 

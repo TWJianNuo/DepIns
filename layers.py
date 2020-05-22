@@ -2131,8 +2131,11 @@ class LocalThetaDesp(nn.Module):
         self.height = height
         self.width = width
         self.batch_size = batch_size
-        self.boundStabh = 0.1
-        self.boundStabv = 0.05
+        # self.boundStabh = 0.1
+        # self.boundStabv = 0.03
+
+        self.boundStabh = 0.02
+        self.boundStabv = 0.02
         self.invIn = nn.Parameter(torch.from_numpy(np.linalg.inv(intrinsic)).float(), requires_grad = False)
         # self.ptspair = ptspair
 
@@ -2263,34 +2266,57 @@ class LocalThetaDesp(nn.Module):
 
         lossh = torch.Tensor(
             [[0,1,1,0,0],
+             [1, 1, 1, 0, 0],
              [1, 1, 1, 1, 0],
             ]
         )
         gth = torch.Tensor(
             [[0,-1,0,1,0],
+             [-1, 0, 0, 1, 0],
              [-1, 0, 0, 0, 1],
             ]
         )
-        self.lossh = torch.nn.Conv2d(1, 2, [1,5], padding=[0,2], bias=False)
+        idh = torch.Tensor(
+            [[0,1,0,1,0],
+             [1, 0, 0, 1, 0],
+             [1, 0, 0, 0, 1],
+            ]
+        )
+        self.lossh = torch.nn.Conv2d(1, 3, [1,5], padding=[0,2], bias=False)
         self.lossh.weight = torch.nn.Parameter(lossh.unsqueeze(1).unsqueeze(1).float(), requires_grad=False)
-        self.gth = torch.nn.Conv2d(1, 2, [1,5], padding=[0,2], bias=False)
+        self.gth = torch.nn.Conv2d(1, 3, [1,5], padding=[0,2], bias=False)
         self.gth.weight = torch.nn.Parameter(gth.unsqueeze(1).unsqueeze(1).float(), requires_grad=False)
+        self.idh = torch.nn.Conv2d(1, 3, [1,5], padding=[0,2], bias=False)
+        self.idh.weight = torch.nn.Parameter(idh.unsqueeze(1).unsqueeze(1).float(), requires_grad=False)
 
 
         lossv = torch.Tensor(
-            [[0,1,1,0,0],
-             [1, 1, 1, 1, 0],
+            [[1, 1, 1, 0, 0, 0, 0],
+             [1, 1, 1, 1, 0, 0, 0],
+             [1, 1, 1, 1, 1, 0, 0],
+             [1, 1, 1, 1, 1, 1, 0],
             ]
         )
         gtv = torch.Tensor(
-            [[0,-1,0,1,0],
-             [-1, 0, 0, 0, 1],
+            [[-1, 0, 0, 1, 0, 0, 0],
+             [-1, 0, 0, 0, 1, 0, 0],
+             [-1, 0, 0, 0, 0, 1, 0],
+             [-1, 0, 0, 0, 0, 0, 1],
             ]
         )
-        self.lossv = torch.nn.Conv2d(1, 2, [5,1], padding=[2,0], bias=False)
+        idv = torch.Tensor(
+            [[1, 0, 0, 1, 0, 0, 0],
+             [1, 0, 0, 0, 1, 0, 0],
+             [1, 0, 0, 0, 0, 1, 0],
+             [1, 0, 0, 0, 0, 0, 1],
+            ]
+        )
+        self.lossv = torch.nn.Conv2d(1, 4, [7,1], padding=[3,0], bias=False)
         self.lossv.weight = torch.nn.Parameter(lossv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
-        self.gtv = torch.nn.Conv2d(1, 2, [5,1], padding=[2,0], bias=False)
+        self.gtv = torch.nn.Conv2d(1, 4, [7,1], padding=[3,0], bias=False)
         self.gtv.weight = torch.nn.Parameter(gtv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
+        self.idv = torch.nn.Conv2d(1, 4, [7,1], padding=[3,0], bias=False)
+        self.idv.weight = torch.nn.Parameter(idv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
 
         selfconh = torch.Tensor(
             [[0, 0, 0],
@@ -2329,6 +2355,163 @@ class LocalThetaDesp(nn.Module):
         # scl_ind = (selfconhInd(torch.ones([self.batch_size, 1, self.height, self.width])) == 2).float() * (selfconvInd(torch.ones([self.batch_size, 1, self.height, self.width])) == 2).float()
         # self.scl_ind = nn.Parameter(scl_ind, requires_grad = False)
         # tensor2disp(scl_ind == 0, ind = 0, vmax = 1).show()
+
+        # denseih = torch.Tensor(
+        #     [
+        #         [[0, 0, 0, 0, 0],
+        #         [0, 0, 0, 0, 0],
+        #         [1, 1, 0, 0, 0],
+        #         [0, 0, 0, 0, 0],
+        #         [0, 0, 0, 0, 0]],
+        #
+        #         [[0, 0, 0, 0, 0],
+        #         [0, 0, 0, 0, 0],
+        #         [1, 0, 1, 0, 0],
+        #         [0, 0, 0, 0, 0],
+        #         [0, 0, 0, 0, 0]],
+        #
+        #         [[0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [1, 0, 0, 1, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #
+        #         [[0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [1, 0, 0, 0, 1],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #
+        #         [[0, 0, 1, 0, 0],
+        #          [0, 0, 1, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #
+        #         [[0, 0, 1, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 1, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #
+        #         [[0, 0, 1, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 1, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #
+        #         [[0, 0, 1, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 1, 0, 0]],
+        #
+        #         [[1, 0, 0, 0, 0],
+        #          [0, 1, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #
+        #         [[1, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 1, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #
+        #         [[1, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 1, 0],
+        #          [0, 0, 0, 0, 0]],
+        #
+        #         [[1, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 1]],
+        #
+        #         [[0, 0, 0, 0, 1],
+        #          [0, 0, 0, 1, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #
+        #         [[0, 0, 0, 0, 1],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 1, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #
+        #         [[0, 0, 0, 0, 1],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 1, 0, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #
+        #         [[0, 0, 0, 0, 1],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 0],
+        #          [1, 0, 0, 0, 0]]
+        #     ]
+        # )
+
+        # indh = torch.Tensor(
+        #     [
+        #         [[1, 1, 0, 0, 0]],
+        #         [[1, 0, 1, 0, 0]],
+        #         [[1, 0, 0, 1, 0]],
+        #         [[1, 0, 0, 0, 1]]
+        #     ]
+        # )
+        # indv = torch.Tensor(
+        #     [
+        #         [[1, 1, 0, 0, 0]],
+        #         [[1, 0, 1, 0, 0]],
+        #         [[1, 0, 0, 1, 0]],
+        #         [[1, 0, 0, 0, 1]]
+        #     ]
+        # )
+        # indm = torch.Tensor(
+        #     [
+        #         [[1, 0, 0, 0, 0],
+        #          [0, 1, 0, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #         [[1, 0, 0, 0, 0],
+        #          [0, 0, 1, 0, 0],
+        #          [0, 0, 0, 0, 0]],
+        #         [[1, 0, 0, 0, 0],
+        #          [0, 0, 0, 1, 0],
+        #          [0, 0, 0, 0, 0]],
+        #         [[1, 0, 0, 0, 0],
+        #          [0, 0, 0, 0, 1],
+        #          [0, 0, 0, 0, 0]],
+        #     ]
+        # )
+        # # self.denseih = torch.nn.Conv2d(in_channels=1, out_channels=denseih.shape[0], kernel_size = [5,5], padding=[2,2], bias=False)
+        # # self.denseih.weight = torch.nn.Parameter(denseih.unsqueeze(1).float(), requires_grad=False)
+        # denseh = torch.Tensor(
+        #     [
+        #         [[1, 1, 1, 1, 1],
+        #          [1, 1, 1, 1, 1],
+        #          [1, 1, 1, 1, 1]]
+        #     ]
+        # )
+        # self.denseh = torch.nn.Conv2d(in_channels=1, out_channels=denseh.shape[0], kernel_size = [3,5], padding=[1,2], bias=False)
+        # self.denseh.weight = torch.nn.Parameter(denseh.unsqueeze(1).float(), requires_grad=False)
+        # self.denseh = self.denseh.cuda()
+        #
+        # densev = torch.Tensor(
+        #     [
+        #         [[1, 1, 1, 1, 1],
+        #          [1, 1, 1, 1, 1],
+        #          [1, 1, 1, 1, 1]]
+        #     ]
+        # ).transpose(1,2)
+        # self.densev = torch.nn.Conv2d(in_channels=1, out_channels=densev.shape[0], kernel_size = [5,3], padding=[2,1], bias=False)
+        # self.densev.weight = torch.nn.Parameter(densev.unsqueeze(1).float(), requires_grad=False)
+        # self.densev = self.densev.cuda()
+
     def get_loss_ratio(self, depthmap, ratiohl, ratiovl):
         depthmap_shifth = torch.clamp(self.copylConv(depthmap), min = 1e-3)
         gth = torch.log(depthmap_shifth) - torch.log(depthmap)
@@ -2482,7 +2665,8 @@ class LocalThetaDesp(nn.Module):
         # gtv = self.gtv(depthmapl)
         # indv = (self.gtv((depthmap > 0).float()) == 0).float()
         # slossv = torch.sum(torch.abs(gtv - lossv) * indv) / (torch.sum(indv) + 1)
-        depthmapl = torch.log(depthmap)
+        depthmapl = torch.log(torch.clamp(depthmap, min = 1e-3))
+        # depthmapl = torch.log(depthmap)
         inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)
         inboundh = inboundh.float()
         outboundh = 1 - inboundh
@@ -2498,7 +2682,10 @@ class LocalThetaDesp(nn.Module):
         # selector = ((depthmap_shifth > 1e-2) * (ratiohl.unsqueeze(1) > float(np.log(1e-3) + 1))).float()
         lossh = self.lossh(ratiohl)
         gth = self.gth(depthmapl)
-        indh = (self.gth((depthmap > 0).float()) == 0).float() * (self.lossh(outboundh) == 0).float()
+        indh = (self.idh((depthmap > 0).float()) == 2).float() * (self.lossh(outboundh) == 0).float()
+        # tensor2disp(indh[:,0:1,:,:], ind = 0, vmax = 1).show()
+        # tensor2disp(indh[:, 1:2, :, :], ind=0, vmax=1).show()
+        # tensor2disp(indh[:, 2:3, :, :], ind=0, vmax=1).show()
         # hloss1 = torch.sum(torch.abs(gth - lossh) * indh * inboundh) / (torch.sum(indh * inboundh) + 1)
         # hloss2 = torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh) / (torch.sum(outboundh) + 1)
         hloss = (torch.sum(torch.abs(gth - lossh) * inboundh * indh) + torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh * indh) / 20) / (torch.sum(indh) + 1)
@@ -2518,7 +2705,11 @@ class LocalThetaDesp(nn.Module):
         # selector = ((depthmap_shifth > 1e-2) * (ratiohl.unsqueeze(1) > float(np.log(1e-3) + 1))).float()
         lossv = self.lossv(ratiovl)
         gtv = self.gtv(depthmapl)
-        indv = (self.gtv((depthmap > 0).float()) == 0).float() * (self.lossv(outboundv) == 0).float()
+        indv = (self.idv((depthmap > 0).float()) == 2).float() * (self.lossv(outboundv) == 0).float()
+        # tensor2disp(indv[:,0:1,:,:], ind = 0, vmax = 1).show()
+        # tensor2disp(indv[:, 1:2, :, :], ind=0, vmax=1).show()
+        # tensor2disp(indv[:, 2:3, :, :], ind=0, vmax=1).show()
+        # tensor2disp(indv[:, 3:4, :, :], ind=0, vmax=1).show()
         # vloss1 = torch.sum(torch.abs(gtv - lossv) * indv * inboundv) / (torch.sum(indv * inboundv) + 1)
         # vloss2 = torch.sum(torch.abs(self.middeltargetv - vtheta) * outboundv) / (torch.sum(outboundv) + 1)
         vloss = (torch.sum(torch.abs(gtv - lossv) * indv * inboundv) + torch.sum(torch.abs(self.middeltargetv - vtheta) * indv * outboundv) / 20) / (torch.sum(indv) + 1)
@@ -2527,6 +2718,20 @@ class LocalThetaDesp(nn.Module):
         scl_mask = (self.selfconvInd(inboundv) == 2).float() * (self.selfconhInd(inboundh) == 2).float()
         scl = torch.sum(torch.abs(scl_pixelwise) * scl_mask) / (torch.sum(scl_mask) + 1)
 
+        # denseihvls = (self.denseh((depthmap > 0).float()) > 1).float()
+        # tensor2disp(denseihvls, ind=0, vmax=1).show()
+        # denseivvls = (self.densev((depthmap > 0).float()) > 1).float()
+        # tensor2disp(denseivvls, ind=0, vmax=1).show()
+        # indhvls = torch.zeros([1,1,self.height,self.width]).cuda()
+        # for i in range(denseihvls.shape[1]):
+        #     indhvls = indhvls + denseihvls[0:1,i:i+1,:,:]
+        # tensor2disp(indhvls, ind=0, vmax=1).show()
+        # indh = (self.gth((depthmap > 0).float()) == 0) * (depthmap > 0)
+        # for k in range(indh.shape[1]):
+        #     indhvls = indhvls + indh[0:1,k:k+1,:,:].float()
+        # tensor2disp(indhvls, ind = 0, vmax = 1).show()
+        # tensor2disp(indh[:,0:1,:,:], ind=0, vmax=1).show()
+        # tensor2disp(indh[:,1:2,:,:], ind=0, vmax=1).show()
 
         return hloss, vloss, scl
 

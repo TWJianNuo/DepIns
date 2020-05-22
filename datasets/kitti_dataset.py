@@ -76,7 +76,7 @@ class KITTIRAWDataset(KITTIDataset):
         depthmap = depthmap.resize(self.full_res_shape, pil.NEAREST)
         if do_flip:
             depthmap = depthmap.transpose(Image.FLIP_LEFT_RIGHT)
-        depthmap = np.array(depthmap).astype(np.uint16)
+        depthmap = np.array(depthmap).astype(np.float32) / 256
 
         return depthmap
 
@@ -139,15 +139,68 @@ class KITTIRAWDataset(KITTIDataset):
         rgb_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'rgb', "{:06d}.png".format(index))
         depth_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'depth', "{:06d}.png".format(index))
         ins_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'ins', "{:06d}.png".format(index))
+        proj_lidar_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'prohjlidar', "{:06d}.png".format(index))
+        # lidar_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'lidar', "{:06d}.bin".format(index))
 
         rgb = pil.open(rgb_path)
         depth = pil.open(depth_path)
         ins = pil.open(ins_path)
+        proj_lidar = pil.open(proj_lidar_path)
         boxlabel = [int(x) for x in random.choice(lines)[:-1].split(' ')]
+
+        scaleM = np.array([
+            [1024 / 1920, 0, 0, 0],
+            [0, 576 / 1080, -128, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
+
+        Tr_velo_to_cam = np.array([
+            [0, -1, 0, 0],
+            [0, 0, -1, 0],
+            [1, 0, 0, 0],
+            [0, 0, 0, 1]
+        ])
+
+        intrinsic = np.array([
+            [960, 0, 960, 0],
+            [0, 960, 540, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
+
+        preSilIn = scaleM @ intrinsic
+        preSilEx = Tr_velo_to_cam
+
+        # velo = load_velodyne_points(lidar_path)
+        # velo = velo[velo[:, 0] >= 0, :]
+        # projectedVelo = (preSilIn @ preSilEx @ velo.T).T
+        # projectedVelo[:,0] = projectedVelo[:,0] / projectedVelo[:,2]
+        # projectedVelo[:, 1] = projectedVelo[:, 1] / projectedVelo[:, 2]
+        #
+        # import matlab
+        # import matlab.engine
+        # eng = matlab.engine.start_matlab()
+        # drawx = velo[:,0]
+        # drawy = velo[:,1]
+        # drawz = velo[:,2]
+        # drawx = matlab.double(drawx.tolist())
+        # drawy = matlab.double(drawy.tolist())
+        # drawz = matlab.double(drawz.tolist())
+        # eng.scatter3(drawx, drawy, drawz, 5, '.', nargout=0)
+        # eng.eval('hold on', nargout=0)
+        # eng.eval('axis equal', nargout=0)
+        # # xlim = matlab.double([0, 50])
+        # # ylim = matlab.double([-10, 10])
+        # # zlim = matlab.double([-5, 5])
+        # # eng.xlim(xlim, nargout=0)
+        # # eng.ylim(ylim, nargout=0)
+        # # eng.zlim(zlim, nargout=0)
+
 
         do_color_aug = self.is_train and random.random() > 0.5
         do_flip = self.is_train and random.random() > 0.5
-        # do_flip = True
+
 
         if do_color_aug:
             color_aug = transforms.ColorJitter.get_params(
@@ -158,6 +211,7 @@ class KITTIRAWDataset(KITTIDataset):
             rgb = rgb.transpose(Image.FLIP_LEFT_RIGHT)
             depth = depth.transpose(Image.FLIP_LEFT_RIGHT)
             ins = ins.transpose(Image.FLIP_LEFT_RIGHT)
+            proj_lidar = proj_lidar.transpose(Image.FLIP_LEFT_RIGHT)
             boxlabel = [boxlabel[0], self.prsil_w - boxlabel[2], self.prsil_w - boxlabel[1], boxlabel[3], boxlabel[4]]
 
         if do_crop:
@@ -197,30 +251,9 @@ class KITTIRAWDataset(KITTIDataset):
             insMask = insMask > 0
             # tensor2disp(torch.from_numpy(insMask).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
 
-        scaleM = np.array([
-            [1024 / 1920, 0, 0, 0],
-            [0, 576 / 1080, -128, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]
-        ])
+        proj_lidar = np.array(proj_lidar).astype(np.float32) / 256
 
-        Tr_velo_to_cam = np.array([
-            [0, -1, 0, 0],
-            [0, 0, -1, 0],
-            [1, 0, 0, 0],
-            [0, 0, 0, 1]
-        ])
-
-        intrinsic = np.array([
-            [960, 0, 960, 0],
-            [0, 960, 540, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]
-        ])
-
-        preSilIn = scaleM @ intrinsic
-        preSilEx = Tr_velo_to_cam
-        return self.to_tensor(rgb), torch.from_numpy(depth).unsqueeze(0).float(), torch.from_numpy(insMask.astype(np.float32)).float().unsqueeze(0), torch.from_numpy(preSilIn).float(), torch.from_numpy(preSilEx).float()
+        return self.to_tensor(rgb), torch.from_numpy(depth).unsqueeze(0).float(), torch.from_numpy(insMask.astype(np.float32)).float().unsqueeze(0), torch.from_numpy(preSilIn).float(), torch.from_numpy(preSilEx).float(), torch.from_numpy(proj_lidar).unsqueeze(0)
 
     def get_image_path(self, folder, frame_index, side):
         f_str = "{:010d}{}".format(frame_index, self.img_ext)
