@@ -2126,7 +2126,7 @@ class MulScaleBCELoss(nn.Module):
 
 
 class LocalThetaDesp(nn.Module):
-    def __init__(self, height, width, batch_size, intrinsic):
+    def __init__(self, height, width, batch_size, intrinsic, extrinsic = None, STEREO_SCALE_FACTOR = 5.4, minDepth = 0.1, maxDepth = 100):
         super(LocalThetaDesp, self).__init__()
         self.height = height
         self.width = width
@@ -2290,32 +2290,67 @@ class LocalThetaDesp(nn.Module):
         self.idh.weight = torch.nn.Parameter(idh.unsqueeze(1).unsqueeze(1).float(), requires_grad=False)
 
 
+        # lossv = torch.Tensor(
+        #     [[1, 1, 1, 0, 0, 0, 0],
+        #      [1, 1, 1, 1, 0, 0, 0],
+        #      [1, 1, 1, 1, 1, 0, 0],
+        #      [1, 1, 1, 1, 1, 1, 0],
+        #     ]
+        # )
+        # gtv = torch.Tensor(
+        #     [[-1, 0, 0, 1, 0, 0, 0],
+        #      [-1, 0, 0, 0, 1, 0, 0],
+        #      [-1, 0, 0, 0, 0, 1, 0],
+        #      [-1, 0, 0, 0, 0, 0, 1],
+        #     ]
+        # )
+        # idv = torch.Tensor(
+        #     [[1, 0, 0, 1, 0, 0, 0],
+        #      [1, 0, 0, 0, 1, 0, 0],
+        #      [1, 0, 0, 0, 0, 1, 0],
+        #      [1, 0, 0, 0, 0, 0, 1],
+        #     ]
+        # )
+        # self.lossv = torch.nn.Conv2d(1, 4, [7,1], padding=[3,0], bias=False)
+        # self.lossv.weight = torch.nn.Parameter(lossv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
+        # self.gtv = torch.nn.Conv2d(1, 4, [7,1], padding=[3,0], bias=False)
+        # self.gtv.weight = torch.nn.Parameter(gtv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
+        # self.idv = torch.nn.Conv2d(1, 4, [7,1], padding=[3,0], bias=False)
+        # self.idv.weight = torch.nn.Parameter(idv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
+
+
         lossv = torch.Tensor(
-            [[1, 1, 1, 0, 0, 0, 0],
-             [1, 1, 1, 1, 0, 0, 0],
-             [1, 1, 1, 1, 1, 0, 0],
-             [1, 1, 1, 1, 1, 1, 0],
+            [[1, 1, 1, 0, 0, 0, 0, 0, 0],
+             [1, 1, 1, 1, 0, 0, 0, 0, 0],
+             [1, 1, 1, 1, 1, 0, 0, 0, 0],
+             [1, 1, 1, 1, 1, 1, 0, 0, 0],
+             [1, 1, 1, 1, 1, 1, 1, 0, 0],
+             [1, 1, 1, 1, 1, 1, 1, 1, 0],
             ]
         )
         gtv = torch.Tensor(
-            [[-1, 0, 0, 1, 0, 0, 0],
-             [-1, 0, 0, 0, 1, 0, 0],
-             [-1, 0, 0, 0, 0, 1, 0],
-             [-1, 0, 0, 0, 0, 0, 1],
+            [[-1, 0, 0, 1, 0, 0, 0, 0, 0],
+             [-1, 0, 0, 0, 1, 0, 0, 0, 0],
+             [-1, 0, 0, 0, 0, 1, 0, 0, 0],
+             [-1, 0, 0, 0, 0, 0, 1, 0, 0],
+             [-1, 0, 0, 0, 0, 0, 0, 1, 0],
+             [-1, 0, 0, 0, 0, 0, 0, 0, 1],
             ]
         )
         idv = torch.Tensor(
-            [[1, 0, 0, 1, 0, 0, 0],
-             [1, 0, 0, 0, 1, 0, 0],
-             [1, 0, 0, 0, 0, 1, 0],
-             [1, 0, 0, 0, 0, 0, 1],
+            [[1, 0, 0, 1, 0, 0, 0, 0, 0],
+             [1, 0, 0, 0, 1, 0, 0, 0, 0],
+             [1, 0, 0, 0, 0, 1, 0, 0, 0],
+             [1, 0, 0, 0, 0, 0, 1, 0, 0],
+             [1, 0, 0, 0, 0, 0, 0, 1, 0],
+             [1, 0, 0, 0, 0, 0, 0, 0, 1],
             ]
         )
-        self.lossv = torch.nn.Conv2d(1, 4, [7,1], padding=[3,0], bias=False)
+        self.lossv = torch.nn.Conv2d(1, 6, [9,1], padding=[4,0], bias=False)
         self.lossv.weight = torch.nn.Parameter(lossv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
-        self.gtv = torch.nn.Conv2d(1, 4, [7,1], padding=[3,0], bias=False)
+        self.gtv = torch.nn.Conv2d(1, 6, [9,1], padding=[4,0], bias=False)
         self.gtv.weight = torch.nn.Parameter(gtv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
-        self.idv = torch.nn.Conv2d(1, 4, [7,1], padding=[3,0], bias=False)
+        self.idv = torch.nn.Conv2d(1, 6, [9,1], padding=[4,0], bias=False)
         self.idv.weight = torch.nn.Parameter(idv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
 
         selfconh = torch.Tensor(
@@ -2352,109 +2387,75 @@ class LocalThetaDesp(nn.Module):
         self.selfconvInd = torch.nn.Conv2d(1, 1, 3, padding=1, bias=False)
         self.selfconvInd.weight = torch.nn.Parameter(selfconvIndW.unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
 
+
+
+        phopath = torch.Tensor(
+            [
+                [[1, 1, 0],
+                 [0, 1, 0],
+                 [0, 0, 0]],
+
+                [[1, 0, 0],
+                 [1, 1, 0],
+                 [0, 0, 0]],
+
+                [[0, 0, 0],
+                 [0, 1, 0],
+                 [1, 1, 0]],
+
+                [[0, 0, 0],
+                 [1, 1, 0],
+                 [1, 0, 0]],
+
+                [[0, 0, 0],
+                 [0, 1, 0],
+                 [0, 1, 1]],
+
+                [[0, 0, 0],
+                 [0, 1, 1],
+                 [0, 0, 1]],
+
+                [[0, 1, 1],
+                 [0, 1, 0],
+                 [0, 0, 0]],
+
+                [[0, 0, 1],
+                 [0, 1, 1],
+                 [0, 0, 0]],
+
+                [[0, 1, 0],
+                 [0, 1, 0],
+                 [0, 0, 0]],
+
+                [[0, 0, 0],
+                 [1, 1, 0],
+                 [0, 0, 0]],
+
+                [[0, 0, 0],
+                 [0, 1, 0],
+                 [0, 1, 0]],
+
+                [[0, 0, 0],
+                 [0, 1, 1],
+                 [0, 0, 0]],
+            ]
+        )
+        phoind, phowh, phowv, phosel = self.translate_path(phopath)
+
+        self.phoind = torch.nn.Conv2d(in_channels=1, out_channels=phoind.shape[0], kernel_size = 3, padding = 1, bias=False)
+        self.phoind.weight = nn.Parameter(phoind.unsqueeze(1), requires_grad = False)
+
+        self.phowh = torch.nn.Conv2d(in_channels=1, out_channels=phowh.shape[0], kernel_size = 3, padding = 1, bias=False)
+        self.phowh.weight = nn.Parameter(phowh.unsqueeze(1), requires_grad=False)
+
+        self.phowv = torch.nn.Conv2d(in_channels=1, out_channels=phowv.shape[0], kernel_size = 3, padding = 1, bias=False)
+        self.phowv.weight = nn.Parameter(phowv.unsqueeze(1), requires_grad=False)
+
+        self.phosel = torch.nn.Conv2d(in_channels=1, out_channels=phosel.shape[0], kernel_size = 3, padding = 1, bias=False)
+        self.phosel.weight = nn.Parameter(phosel.unsqueeze(1), requires_grad=False)
         # scl_ind = (selfconhInd(torch.ones([self.batch_size, 1, self.height, self.width])) == 2).float() * (selfconvInd(torch.ones([self.batch_size, 1, self.height, self.width])) == 2).float()
         # self.scl_ind = nn.Parameter(scl_ind, requires_grad = False)
         # tensor2disp(scl_ind == 0, ind = 0, vmax = 1).show()
-
-        # denseih = torch.Tensor(
-        #     [
-        #         [[0, 0, 0, 0, 0],
-        #         [0, 0, 0, 0, 0],
-        #         [1, 1, 0, 0, 0],
-        #         [0, 0, 0, 0, 0],
-        #         [0, 0, 0, 0, 0]],
-        #
-        #         [[0, 0, 0, 0, 0],
-        #         [0, 0, 0, 0, 0],
-        #         [1, 0, 1, 0, 0],
-        #         [0, 0, 0, 0, 0],
-        #         [0, 0, 0, 0, 0]],
-        #
-        #         [[0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [1, 0, 0, 1, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #
-        #         [[0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [1, 0, 0, 0, 1],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #
-        #         [[0, 0, 1, 0, 0],
-        #          [0, 0, 1, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #
-        #         [[0, 0, 1, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 1, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #
-        #         [[0, 0, 1, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 1, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #
-        #         [[0, 0, 1, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 1, 0, 0]],
-        #
-        #         [[1, 0, 0, 0, 0],
-        #          [0, 1, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #
-        #         [[1, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 1, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #
-        #         [[1, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 1, 0],
-        #          [0, 0, 0, 0, 0]],
-        #
-        #         [[1, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 1]],
-        #
-        #         [[0, 0, 0, 0, 1],
-        #          [0, 0, 0, 1, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #
-        #         [[0, 0, 0, 0, 1],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 1, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #
-        #         [[0, 0, 0, 0, 1],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 1, 0, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #
-        #         [[0, 0, 0, 0, 1],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 0],
-        #          [1, 0, 0, 0, 0]]
-        #     ]
-        # )
 
         # indh = torch.Tensor(
         #     [
@@ -2490,27 +2491,156 @@ class LocalThetaDesp(nn.Module):
         # )
         # # self.denseih = torch.nn.Conv2d(in_channels=1, out_channels=denseih.shape[0], kernel_size = [5,5], padding=[2,2], bias=False)
         # # self.denseih.weight = torch.nn.Parameter(denseih.unsqueeze(1).float(), requires_grad=False)
+
         # denseh = torch.Tensor(
         #     [
-        #         [[1, 1, 1, 1, 1],
-        #          [1, 1, 1, 1, 1],
-        #          [1, 1, 1, 1, 1]]
+        #         [[1, 1, 1, 1, 1]]
         #     ]
         # )
-        # self.denseh = torch.nn.Conv2d(in_channels=1, out_channels=denseh.shape[0], kernel_size = [3,5], padding=[1,2], bias=False)
+        # self.denseh = torch.nn.Conv2d(in_channels=1, out_channels=denseh.shape[0], kernel_size = [1,5], padding=[0,2], bias=False)
         # self.denseh.weight = torch.nn.Parameter(denseh.unsqueeze(1).float(), requires_grad=False)
         # self.denseh = self.denseh.cuda()
         #
         # densev = torch.Tensor(
         #     [
-        #         [[1, 1, 1, 1, 1],
-        #          [1, 1, 1, 1, 1],
-        #          [1, 1, 1, 1, 1]]
+        #         [[1, 1, 1, 1, 1, 1, 1]]
         #     ]
         # ).transpose(1,2)
-        # self.densev = torch.nn.Conv2d(in_channels=1, out_channels=densev.shape[0], kernel_size = [5,3], padding=[2,1], bias=False)
+        # self.densev = torch.nn.Conv2d(in_channels=1, out_channels=densev.shape[0], kernel_size = [7,1], padding=[3,0], bias=False)
         # self.densev.weight = torch.nn.Parameter(densev.unsqueeze(1).float(), requires_grad=False)
         # self.densev = self.densev.cuda()
+        #
+        #
+        # dense = torch.Tensor(
+        #     [
+        #         [[1, 1, 1],
+        #          [1, 1, 1],
+        #          [1, 1, 1]]
+        #     ]
+        # )
+        # self.dense = torch.nn.Conv2d(in_channels=1, out_channels=dense.shape[0], kernel_size = [3,3], padding=[1,1], bias=False)
+        # self.dense.weight = torch.nn.Parameter(dense.unsqueeze(1).float(), requires_grad=False)
+        # self.dense = self.dense.cuda()
+
+    def translate_path(self, phopath):
+        phoind = list()
+        phosel = list()
+        phowh = list()
+        phowv = list()
+        wh = phopath.shape[1]
+        ww = phopath.shape[2]
+        accOrder = np.array([[5,2,6],
+                             [1,0,3],
+                             [8,4,7]])
+        accxx, accyy = np.meshgrid(np.arange(wh), np.arange(ww))
+        accOrder = accOrder.flatten()
+        accxx = accxx.flatten()
+        accyy = accyy.flatten()
+        acc = np.stack([accxx, accyy, accOrder], axis=0).transpose()
+        acc = acc[np.argsort(acc[:,2]), :]
+        for i in range(phopath.shape[0]):
+            curpath = phopath[i]
+            curphoind = torch.zeros([wh,ww])
+            curpho_h = torch.zeros([wh, ww])
+            curpho_v = torch.zeros([wh, ww])
+            curphosel = torch.zeros([wh, ww])
+            count = 0
+
+            curx = ww
+            cury = wh
+            for m in range(acc.shape[0]):
+                if curpath[acc[m, 1], acc[m, 0]] == 1:
+                    lastx = curx
+                    lasty = cury
+                    curx = acc[m, 0]
+                    cury = acc[m, 1]
+                    if count == 0:
+                        curphoind[cury,curx] = -1
+                    else:
+                        if curx - lastx == 1:
+                            curpho_h[lasty, lastx] = 1
+                        elif curx - lastx == -1:
+                            curpho_h[cury,curx] = -1
+
+                        if cury - lasty == 1:
+                            curpho_v[lasty, lastx] = 1
+                        elif cury - lasty == -1:
+                            curpho_v[cury, curx] = -1
+                    count = count + 1
+            curphoind[cury, curx] = 1
+            curphosel[cury, curx] = 1
+            phoind.append(curphoind)
+            phowh.append(curpho_h)
+            phowv.append(curpho_v)
+            phosel.append(curphosel)
+        # vls = 5
+        # print(phopath[vls])
+        # print(phoind[vls])
+        # print(phowh[vls])
+        # print(phowv[vls])
+        phoind = torch.stack(phoind, dim = 0)
+        phowh = torch.stack(phowh, dim = 0)
+        phowv = torch.stack(phowv, dim = 0)
+        phosel = torch.stack(phosel, dim = 0)
+        return phoind, phowh, phowv, phosel
+
+    #
+    # def get_photometricLoss(self, depthmap, htheta, vtheta, rgb, rgbs):
+    #
+    #     depthmapl = torch.log(torch.clamp(depthmap, min = 1e-3))
+    #     inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)
+    #     inboundh = inboundh.float()
+    #     outboundh = 1 - inboundh
+    #
+    #     bk_htheta = self.backconvert_htheta(htheta)
+    #     npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:,:,:,1,0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_h[:,:,:,0,0].unsqueeze(1)
+    #     npts3d_pdiff_downh = torch.cos(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 0, 0].unsqueeze(1)
+    #     ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min = 1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downh), min = 1e-4))
+    #
+    #
+    #     lossh = self.lossh(ratiohl)
+    #     gth = self.gth(depthmapl)
+    #     indh = (self.idh((depthmap > 0).float()) == 2).float() * (self.lossh(outboundh) == 0).float()
+    #     hloss = (torch.sum(torch.abs(gth - lossh) * inboundh * indh) + torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh * indh) / 20) / (torch.sum(indh) + 1)
+    #
+    #     inboundv = (vtheta < self.upperboundv) * (vtheta > self.lowerboundv)
+    #     inboundv = inboundv.float()
+    #     outboundv = 1 - inboundv
+    #
+    #     bk_vtheta = self.backconvert_vtheta(vtheta)
+    #     npts3d_pdiff_upv = torch.cos(bk_vtheta) * self.npts3d_p_v[:,:,:,1,0].unsqueeze(1) - torch.sin(bk_vtheta) * self.npts3d_p_v[:,:,:,0,0].unsqueeze(1)
+    #     npts3d_pdiff_downv = torch.cos(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 0, 0].unsqueeze(1)
+    #     ratiovl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_upv), min = 1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downv), min = 1e-4))
+    #
+    #
+    #     lossv = self.lossv(ratiovl)
+    #     gtv = self.gtv(depthmapl)
+    #     indv = (self.idv((depthmap > 0).float()) == 2).float() * (self.lossv(outboundv) == 0).float()
+    #     vloss = (torch.sum(torch.abs(gtv - lossv) * indv * inboundv) + torch.sum(torch.abs(self.middeltargetv - vtheta) * indv * outboundv) / 20) / (torch.sum(indv) + 1)
+    #
+    #     scl_pixelwise = self.selfconh(ratiohl) + self.selfconv(ratiovl)
+    #     scl_mask = (self.selfconvInd(inboundv) == 2).float() * (self.selfconhInd(inboundh) == 2).float()
+    #     scl = torch.sum(torch.abs(scl_pixelwise) * scl_mask) / (torch.sum(scl_mask) + 1)
+    #
+    #     predDepthl = self.phowh(ratiohl) + self.phowv(ratiovl)
+    #     gtDepthl = self.phoind(depthmapl)
+    #     predDepth = torch.exp(predDepthl + depthmapl)
+    #     depthGt = self.phosel(depthmap)
+    #     import random
+    #     tx = random.randint(0, self.width)
+    #     ty = random.randint(0, self.height)
+    #     # print(predDepthl[0,:,ty,tx])
+    #     # print(gtDepthl[0, :, ty, tx])
+    #
+    #     print(predDepth[0,:,ty,tx])
+    #     print(depthGt[0, :, ty, tx])
+    #
+    #     # print(ratiohl[0, 0, ty, tx])
+    #     # print(torch.log(depthmap[0, 0, ty, tx + 1] / depthmap[0, 0, ty, tx]))
+    #     #
+    #     # print(gtDepthl[0, 0, ty, tx])
+    #     # print(depthmapl[0, 0, ty - 1, tx - 1] - depthmapl[0, 0, ty - 1, tx] - depthmapl[0, 0, ty, tx])
+
 
     def get_loss_ratio(self, depthmap, ratiohl, ratiovl):
         depthmap_shifth = torch.clamp(self.copylConv(depthmap), min = 1e-3)
@@ -2653,7 +2783,7 @@ class LocalThetaDesp(nn.Module):
         # tensor2disp(inboundv, vmax = 1, ind = 0).show()
         return htheta, vtheta
 
-    def path_loss(self, depthmap, htheta, vtheta):
+    def path_loss(self, depthmap, htheta, vtheta, isPho = False):
         # depthmapl = torch.log(depthmap)
         #
         # lossh = self.lossh(ratiohl)
@@ -2666,6 +2796,11 @@ class LocalThetaDesp(nn.Module):
         # indv = (self.gtv((depthmap > 0).float()) == 0).float()
         # slossv = torch.sum(torch.abs(gtv - lossv) * indv) / (torch.sum(indv) + 1)
         depthmapl = torch.log(torch.clamp(depthmap, min = 1e-3))
+        # tensor2disp(depthmap > 0, ind=0, vmax=1).show()
+        # tensor2disp(self.denseh((depthmap > 0).float()) > 1, ind=0, vmax=1).show()
+        # tensor2disp(self.densev((depthmap > 0).float()) > 1, ind=0, vmax=1).show()
+        # tensor2disp((self.denseh((depthmap > 0).float()) > 1).float() + (self.dense((depthmap > 0).float()) > 0).float(), ind=0, vmax=1).show()
+        # tensor2disp((self.densev((depthmap > 0).float()) > 1).float() + (self.dense((depthmap > 0).float()) > 0).float(), ind=0, vmax=1).show()
         # depthmapl = torch.log(depthmap)
         inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)
         inboundh = inboundh.float()
@@ -2710,6 +2845,7 @@ class LocalThetaDesp(nn.Module):
         # tensor2disp(indv[:, 1:2, :, :], ind=0, vmax=1).show()
         # tensor2disp(indv[:, 2:3, :, :], ind=0, vmax=1).show()
         # tensor2disp(indv[:, 3:4, :, :], ind=0, vmax=1).show()
+        # tensor2disp(indv[:, 4:5, :, :], ind=0, vmax=1).show()
         # vloss1 = torch.sum(torch.abs(gtv - lossv) * indv * inboundv) / (torch.sum(indv * inboundv) + 1)
         # vloss2 = torch.sum(torch.abs(self.middeltargetv - vtheta) * outboundv) / (torch.sum(outboundv) + 1)
         vloss = (torch.sum(torch.abs(gtv - lossv) * indv * inboundv) + torch.sum(torch.abs(self.middeltargetv - vtheta) * indv * outboundv) / 20) / (torch.sum(indv) + 1)
@@ -2732,8 +2868,23 @@ class LocalThetaDesp(nn.Module):
         # tensor2disp(indhvls, ind = 0, vmax = 1).show()
         # tensor2disp(indh[:,0:1,:,:], ind=0, vmax=1).show()
         # tensor2disp(indh[:,1:2,:,:], ind=0, vmax=1).show()
+        if isPho:
+            predDepthl = self.phowh(ratiohl) + self.phowv(ratiovl)
+            gtDepthl = self.phoind(depthmapl)
 
-        return hloss, vloss, scl
+            predDepth = torch.exp(predDepthl + depthmapl)
+            depthGt = self.phosel(depthmap)
+
+            import random
+            tx = random.randint(0, self.width)
+            ty = random.randint(0, self.height)
+            print(predDepthl[0,:,ty,tx])
+            print(gtDepthl[0, :, ty, tx])
+            print("===================")
+            print(predDepth[0, :, ty, tx])
+            print(depthGt[0, :, ty, tx])
+        else:
+            return hloss, vloss, scl
 
     def mixed_loss(self, depthmap, htheta, vtheta):
         inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)

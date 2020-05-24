@@ -634,7 +634,15 @@ class Trainer:
                 figcombined = np.concatenate([np.array(figrgb), np.array(fighpred), np.array(figvpred)], axis=0)
             else:
                 figdisp = tensor2disp(outputs['pred_disp'], vmax=0.1, ind=0)
-                figcombined = np.concatenate([np.array(figrgb), np.array(fighpred), np.array(figvpred), np.array(figdisp)], axis=0)
+                _, predDepth = disp_to_depth(outputs[('disp', 0)][:,2:3,:,:], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
+                predDepth = predDepth * self.STEREO_SCALE_FACTOR
+                predDepth = F.interpolate(predDepth, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+                predD2htheta, predD2vtheta = self.localthetadespKitti.get_theta(predDepth)
+                fighpred_fromD = tensor2disp(predD2htheta - 1, vmax=4, ind=vind).resize(figdisp.size, pil.BILINEAR)
+                figvpred_fromD = tensor2disp(predD2vtheta - 1, vmax=4, ind=vind).resize(figdisp.size, pil.BILINEAR)
+                figcombined1 = np.concatenate([np.array(figrgb), np.array(fighpred), np.array(figvpred)], axis=0)
+                figcombined2 = np.concatenate([np.array(figdisp), np.array(fighpred_fromD), np.array(figvpred_fromD)], axis=0)
+                figcombined = np.concatenate([figcombined1, figcombined2], axis=1)
             self.writers['train'].add_image('rgb', torch.from_numpy(figcombined).float() / 255, dataformats='HWC', global_step=self.step)
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file

@@ -321,13 +321,14 @@ class MonoDataset(data.Dataset):
         inputs['indicesRec'] = index
 
         if self.PreSIL_root is not None:
-            pSIL_rgb, pSIL_depth, pSIL_insMask, preSilIn, preSilEx, presil_projLidar = self.get_PreSIL()
+            # pSIL_rgb, pSIL_depth, pSIL_insMask, preSilIn, preSilEx, presil_projLidar = self.get_PreSIL()
+            pSIL_rgb, pSIL_depth, pSIL_insMask, preSilIn, preSilEx = self.get_PreSIL()
             inputs["pSIL_rgb"] = pSIL_rgb
             inputs["pSIL_depth"] = pSIL_depth
             inputs["pSIL_insMask"] = pSIL_insMask
             inputs["preSilIn"] = preSilIn
             inputs["preSilEx"] = preSilEx
-            inputs["presil_projLidar"] = presil_projLidar
+            # inputs["presil_projLidar"] = presil_projLidar
 
         if self.theta_gt_path is not None:
             inputs["thetagt"] = self.get_theta_fromfile(folder, frame_index, side, do_flip)

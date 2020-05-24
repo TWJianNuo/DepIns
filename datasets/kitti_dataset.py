@@ -139,13 +139,13 @@ class KITTIRAWDataset(KITTIDataset):
         rgb_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'rgb', "{:06d}.png".format(index))
         depth_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'depth', "{:06d}.png".format(index))
         ins_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'ins', "{:06d}.png".format(index))
-        proj_lidar_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'prohjlidar', "{:06d}.png".format(index))
+        # proj_lidar_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'prohjlidar', "{:06d}.png".format(index))
         # lidar_path = os.path.join(self.PreSIL_root, "{:06d}".format(seq), 'lidar', "{:06d}.bin".format(index))
 
         rgb = pil.open(rgb_path)
         depth = pil.open(depth_path)
         ins = pil.open(ins_path)
-        proj_lidar = pil.open(proj_lidar_path)
+        # proj_lidar = pil.open(proj_lidar_path)
         boxlabel = [int(x) for x in random.choice(lines)[:-1].split(' ')]
 
         scaleM = np.array([
@@ -211,7 +211,7 @@ class KITTIRAWDataset(KITTIDataset):
             rgb = rgb.transpose(Image.FLIP_LEFT_RIGHT)
             depth = depth.transpose(Image.FLIP_LEFT_RIGHT)
             ins = ins.transpose(Image.FLIP_LEFT_RIGHT)
-            proj_lidar = proj_lidar.transpose(Image.FLIP_LEFT_RIGHT)
+            # proj_lidar = proj_lidar.transpose(Image.FLIP_LEFT_RIGHT)
             boxlabel = [boxlabel[0], self.prsil_w - boxlabel[2], self.prsil_w - boxlabel[1], boxlabel[3], boxlabel[4]]
 
         if do_crop:
@@ -251,9 +251,10 @@ class KITTIRAWDataset(KITTIDataset):
             insMask = insMask > 0
             # tensor2disp(torch.from_numpy(insMask).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
 
-        proj_lidar = np.array(proj_lidar).astype(np.float32) / 256
+        # proj_lidar = np.array(proj_lidar).astype(np.float32) / 256
 
-        return self.to_tensor(rgb), torch.from_numpy(depth).unsqueeze(0).float(), torch.from_numpy(insMask.astype(np.float32)).float().unsqueeze(0), torch.from_numpy(preSilIn).float(), torch.from_numpy(preSilEx).float(), torch.from_numpy(proj_lidar).unsqueeze(0)
+        # return self.to_tensor(rgb), torch.from_numpy(depth).unsqueeze(0).float(), torch.from_numpy(insMask.astype(np.float32)).float().unsqueeze(0), torch.from_numpy(preSilIn).float(), torch.from_numpy(preSilEx).float(), torch.from_numpy(proj_lidar).unsqueeze(0)
+        return self.to_tensor(rgb), torch.from_numpy(depth).unsqueeze(0).float(), torch.from_numpy(insMask.astype(np.float32)).float().unsqueeze(0), torch.from_numpy(preSilIn).float(), torch.from_numpy(preSilEx).float()
 
     def get_image_path(self, folder, frame_index, side):
         f_str = "{:010d}{}".format(frame_index, self.img_ext)
