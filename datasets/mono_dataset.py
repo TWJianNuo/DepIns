@@ -83,6 +83,7 @@ class MonoDataset(data.Dataset):
         self.loader = pil_loader
         self.to_tensor = transforms.ToTensor()
 
+
         # We need to specify augmentations differently in newer versions of torchvision.
         # We first try the newer tuple version; if this fails we fall back to scalars
         try:
@@ -101,8 +102,9 @@ class MonoDataset(data.Dataset):
         self.resize = {}
         for i in range(self.num_scales):
             s = 2 ** i
-            self.resize[i] = transforms.Resize((self.height // s, self.width // s),
-                                               interpolation=self.interp)
+            self.resize[i] = transforms.Resize((self.height // s, self.width // s), interpolation=self.interp)
+
+
 
         self.load_depth = self.check_depth()
         self.load_detect = load_detect
@@ -276,8 +278,10 @@ class MonoDataset(data.Dataset):
             inputs['entry_tag'] = inputs['entry_tag'] + ' fln'
 
         for i in self.frame_idxs:
-            del inputs[("color", i, -1)]
-            del inputs[("color_aug", i, -1)]
+            inputs[("color", i, -1)] = F.interpolate(inputs[("color", i, -1)].unsqueeze(0), [self.full_res_shape[1], self.full_res_shape[0]], mode = 'bilinear', align_corners=True).squeeze(0)
+            inputs[("color_aug", i, -1)] = F.interpolate(inputs[("color_aug", i, -1)].unsqueeze(0), [self.full_res_shape[1], self.full_res_shape[0]], mode = 'bilinear', align_corners=True).squeeze(0)
+            # del inputs[("color", i, -1)]
+            # del inputs[("color_aug", i, -1)]
 
         if self.load_depth:
             if self.kitti_gt_path is None:

@@ -2440,7 +2440,15 @@ class LocalThetaDesp(nn.Module):
                  [0, 0, 0]],
             ]
         )
-        phoind, phowh, phowv, phosel = self.translate_path(phopath)
+        phoind, phowh, phowv, phosel, phopixelMv = self.translate_path(phopath)
+
+        self.phoxx = torch.from_numpy(xx).unsqueeze(0).expand([8,-1,-1]) + torch.from_numpy(phopixelMv[:,0]).unsqueeze(1).unsqueeze(2).expand([8,self.height, self.width])
+        self.phoxx = torch.cat([torch.from_numpy(xx).unsqueeze(0), self.phoxx], dim = 0).unsqueeze(0).expand([self.batch_size, -1, -1, -1])
+        self.phoxx = nn.Parameter(self.phoxx.float(), requires_grad = False)
+
+        self.phoyy = torch.from_numpy(yy).unsqueeze(0).expand([8,-1,-1]) + torch.from_numpy(phopixelMv[:,1]).unsqueeze(1).unsqueeze(2).expand([8,self.height, self.width])
+        self.phoyy = torch.cat([torch.from_numpy(yy).unsqueeze(0), self.phoyy], dim = 0).unsqueeze(0).expand([self.batch_size, -1, -1, -1])
+        self.phoyy = nn.Parameter(self.phoyy.float(), requires_grad = False)
 
         self.phoind = torch.nn.Conv2d(in_channels=1, out_channels=phoind.shape[0], kernel_size = 3, padding = 1, bias=False)
         self.phoind.weight = nn.Parameter(phoind.unsqueeze(1), requires_grad = False)
@@ -2453,6 +2461,9 @@ class LocalThetaDesp(nn.Module):
 
         self.phosel = torch.nn.Conv2d(in_channels=1, out_channels=phosel.shape[0], kernel_size = 3, padding = 1, bias=False)
         self.phosel.weight = nn.Parameter(phosel.unsqueeze(1), requires_grad=False)
+
+        self.C1 = 0.01 ** 2
+        self.C2 = 0.03 ** 2
         # scl_ind = (selfconhInd(torch.ones([self.batch_size, 1, self.height, self.width])) == 2).float() * (selfconvInd(torch.ones([self.batch_size, 1, self.height, self.width])) == 2).float()
         # self.scl_ind = nn.Parameter(scl_ind, requires_grad = False)
         # tensor2disp(scl_ind == 0, ind = 0, vmax = 1).show()
@@ -2525,10 +2536,13 @@ class LocalThetaDesp(nn.Module):
     def translate_path(self, phopath):
         phoind = list()
         phosel = list()
+
         phowh = list()
         phowv = list()
+        phopixelMv = list()
         wh = phopath.shape[1]
         ww = phopath.shape[2]
+
         accOrder = np.array([[5,2,6],
                              [1,0,3],
                              [8,4,7]])
@@ -2538,6 +2552,10 @@ class LocalThetaDesp(nn.Module):
         accyy = accyy.flatten()
         acc = np.stack([accxx, accyy, accOrder], axis=0).transpose()
         acc = acc[np.argsort(acc[:,2]), :]
+
+        stpholse = torch.zeros([wh, ww])
+        stpholse[acc[0,1], acc[0,0]] = 1
+        phosel.append(stpholse)
         for i in range(phopath.shape[0]):
             curpath = phopath[i]
             curphoind = torch.zeros([wh,ww])
@@ -2572,17 +2590,21 @@ class LocalThetaDesp(nn.Module):
             phoind.append(curphoind)
             phowh.append(curpho_h)
             phowv.append(curpho_v)
-            phosel.append(curphosel)
+
+            if [curx - acc[0, 0], cury - acc[0, 1]] not in phopixelMv:
+                phopixelMv.append([curx - acc[0, 0], cury - acc[0, 1]])
+                phosel.append(curphosel)
         # vls = 5
         # print(phopath[vls])
         # print(phoind[vls])
         # print(phowh[vls])
         # print(phowv[vls])
+        phopixelMv = np.array(phopixelMv)
         phoind = torch.stack(phoind, dim = 0)
         phowh = torch.stack(phowh, dim = 0)
         phowv = torch.stack(phowv, dim = 0)
         phosel = torch.stack(phosel, dim = 0)
-        return phoind, phowh, phowv, phosel
+        return phoind, phowh, phowv, phosel, phopixelMv
 
     #
     # def get_photometricLoss(self, depthmap, htheta, vtheta, rgb, rgbs):
@@ -2783,7 +2805,7 @@ class LocalThetaDesp(nn.Module):
         # tensor2disp(inboundv, vmax = 1, ind = 0).show()
         return htheta, vtheta
 
-    def path_loss(self, depthmap, htheta, vtheta, isPho = False):
+    def path_loss(self, depthmap, htheta, vtheta, isPho = False, ks = None, rgb = None, rgbStereo = None):
         # depthmapl = torch.log(depthmap)
         #
         # lossh = self.lossh(ratiohl)
@@ -2869,20 +2891,123 @@ class LocalThetaDesp(nn.Module):
         # tensor2disp(indh[:,0:1,:,:], ind=0, vmax=1).show()
         # tensor2disp(indh[:,1:2,:,:], ind=0, vmax=1).show()
         if isPho:
+            # tensor2disp(htheta - 1, vmax=4, ind=0).show()
+            # tensor2disp(1 / depthmap, percentile=95, ind=0).show()
+
             predDepthl = self.phowh(ratiohl) + self.phowv(ratiovl)
-            gtDepthl = self.phoind(depthmapl)
+            # gtDepthl = self.phoind(depthmapl)
 
             predDepth = torch.exp(predDepthl + depthmapl)
-            depthGt = self.phosel(depthmap)
+            # depthGt = self.phosel(depthmap)
+            predDepth_organized = torch.stack([
+                torch.clamp(depthmap, min = 1e-3).squeeze(1),
+                (predDepth[:,0,:,:] + predDepth[:,1,:,:]) / 2,
+                (predDepth[:, 2, :, :] + predDepth[:, 3, :, :]) / 2,
+                (predDepth[:, 4, :, :] + predDepth[:, 5, :, :]) / 2,
+                (predDepth[:, 6, :, :] + predDepth[:, 7, :, :]) / 2,
+                predDepth[:, 8, :, :],
+                predDepth[:, 9, :, :],
+                predDepth[:, 10, :, :],
+                predDepth[:, 11, :, :]
+            ], dim=1).contiguous()
 
-            import random
-            tx = random.randint(0, self.width)
-            ty = random.randint(0, self.height)
-            print(predDepthl[0,:,ty,tx])
-            print(gtDepthl[0, :, ty, tx])
-            print("===================")
-            print(predDepth[0, :, ty, tx])
-            print(depthGt[0, :, ty, tx])
+
+
+            predDisp_organized = ks.view(self.batch_size, 1, 1, 1) / predDepth_organized
+            predxx = self.phoxx + predDisp_organized
+            predpixels = torch.stack([(predxx.view([-1, self.height, self.width]) / (self.width - 1) - 0.5) * 2, (self.phoyy.view([-1, self.height, self.width]) / (self.height - 1) - 0.5) * 2], dim=3)
+            rgbStereoExtended = rgbStereo.unsqueeze(1).expand([-1,9,-1,-1,-1]).contiguous().view(-1, 3, self.height, self.width)
+            predPho = F.grid_sample(rgbStereoExtended, predpixels, padding_mode="border")
+            predPho = predPho.view([self.batch_size, 9, 3, self.height, self.width])
+            gtPho = torch.stack([self.phosel(rgb[:,0:1,:,:]), self.phosel(rgb[:,1:2,:,:]), self.phosel(rgb[:,2:3,:,:])], dim=2)
+
+            mu_x = torch.mean(gtPho, dim= 1)
+            mu_y = torch.mean(predPho, dim=1)
+
+            sigma_x = torch.mean(gtPho ** 2, dim= 1) - mu_x ** 2
+            sigma_y = torch.mean(predPho ** 2, dim= 1) - mu_y ** 2
+            sigma_xy = torch.mean(gtPho * predPho, dim= 1) - mu_x * mu_y
+
+            SSIM_n = (2 * mu_x * mu_y + self.C1) * (2 * sigma_xy + self.C2)
+            SSIM_d = (mu_x ** 2 + mu_y ** 2 + self.C1) * (sigma_x + sigma_y + self.C2)
+            SSIMl = torch.clamp((1 - SSIM_n / SSIM_d) / 2, 0, 1)
+            l1l = torch.mean(torch.abs(gtPho - predPho), dim = 1)
+
+            pholoss = SSIMl * 0.85 + l1l * 0.15
+            pholoss = torch.mean(pholoss, dim=1, keepdim=True)
+
+            phoSelector = (depthmap > 0).float() * inboundh * inboundv
+            pholoss_scale = torch.sum(pholoss * phoSelector) / (torch.sum(phoSelector) + 1)
+            # for i in range(9):
+            #     tensor2rgb(predPho[0,i:i+1,:,:,:], ind = 0).show()
+            #     tensor2rgb(gtPho[0, i:i + 1, :, :, :], ind=0).show()
+            #
+            #
+            # phoxxnumpy = self.phoxx.detach().cpu().numpy()[0,:,:,:]
+            # phoyynumpy = self.phoyy.detach().cpu().numpy()[0,:,:,:]
+            #
+            # predxxnumpy = predxx.detach().cpu().numpy()[0,:,:,:]
+            # predyynumpy = phoyynumpy
+            #
+            # vlsSel = depthmap[0,0,:,:].detach().cpu().numpy() > 0
+            # xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+            # xxval = xx[vlsSel]
+            # yyval = yy[vlsSel]
+            #
+            # z = depthmap[0,0,:,:].detach().cpu().numpy()[vlsSel]
+            # z = 5 / z
+            # cm = plt.get_cmap('magma')
+            # z = cm(z)
+            #
+            # import random
+            # drawind = random.randint(0, len(xxval))
+            #
+            # # accx = xxval[drawind]
+            # # accy = yyval[drawind]
+            # accx = 473
+            # accy = 164
+            # drawx = phoxxnumpy[:, accy, accx]
+            # drawy = phoyynumpy[:, accy, accx]
+            #
+            # plt.figure()
+            # plt.imshow(tensor2rgb(rgb, ind = 0))
+            # plt.scatter(xxval, yyval, 0.5, z)
+            # plt.scatter(drawx, drawy, 1, 'r')
+            # # plt.show()
+            #
+            #
+            # xxStereoval = predxx[0,0,:,:].detach().cpu().numpy()[vlsSel]
+            # yyStereoval = self.phoyy[0,0,:,:].detach().cpu().numpy()[vlsSel]
+            # drawxStereo = predxxnumpy[:, accy, accx]
+            # drawyStereo = predyynumpy[:, accy, accx]
+            # plt.figure()
+            # plt.imshow(tensor2rgb(rgbStereo, ind = 0))
+            # plt.scatter(xxStereoval, yyStereoval, 0.5, z)
+            # plt.scatter(drawxStereo, drawyStereo, 1, 'r')
+            # # plt.show()
+            #
+            #
+            # import random
+            # tx = random.randint(0, self.width)
+            # ty = random.randint(0, self.height)
+            # print(predDepthl[0,:,ty,tx])
+            # print(gtDepthl[0, :, ty, tx])
+            # print("===================")
+            # print(predDepth[0, :, ty, tx])
+            # print(depthGt[0, :, ty, tx])
+            # print("===================")
+            # print(predDepth[0, 0, ty, tx])
+            # print(predDepth[0, 1, ty, tx])
+            # print("===================")
+            # print(predDepth[0, 2, ty, tx])
+            # print(predDepth[0, 3, ty, tx])
+            # print("===================")
+            # print(predDepth[0, 4, ty, tx])
+            # print(predDepth[0, 5, ty, tx])
+            # print("===================")
+            # print(predDepth[0, 6, ty, tx])
+            # print(predDepth[0, 7, ty, tx])
+            return hloss, vloss, scl, pholoss_scale
         else:
             return hloss, vloss, scl
 
