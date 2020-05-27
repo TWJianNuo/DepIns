@@ -2839,7 +2839,54 @@ class LocalThetaDesp(nn.Module):
         scl_pixelwise = self.selfconh(ratiohl) + self.selfconv(ratiovl)
         scl_mask = (self.selfconvInd(inboundv) == 2).float() * (self.selfconhInd(inboundh) == 2).float()
         scl = torch.sum(torch.abs(scl_pixelwise) * scl_mask) / (torch.sum(scl_mask) + 1)
+
         return hloss, vloss, scl
+
+    def photometric_loss_on_depth(self, depthmap, ratiohl, ratiovl, ks, rgb, rgbStereo, inboundh, inboundv):
+        depthmapl = torch.log(torch.clamp(depthmap, min=1e-3))
+        predDepthl = self.phowh(ratiohl) + self.phowv(ratiovl)
+        predDepth = torch.exp(predDepthl + depthmapl)
+        predDepth_organized = torch.stack([
+            torch.clamp(depthmap, min=1e-3).squeeze(1),
+            (predDepth[:, 0, :, :] + predDepth[:, 1, :, :]) / 2,
+            (predDepth[:, 2, :, :] + predDepth[:, 3, :, :]) / 2,
+            (predDepth[:, 4, :, :] + predDepth[:, 5, :, :]) / 2,
+            (predDepth[:, 6, :, :] + predDepth[:, 7, :, :]) / 2,
+            predDepth[:, 8, :, :],
+            predDepth[:, 9, :, :],
+            predDepth[:, 10, :, :],
+            predDepth[:, 11, :, :]
+        ], dim=1).contiguous()
+        predDisp_organized = ks.view(self.batch_size, 1, 1, 1) / predDepth_organized
+        predxx = self.phoxx + predDisp_organized
+        predpixels = torch.stack([(predxx.view([-1, self.height, self.width]) / (self.width - 1) - 0.5) * 2,
+                                  (self.phoyy.view([-1, self.height, self.width]) / (self.height - 1) - 0.5) * 2],
+                                 dim=3)
+        rgbStereoExtended = rgbStereo.unsqueeze(1).expand([-1, 9, -1, -1, -1]).contiguous().view(-1, 3, self.height,
+                                                                                                 self.width)
+        predPho = F.grid_sample(rgbStereoExtended, predpixels, padding_mode="border")
+        predPho = predPho.view([self.batch_size, 9, 3, self.height, self.width])
+        gtPho = torch.stack(
+            [self.phosel(rgb[:, 0:1, :, :]), self.phosel(rgb[:, 1:2, :, :]), self.phosel(rgb[:, 2:3, :, :])], dim=2)
+
+        mu_x = torch.mean(gtPho, dim=1)
+        mu_y = torch.mean(predPho, dim=1)
+
+        sigma_x = torch.mean(gtPho ** 2, dim=1) - mu_x ** 2
+        sigma_y = torch.mean(predPho ** 2, dim=1) - mu_y ** 2
+        sigma_xy = torch.mean(gtPho * predPho, dim=1) - mu_x * mu_y
+
+        SSIM_n = (2 * mu_x * mu_y + self.C1) * (2 * sigma_xy + self.C2)
+        SSIM_d = (mu_x ** 2 + mu_y ** 2 + self.C1) * (sigma_x + sigma_y + self.C2)
+        SSIMl = torch.clamp((1 - SSIM_n / SSIM_d) / 2, 0, 1)
+        l1l = torch.mean(torch.abs(gtPho - predPho), dim=1)
+
+        # pholoss = SSIMl * 0.85 + l1l * 0.15
+        pholoss = l1l
+        pholoss = torch.mean(pholoss, dim=1, keepdim=True)
+
+        phoSelector = (depthmap > 0).float() * inboundh * inboundv
+        pholoss_scale = torch.sum(pholoss * phoSelector) / (torch.sum(phoSelector) + 1)
 
     def path_loss(self, depthmap, htheta, vtheta, isPho = False, ks = None, rgb = None, rgbStereo = None):
         # depthmapl = torch.log(depthmap)

@@ -208,22 +208,34 @@ class MonodepthOptions:
         self.parser.add_argument("--theta_gt_path",
                                  type=str,
                                  default='None')
-        self.parser.add_argument("--theta_scale",
+        self.parser.add_argument("--lthetaScale",
                                  type=float,
                                  default=1)
-        self.parser.add_argument("--theta_constrain",
+        self.parser.add_argument("--sclLossScale",
                                  type=float,
                                  default=1)
+        self.parser.add_argument("--l1lossScale",
+                                 type=float,
+                                 default=1e-3)
+        self.parser.add_argument("--pholossScale",
+                                 type=float,
+                                 default=1e-3)
+
         self.parser.add_argument("--localGeomMode",
                                  type=str,
                                  choices=["directSup", "ratioSup", "pathSup", "lidarSup", "lidarSupKitti"])
-        self.parser.add_argument("--addDepthBranch",
-                                 action="store_true")
         self.parser.add_argument("--l1constrain",
+                                 action="store_true")
+        self.parser.add_argument("--photoConstrain",
                                  action="store_true")
         self.parser.add_argument("--l1constrainScale",
                                  type=float,
                                  default=1e-2)
+        self.parser.add_argument("--no_aug",
+                                 action="store_true")
+        self.parser.add_argument("--no_shuffle",
+                                 action="store_true")
+
 
 
         # ABLATION options
