@@ -498,7 +498,8 @@ class Trainer:
             fighpred = tensor2disp(outputs['htheta_pred'] - 1, vmax = 4, ind=vind)
             figvpred = tensor2disp(outputs['vtheta_pred'] - 1, vmax = 4, ind=vind)
 
-            figdisp = tensor2disp(outputs[('disp', 0)], vmax=0.1, ind=0)
+            figdisp = tensor2disp(outputs[('disp', 0)][:,2:3,:,:], vmax=0.1, ind=0)
+            # tensor2disp(outputs[('disp', 0)], vmax=1, ind=0).show()
             _, predDepth = disp_to_depth(outputs[('disp', 0)][:,2:3,:,:], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
             predDepth = predDepth * self.STEREO_SCALE_FACTOR
             predDepth = F.interpolate(predDepth, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
