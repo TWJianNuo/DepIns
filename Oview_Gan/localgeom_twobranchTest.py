@@ -473,7 +473,7 @@ class Trainer:
             sclLoss = sclLoss / 4
 
 
-            if self.opt.l1constrain:
+            if self.opt.l1constrain and self.epoch > 12:
                 htheta_pred_detached = outputs['htheta_pred'].detach()
                 vtheta_pred_detached = outputs['vtheta_pred'].detach()
                 for i in range(len(self.opt.scales)):
