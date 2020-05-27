@@ -219,6 +219,8 @@ class MonodepthOptions:
                                  choices=["directSup", "ratioSup", "pathSup", "lidarSup", "lidarSupKitti"])
         self.parser.add_argument("--addDepthBranch",
                                  action="store_true")
+        self.parser.add_argument("--l1constrain",
+                                 action="store_true")
 
 
 

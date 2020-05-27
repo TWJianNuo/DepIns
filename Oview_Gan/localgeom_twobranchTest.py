@@ -119,6 +119,16 @@ class Trainer:
                 [0, 1.92 * self.kittih, 0.5 * self.kittih],
                 [0, 0, 1]], dtype=np.float32)
             self.localthetadespKitti = LocalThetaDesp(height=self.kittih, width=self.kittiw,batch_size=self.opt.batch_size, intrinsic=intrinsicKitti).cuda()
+
+
+            intrinsicKitti_scaled = np.array([
+                [0.58 * self.opt.width, 0, 0.5 * self.opt.width],
+                [0, 1.92 * self.opt.height, 0.5 * self.opt.height],
+                [0, 0, 1]], dtype=np.float32)
+            self.localthetadespKitti_scaled = LocalThetaDesp(height=self.opt.height, width=self.opt.width,batch_size=self.opt.batch_size, intrinsic=intrinsicKitti_scaled).cuda()
+
+            self.thetalossmap = torch.zeros([1, 1, self.opt.height, self.opt.width]).expand([self.opt.batch_size, -1, -1, -1]).cuda()
+            self.thetalossmap[:,:,110::,:] = 1
         else:
             intrinsic = np.array([
                     [512., 0., 512.],
@@ -417,18 +427,15 @@ class Trainer:
                 tensor2disp(outputs['vtheta_pred'] - vtheta_pred.min(), vmax=4, ind=0).show()
                 tensor2disp(vtheta - vtheta.min(), vmax=4, ind=0).show()
         else:
-            # for m in range(1000):
+            # outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
+            # htheta_pred_detached = outputs[('disp', 0)][:, 0:1, :, :].detach() * float(np.pi) * 2
+            # vtheta_pred_detached = outputs[('disp', 0)][:, 1:2, :, :].detach() * float(np.pi) * 2
+            # disp_bck = outputs[('disp', 0)][:, 2:3, :, :].detach()
+            # for m in range(700):
             outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
 
-            intrinsicKitti_scaled = np.array([
-                [0.58 * self.opt.width, 0, 0.5 * self.opt.width],
-                [0, 1.92 * self.opt.height, 0.5 * self.opt.height],
-                [0, 0, 1]], dtype=np.float32)
-            self.localthetadespKitti2 = LocalThetaDesp(height=self.opt.height, width=self.opt.width,batch_size=self.opt.batch_size, intrinsic=intrinsicKitti_scaled).cuda()
-
-
-
-
+            ldepth = 0
+            l1constrain = 0
             if self.opt.addDepthBranch:
                 ldepth = 0
                 selector_depth = (inputs['depth_gt'] > 0).float()
@@ -436,7 +443,9 @@ class Trainer:
                     pred_disp = outputs[('disp', i)][:, 2:3, :, :]
                     pred_disp = F.interpolate(pred_disp, [self.kittih, self.kittiw], mode='bilinear',align_corners=True)
                     _, pred_depth = disp_to_depth(pred_disp, self.opt.min_depth, self.opt.max_depth)
-                    ldepth = ldepth + torch.sum(torch.abs(pred_depth * self.STEREO_SCALE_FACTOR - inputs['depth_gt']) * selector_depth) / (torch.sum(selector_depth) + 1)
+                    pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
+                    ldepth = ldepth + torch.sum(torch.abs(pred_depth - inputs['depth_gt']) * selector_depth) / (torch.sum(selector_depth) + 1)
+                    outputs['pred_depth', i] = pred_depth
                     if i == 0:
                         outputs['pred_disp'] = outputs[('disp', i)][:, 2:3, :, :]
                         losses['depthLoss'] = ldepth
@@ -444,63 +453,58 @@ class Trainer:
 
             ltheta = 0
             sclLoss = 0
-            pholoss = 0
             for i in range(len(self.opt.scales)):
-            # for i in range(len(self.opt.scales)):
-            # for i in range(1):
                 pred_theta = outputs[('disp', i)]
                 pred_theta = F.interpolate(pred_theta, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
                 pred_theta = pred_theta * float(np.pi) * 2
                 htheta_pred = pred_theta[:, 0:1, :, :]
                 vtheta_pred = pred_theta[:, 1:2, :, :]
 
-                # pred_disp = outputs[('disp', i)][:, 2:3, :, :]
-                # pred_disp = F.interpolate(pred_disp, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-                # _, pred_depth = disp_to_depth(pred_disp, self.opt.min_depth, self.opt.max_depth)
-                # hloss, vloss, scl = self.localthetadespKitti.path_loss(depthmap=pred_depth * self.STEREO_SCALE_FACTOR, htheta=htheta_pred, vtheta=vtheta_pred, isPho = True, ks = self.unitFK * self.kittiw * inputs['stereo_T'][:,0,3] * self.STEREO_SCALE_FACTOR,
-                #                                                        rgb = inputs[('color', 0, -1)], rgbStereo=inputs[('color', 's', -1)])
-
-                depthgt_rescaled = F.interpolate(inputs['depth_gt'], [self.opt.height, self.opt.width], mode='nearest')
-                hloss, vloss, scl, pholoss_scale = self.localthetadespKitti2.path_loss(depthmap=depthgt_rescaled,
-                                                                                      htheta=outputs[('disp', i)][:, 0:1, :, :] * float(np.pi) * 2,
-                                                                                      vtheta=outputs[('disp', i)][:, 1:2, :, :] * float(np.pi) * 2, isPho=True,
-                                                                                      ks=self.unitFK * self.opt.width * inputs['stereo_T'][:, 0,3] * self.STEREO_SCALE_FACTOR,
-                                                                                      rgb=inputs[('color', 0, 0)],
-                                                                                      rgbStereo=inputs[('color', 's', 0)])
-
-
-                hloss, vloss, scl, pholoss_scale = self.localthetadespKitti.path_loss(depthmap=inputs['depth_gt'], htheta=htheta_pred, vtheta=vtheta_pred, isPho = True, ks = self.unitFK * self.kittiw * inputs['stereo_T'][:,0,3] * self.STEREO_SCALE_FACTOR,
-                                                                       rgb = inputs[('color', 0, -1)], rgbStereo=inputs[('color', 's', -1)])
-                pholoss = pholoss + pholoss_scale
+                hloss, vloss, scl = self.localthetadespKitti.cleaned_path_loss(depthmap=inputs['depth_gt'], htheta=htheta_pred, vtheta=vtheta_pred)
                 if i == 0:
                     outputs['htheta_pred'] = outputs[('disp', i)][:, 0:1, :, :] * float(np.pi) * 2
                     outputs['vtheta_pred'] = outputs[('disp', i)][:, 1:2, :, :] * float(np.pi) * 2
                     losses['hloss'] = hloss
                     losses['vloss'] = vloss
                     losses['scl'] = scl
-                    losses['pholoss'] = pholoss_scale
                 ltheta = ltheta + (hloss * 10 + vloss) / 2
                 sclLoss = sclLoss + scl
             ltheta = ltheta / 4
             sclLoss = sclLoss / 4
-            pholoss = pholoss / 4
 
+
+            if self.opt.l1constrain:
+                htheta_pred_detached = outputs['htheta_pred'].detach()
+                vtheta_pred_detached = outputs['vtheta_pred'].detach()
+                for i in range(len(self.opt.scales)):
+                    scaledDepth = F.interpolate(outputs['pred_depth', i], [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
+                    hthetai, vthetai = self.localthetadespKitti_scaled.get_theta(depthmap=scaledDepth)
+                    l1constrain = l1constrain + torch.sum((torch.abs(hthetai - htheta_pred_detached) + torch.abs(vthetai - vtheta_pred_detached)) * self.thetalossmap) / torch.sum(self.thetalossmap)
+                    # hfig = tensor2disp(hthetai - 1, vmax=4, ind=0)
+                    # plt.figure()
+                    # plt.imshow(hfig)
+                    if i == 0:
+                        outputs['l1constrain'] = l1constrain
+                        outputs['hthetai'] = hthetai
+                        outputs['vthetai'] = vthetai
+                l1constrain = l1constrain / len(self.opt.scales)
 
             if self.opt.addDepthBranch:
-                # losses['totLoss'] = ltheta * self.opt.theta_scale + sclLoss * self.opt.theta_constrain + pholoss * 1e-1 + ldepth * 1e-3
-                losses[
-                    'totLoss'] = pholoss
+                losses['totLoss'] = ltheta * self.opt.theta_scale + sclLoss * self.opt.theta_constrain + ldepth * 1e-3 + l1constrain * 1e-2
             else:
-                losses['totLoss'] = ltheta * self.opt.theta_scale + sclLoss * self.opt.theta_constrain + pholoss * 1e-1
+                losses['totLoss'] = ltheta * self.opt.theta_scale + sclLoss * self.opt.theta_constrain + l1constrain
 
             # self.model_optimizer.zero_grad()
             # losses['totLoss'].backward()
+            # l1constrain.backward()
             # self.model_optimizer.step()
-            # print(losses['totLoss'])
+            # print(l1constrain)
             # tensor2disp(outputs['htheta_pred'] - 1, vmax=4, ind=0).show()
             # tensor2disp(outputs['vtheta_pred'] - 1, vmax=4, ind=0).show()
             # tensor2rgb(inputs[('color', 0, 0)], ind  = 0).show()
-            # tensor2disp(outputs['pred_disp'], vmax=0.1, ind=0).show()
+            # tensor2disp(outputs['hthetai'] - 1, vmax=4, ind=0).show()
+            # tensor2disp(outputs['pred_disp'], percentile=95, ind=0).show()
+            # tensor2disp(disp_bck, percentile=95, ind=0).show()
             # aaaa
 
         return outputs, losses

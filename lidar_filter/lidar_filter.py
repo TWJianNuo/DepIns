@@ -443,9 +443,11 @@ startind = 0
 import random
 from datetime import datetime
 random.seed(datetime.now())
-candidate_date = ['2011_09_26', '2011_10_03']
-args.day_seq = random.choice(candidate_date)
 random.shuffle(lines)
+
+
+candidate_date = ['2011_09_26', '2011_09_28', '2011_09_29', '2011_09_30', '2011_10_03']
+args.day_seq = random.choice(candidate_date)
 for kk in range(startind, len(lines)):
     line = lines[kk]
     folder, frameind, direction = line.split()
@@ -568,6 +570,9 @@ for kk in range(startind, len(lines)):
     # plt.close()
 
     # vls_path_png2 = os.path.join(vls_path, folder.split('/')[1]+'_'+str(frameind)+'_'+direction + '.png')
+
+    rgbpath = os.path.join(root_path, dayc, seqc, 'image_0' + str(mapping_cam[direction]), 'data', "{:010d}.png".format(frameind))
+    rgb = pil.open(rgbpath)
     drawx = nvelo_projected_img_np[:, :, 3][noocc_mask_np == 1]
     drawy = nvelo_projected_img_np[:, :, 4][noocc_mask_np == 1]
     z = nvelo_projected_img_np[:, :, 2][noocc_mask_np == 1]
@@ -575,9 +580,11 @@ for kk in range(startind, len(lines)):
     cm = plt.get_cmap('magma')
     z = cm(z)
     fig, ax = plt.subplots(figsize=(16, 12), dpi=100)
+    plt.imshow(rgb)
     # fig, ax = plt.subplots()
     ax.axis('equal')
     plt.scatter(drawx, drawy, s=5, marker='.', c=z[:, 0:3])
+    # plt.scatter([0,1], [0,1], s=50, marker='.', c='r')
     ax.set_xlim(0, w)  # decreasing time
     ax.set_ylim(h2, 0)  # decreasing time
     plt.savefig(vls_path_png2)
