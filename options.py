@@ -221,7 +221,9 @@ class MonodepthOptions:
                                  action="store_true")
         self.parser.add_argument("--l1constrain",
                                  action="store_true")
-
+        self.parser.add_argument("--l1constrainScale",
+                                 type=float,
+                                 default=1e-2)
 
 
         # ABLATION options

@@ -490,7 +490,7 @@ class Trainer:
                 l1constrain = l1constrain / len(self.opt.scales)
 
             if self.opt.addDepthBranch:
-                losses['totLoss'] = ltheta * self.opt.theta_scale + sclLoss * self.opt.theta_constrain + ldepth * 1e-3 + l1constrain * 1e-2
+                losses['totLoss'] = ltheta * self.opt.theta_scale + sclLoss * self.opt.theta_constrain + ldepth * 1e-3 + l1constrain * self.opt.l1constrainScale
             else:
                 losses['totLoss'] = ltheta * self.opt.theta_scale + sclLoss * self.opt.theta_constrain + l1constrain
 
