@@ -220,17 +220,17 @@ class MonodepthOptions:
         self.parser.add_argument("--pholossScale",
                                  type=float,
                                  default=1e-3)
+        self.parser.add_argument("--l1constrainScale",
+                                 type=float,
+                                 default=1e-2)
+        self.parser.add_argument("--phoconstrainScale",
+                                 type=float,
+                                 default=1e-2)
 
         self.parser.add_argument("--localGeomMode",
                                  type=str,
                                  choices=["directSup", "ratioSup", "pathSup", "lidarSup", "lidarSupKitti"])
-        self.parser.add_argument("--l1constrain",
-                                 action="store_true")
-        self.parser.add_argument("--photoConstrain",
-                                 action="store_true")
-        self.parser.add_argument("--l1constrainScale",
-                                 type=float,
-                                 default=1e-2)
+
         self.parser.add_argument("--no_aug",
                                  action="store_true")
         self.parser.add_argument("--no_shuffle",

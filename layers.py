@@ -2842,8 +2842,28 @@ class LocalThetaDesp(nn.Module):
 
         return hloss, vloss, scl
 
-    def photometric_loss_on_depth(self, depthmap, ratiohl, ratiovl, ks, rgb, rgbStereo, inboundh, inboundv):
-        depthmapl = torch.log(torch.clamp(depthmap, min=1e-3))
+    def photometric_loss_on_depth(self, depthmap, htheta, vtheta, ks, rgb, rgbStereo, ssimMsk, ssimref = None):
+
+        depthmapl = torch.log(torch.clamp(depthmap, min = 1e-3))
+        inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)
+        inboundh = inboundh.float()
+
+
+        bk_htheta = self.backconvert_htheta(htheta)
+        npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:,:,:,1,0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_h[:,:,:,0,0].unsqueeze(1)
+        npts3d_pdiff_downh = torch.cos(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 0, 0].unsqueeze(1)
+        ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min = 1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downh), min = 1e-4))
+
+        inboundv = (vtheta < self.upperboundv) * (vtheta > self.lowerboundv)
+        inboundv = inboundv.float()
+
+
+        bk_vtheta = self.backconvert_vtheta(vtheta)
+        npts3d_pdiff_upv = torch.cos(bk_vtheta) * self.npts3d_p_v[:,:,:,1,0].unsqueeze(1) - torch.sin(bk_vtheta) * self.npts3d_p_v[:,:,:,0,0].unsqueeze(1)
+        npts3d_pdiff_downv = torch.cos(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 0, 0].unsqueeze(1)
+        ratiovl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_upv), min = 1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downv), min = 1e-4))
+
+
         predDepthl = self.phowh(ratiohl) + self.phowv(ratiovl)
         predDepth = torch.exp(predDepthl + depthmapl)
         predDepth_organized = torch.stack([
@@ -2866,8 +2886,8 @@ class LocalThetaDesp(nn.Module):
                                                                                                  self.width)
         predPho = F.grid_sample(rgbStereoExtended, predpixels, padding_mode="border")
         predPho = predPho.view([self.batch_size, 9, 3, self.height, self.width])
-        gtPho = torch.stack(
-            [self.phosel(rgb[:, 0:1, :, :]), self.phosel(rgb[:, 1:2, :, :]), self.phosel(rgb[:, 2:3, :, :])], dim=2)
+        predPho = torch.stack([self.phosel(predPho[:, 0, 0:1, :, :]), self.phosel(predPho[:, 0, 1:2, :, :]), self.phosel(predPho[:, 0, 2:3, :, :])], dim=2)
+        gtPho = torch.stack([self.phosel(rgb[:, 0:1, :, :]), self.phosel(rgb[:, 1:2, :, :]), self.phosel(rgb[:, 2:3, :, :])], dim=2)
 
         mu_x = torch.mean(gtPho, dim=1)
         mu_y = torch.mean(predPho, dim=1)
@@ -2879,14 +2899,23 @@ class LocalThetaDesp(nn.Module):
         SSIM_n = (2 * mu_x * mu_y + self.C1) * (2 * sigma_xy + self.C2)
         SSIM_d = (mu_x ** 2 + mu_y ** 2 + self.C1) * (sigma_x + sigma_y + self.C2)
         SSIMl = torch.clamp((1 - SSIM_n / SSIM_d) / 2, 0, 1)
-        l1l = torch.mean(torch.abs(gtPho - predPho), dim=1)
 
-        # pholoss = SSIMl * 0.85 + l1l * 0.15
-        pholoss = l1l
+        l1l = torch.mean(torch.abs(gtPho - predPho), dim=1)
+        # l1l = torch.mean(torch.abs(gtPho[:,0:1,:,:,:] - predPho[:,0:1,:,:,:]), dim=1)
+
+        pholoss = SSIMl * 0.85 + l1l * 0.15
         pholoss = torch.mean(pholoss, dim=1, keepdim=True)
 
-        phoSelector = (depthmap > 0).float() * inboundh * inboundv
+        # import random
+        # tx = random.randint(0, self.width)
+        # ty = random.randint(0, self.height)
+        # print(pholoss[0,:,ty,tx])
+        # print(ssimref[0, :, ty, tx])
+
+        phoSelector = (depthmap > 0).float() * inboundh * inboundv * (1 - ssimMsk)
         pholoss_scale = torch.sum(pholoss * phoSelector) / (torch.sum(phoSelector) + 1)
+        # tensor2disp(phoSelector, vmax=1, ind = 0).show()
+        return pholoss_scale
 
     def path_loss(self, depthmap, htheta, vtheta, isPho = False, ks = None, rgb = None, rgbStereo = None):
         # depthmapl = torch.log(depthmap)
