@@ -205,9 +205,6 @@ class MonodepthOptions:
         self.parser.add_argument("--output_dir",
                                  type=str,
                                  default='None')
-        self.parser.add_argument("--theta_gt_path",
-                                 type=str,
-                                 default='None')
         self.parser.add_argument("--lthetaScale",
                                  type=float,
                                  default=1)
@@ -232,6 +229,9 @@ class MonodepthOptions:
         self.parser.add_argument("--localGeomMode",
                                  type=str,
                                  choices=["directSup", "ratioSup", "pathSup", "lidarSup", "lidarSupKitti"])
+        self.parser.add_argument("--theta_gt_path",
+                                 type=str,
+                                 default='None')
 
         self.parser.add_argument("--no_aug",
                                  action="store_true")

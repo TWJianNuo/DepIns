@@ -62,13 +62,22 @@ class KITTIRAWDataset(KITTIDataset):
         super(KITTIRAWDataset, self).__init__(*args, **kwargs)
 
     def get_theta_fromfile(self, folder, frame_index, side, do_flip):
-        thetagt = pil.open(os.path.join(self.theta_gt_path, folder, "image_0{}".format(self.side_map[side]), str(frame_index).zfill(10) + '.png'))
-        thetagt = thetagt.resize([self.width, self.height], pil.BILINEAR)
+        htheta = pil.open(os.path.join(self.theta_gt_path, folder, "htheta", "image_0{}".format(self.side_map[side]), str(frame_index).zfill(10) + '.png'))
+        htheta = htheta.resize([self.width, self.height], pil.BILINEAR)
         if do_flip:
-            thetagt = thetagt.transpose(Image.FLIP_LEFT_RIGHT)
-        thetagt = np.array(thetagt).astype(np.float32) / 256 * 3.1415
-        thetagt = torch.from_numpy(thetagt).unsqueeze(0)
-        return thetagt
+            htheta = htheta.transpose(Image.FLIP_LEFT_RIGHT)
+        htheta = np.array(htheta).astype(np.float32) / 10 / 256
+        htheta = torch.from_numpy(htheta).unsqueeze(0)
+
+        vtheta = pil.open(os.path.join(self.theta_gt_path, folder, "vtheta", "image_0{}".format(self.side_map[side]), str(frame_index).zfill(10) + '.png'))
+        vtheta = vtheta.resize([self.width, self.height], pil.BILINEAR)
+        if do_flip:
+            vtheta = vtheta.transpose(Image.FLIP_LEFT_RIGHT)
+        vtheta = np.array(vtheta).astype(np.float32) / 10 / 256
+        vtheta = torch.from_numpy(vtheta).unsqueeze(0)
+        tensor2disp(htheta.unsqueeze(0) -1, vmax=4, ind = 0).show()
+        tensor2disp(vtheta.unsqueeze(0) - 1, vmax=4, ind=0).show()
+        return htheta
 
     def get_depth_fromfile(self, folder, frame_index, side, do_flip):
         rgb_path = os.path.join(self.kitti_gt_path, folder, "image_0{}".format(self.side_map[side]), "{:010d}.png".format(frame_index))

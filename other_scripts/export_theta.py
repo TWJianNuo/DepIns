@@ -131,7 +131,7 @@ def export_gt_depths_kitti():
                 thetav = outputs[('disp', 0)][i:i + 1, 1:2, :, :] * 2 * np.pi
 
                 thetahnp = thetah.squeeze(0).squeeze(0).cpu().numpy()
-                thetavnp = thetah.squeeze(0).squeeze(0).cpu().numpy()
+                thetavnp = thetav.squeeze(0).squeeze(0).cpu().numpy()
 
                 thetahnp_towrite = (thetahnp * 10 * 256).astype(np.uint16)
                 thetavnp_towrite = (thetavnp * 10 * 256).astype(np.uint16)
