@@ -226,6 +226,8 @@ class MonodepthOptions:
         self.parser.add_argument("--phoconstrainScale",
                                  type=float,
                                  default=1e-2)
+        self.parser.add_argument("--ban_phoconstrain",
+                                 action="store_true")
 
         self.parser.add_argument("--localGeomMode",
                                  type=str,

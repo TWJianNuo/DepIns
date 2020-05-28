@@ -320,7 +320,8 @@ class Trainer:
             hthetai, vthetai = self.localthetadespKitti_scaled.get_theta(depthmap=scaledDepth)
             # tensor2rgb(outputs[('color', 's', 0)], ind = 0).show()
             # ssimref = self.ssim(outputs[('color', 's', 0)], inputs[('color', 0, 0)])
-            phoconstrain = phoconstrain + self.localthetadespKitti_scaled.photometric_loss_on_depth(depthmap=scaledDepth, htheta=htheta_pred_detached, vtheta=vtheta_pred_detached, ks = ks, rgb = inputs[('color', 0, 0)], rgbStereo = inputs[('color', 's', 0)], ssimMsk=outputs['selfOccMask'])
+            if not self.opt.ban_phoconstrain:
+                phoconstrain = phoconstrain + self.localthetadespKitti_scaled.photometric_loss_on_depth(depthmap=scaledDepth, htheta=htheta_pred_detached, vtheta=vtheta_pred_detached, ks = ks, rgb = inputs[('color', 0, 0)], rgbStereo = inputs[('color', 's', 0)], ssimMsk=outputs['selfOccMask'])
             l1constrain = l1constrain + torch.sum((torch.abs(hthetai - htheta_pred_detached) + torch.abs(vthetai - vtheta_pred_detached)) * self.thetalossmap) / torch.sum(self.thetalossmap)
         l1constrain = l1constrain / len(self.opt.scales)
         phoconstrain = phoconstrain / len(self.opt.scales)
