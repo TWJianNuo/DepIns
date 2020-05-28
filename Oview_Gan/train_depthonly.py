@@ -7,9 +7,15 @@ from options import MonodepthOptions
 import warnings
 
 import torch.optim as optim
+import torch
 from torch.utils.data import DataLoader
-# from tensorboardX import SummaryWriter
-from torch.utils.tensorboard import SummaryWriter
+
+
+version_num = int((torch.__version__).replace('.', '').ljust(10, '0'))
+if version_num > 1100000000:
+    from torch.utils.tensorboard import SummaryWriter
+else:
+    from tensorboardX import SummaryWriter
 
 from layers import *
 
@@ -244,6 +250,7 @@ class Trainer:
         """
         self.model_lr_scheduler.step()
         self.set_train()
+        # self.set_eval()
 
         for batch_idx, inputs in enumerate(self.train_loader):
 
@@ -284,20 +291,22 @@ class Trainer:
 
         outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
 
+        # print((outputs[('disp', 0)][:,0:1,:,:] * 2 * float(np.pi) - inputs['htheta']).abs().max())
+        # tensor2disp(inputs['htheta'] - 1, vmax=4, ind = 0).show()
+        # tensor2disp(outputs[('disp', 0)][:,0:1,:,:] * 2 * float(np.pi) - 1, vmax=4, ind=0).show()
+
         # Depth Branch
         self.generate_images_pred(inputs, outputs)
         losses.update(self.depth_compute_losses(inputs, outputs))
 
         # Theta Branch
-        losses.update(self.theta_compute_losses(inputs, outputs))
+        # losses.update(self.theta_compute_losses(inputs, outputs))
 
         # Constrain Branch
         losses.update(self.constrain_compute_losses(inputs, outputs))
 
 
-        losses['totLoss'] = losses['ltheta'] * self.opt.lthetaScale + \
-                            losses['sclLoss'] * self.opt.sclLossScale + \
-                            losses['l1loss'] * self.opt.l1lossScale + \
+        losses['totLoss'] = losses['l1loss'] * self.opt.l1lossScale + \
                             losses['pholoss'] * self.opt.pholossScale + \
                             losses['l1constrain'] * self.opt.l1constrainScale + \
                             losses['phoconstrain'] * self.opt.phoconstrainScale
@@ -308,8 +317,8 @@ class Trainer:
         losses = dict()
         l1constrain = 0
         phoconstrain = 9
-        htheta_pred_detached = outputs['htheta_pred'].detach()
-        vtheta_pred_detached = outputs['vtheta_pred'].detach()
+        htheta_pred_detached = inputs['htheta']
+        vtheta_pred_detached = inputs['vtheta']
         ks = self.unitFK * self.opt.width * inputs['stereo_T'][:, 0,3] * self.STEREO_SCALE_FACTOR
         for i in range(len(self.opt.scales)):
             scaledDepth = F.interpolate(outputs[('depth', 0, i)] * self.STEREO_SCALE_FACTOR, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
@@ -497,12 +506,14 @@ class Trainer:
             figv = tensor2disp(outputs['vtheta'] - outputs['vtheta'].min(), percentile=95, ind=vind)
             figvpred = tensor2disp(outputs['vtheta_pred'] - outputs['vtheta_pred'].min(), percentile=95, ind=vind)
             figcombined = np.concatenate([np.array(figrgb), np.array(figh), np.array(fighpred), np.array(figv), np.array(figvpred)], axis=0)
-            self.writers['train'].add_image('rgb', torch.from_numpy(figcombined).float() / 255, dataformats='HWC', global_step=self.step)
+            self.writers['train'].add_image('rgb', (torch.from_numpy(figcombined).float() / 255)).permute([2,0,1], self.step)
             # self.writers['train'].add_image('rgb', torch.from_numpy(figcombined).float().permute([2,0,1]) / 255, self.step)
         else:
             figrgb = tensor2rgb(inputs[('color', 0, 0)], ind=vind)
-            fighpred = tensor2disp(outputs['htheta_pred'] - 1, vmax = 4, ind=vind)
-            figvpred = tensor2disp(outputs['vtheta_pred'] - 1, vmax = 4, ind=vind)
+            fighpred = tensor2disp(inputs['htheta'] - 1, vmax = 4, ind=vind)
+            figvpred = tensor2disp(inputs['vtheta'] - 1, vmax = 4, ind=vind)
+            # fighpred = tensor2disp(outputs['htheta_pred'] - 1, vmax = 4, ind=vind)
+            # figvpred = tensor2disp(outputs['vtheta_pred'] - 1, vmax = 4, ind=vind)
 
             figdisp = tensor2disp(outputs[('disp', 0)][:,2:3,:,:], vmax=0.1, ind=0)
             # tensor2disp(outputs[('disp', 0)], vmax=1, ind=0).show()
@@ -515,7 +526,7 @@ class Trainer:
             figcombined1 = np.concatenate([np.array(figrgb), np.array(fighpred), np.array(figvpred)], axis=0)
             figcombined2 = np.concatenate([np.array(figdisp), np.array(fighpred_fromD), np.array(figvpred_fromD)], axis=0)
             figcombined = np.concatenate([figcombined1, figcombined2], axis=1)
-            self.writers['train'].add_image('overview', torch.from_numpy(figcombined).float() / 255, dataformats='HWC', global_step=self.step)
+            self.writers['train'].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2,0,1]), self.step)
 
 
             figrgb_stereo = tensor2rgb(inputs[('color', 's', 0)], ind=vind)
@@ -527,7 +538,7 @@ class Trainer:
             occmask = tensor2disp(outputs['selfOccMask'], vmax = 1, ind=vind)
             color_recon = tensor2rgb(outputs[('color', 's', 0)], ind=vind)
             combined2 = np.concatenate([figrgb2, figrgb_stereo, color_recon, occmask])
-            self.writers['train'].add_image('rgb', torch.from_numpy(combined2).float() / 255, dataformats='HWC', global_step=self.step)
+            self.writers['train'].add_image('rgb', (torch.from_numpy(combined2).float() / 255).permute([2,0,1]), self.step)
             # pil.fromarray(combined2).show()
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file

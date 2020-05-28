@@ -334,7 +334,7 @@ class MonoDataset(data.Dataset):
             # inputs["presil_projLidar"] = presil_projLidar
 
         if self.theta_gt_path is not None:
-            inputs["thetagt"] = self.get_theta_fromfile(folder, frame_index, side, do_flip)
+            inputs.update(self.get_theta_fromfile(folder, frame_index, side, do_flip))
         return inputs
 
     def get_color(self, folder, frame_index, side, do_flip):

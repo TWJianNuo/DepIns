@@ -62,6 +62,7 @@ class KITTIRAWDataset(KITTIDataset):
         super(KITTIRAWDataset, self).__init__(*args, **kwargs)
 
     def get_theta_fromfile(self, folder, frame_index, side, do_flip):
+        inputs = dict()
         htheta = pil.open(os.path.join(self.theta_gt_path, folder, "htheta", "image_0{}".format(self.side_map[side]), str(frame_index).zfill(10) + '.png'))
         htheta = htheta.resize([self.width, self.height], pil.BILINEAR)
         if do_flip:
@@ -75,9 +76,11 @@ class KITTIRAWDataset(KITTIDataset):
             vtheta = vtheta.transpose(Image.FLIP_LEFT_RIGHT)
         vtheta = np.array(vtheta).astype(np.float32) / 10 / 256
         vtheta = torch.from_numpy(vtheta).unsqueeze(0)
-        tensor2disp(htheta.unsqueeze(0) -1, vmax=4, ind = 0).show()
-        tensor2disp(vtheta.unsqueeze(0) - 1, vmax=4, ind=0).show()
-        return htheta
+        # tensor2disp(htheta.unsqueeze(0) -1, vmax=4, ind = 0).show()
+        # tensor2disp(vtheta.unsqueeze(0) - 1, vmax=4, ind=0).show()
+        inputs['htheta'] = htheta
+        inputs['vtheta'] = vtheta
+        return inputs
 
     def get_depth_fromfile(self, folder, frame_index, side, do_flip):
         rgb_path = os.path.join(self.kitti_gt_path, folder, "image_0{}".format(self.side_map[side]), "{:010d}.png".format(frame_index))
