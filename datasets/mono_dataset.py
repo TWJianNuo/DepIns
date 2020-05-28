@@ -137,7 +137,7 @@ class MonoDataset(data.Dataset):
         else:
             self.kitti_gt_path = None
 
-        if kitti_gt_path is not 'None':
+        if theta_gt_path is not 'None':
             self.theta_gt_path = theta_gt_path
         else:
             self.theta_gt_path = None
