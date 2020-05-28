@@ -11,7 +11,9 @@ import torch
 from torch.utils.data import DataLoader
 
 
-version_num = int((torch.__version__).replace('.', '').ljust(10, '0'))
+version_num = torch.__version__
+version_num = ''.join(i for i in version_num if i.isdigit())
+version_num = int(version_num.ljust(10, '0'))
 if version_num > 1100000000:
     from torch.utils.tensorboard import SummaryWriter
 else:
