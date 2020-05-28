@@ -94,6 +94,13 @@ def export_gt_depths_kitti():
 
 
     lines = collect_all_entries(opt.data_path)
+    lines_valid = list()
+    for line in lines:
+        folder, frame_id, direction = line.split()
+        frame_id = int(frame_id)
+        velo_filename = os.path.join(opt.data_path, folder, "velodyne_points/data", "{:010d}.bin".format(frame_id))
+        if os.path.isfile(velo_filename):
+            lines_valid.append(line)
 
     mapping = {'l': 'image_02', 'r': 'image_03'}
     mapping_cam = {'l': 2, 'r': 3}
@@ -101,7 +108,7 @@ def export_gt_depths_kitti():
     ts = time.time()
     imgCount = 0
 
-    dataset = datasets.KITTIRAWDataset(opt.data_path, lines, encoder_dict['height'], encoder_dict['width'], [0], 4, is_train=False)
+    dataset = datasets.KITTIRAWDataset(opt.data_path, lines_valid, encoder_dict['height'], encoder_dict['width'], [0], 4, is_train=False)
     dataloader = DataLoader(dataset, 16, shuffle=False, num_workers=opt.num_workers, pin_memory=True, drop_last=False)
     with torch.no_grad():
         for data in dataloader:
