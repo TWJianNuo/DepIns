@@ -293,10 +293,6 @@ class Trainer:
 
         outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
 
-        # print((outputs[('disp', 0)][:,0:1,:,:] * 2 * float(np.pi) - inputs['htheta']).abs().max())
-        # tensor2disp(inputs['htheta'] - 1, vmax=4, ind = 0).show()
-        # tensor2disp(outputs[('disp', 0)][:,0:1,:,:] * 2 * float(np.pi) - 1, vmax=4, ind=0).show()
-
         # Depth Branch
         self.generate_images_pred(inputs, outputs)
         losses.update(self.depth_compute_losses(inputs, outputs))
@@ -324,12 +320,10 @@ class Trainer:
         ks = self.unitFK * self.opt.width * inputs['stereo_T'][:, 0,3] * self.STEREO_SCALE_FACTOR
         for i in range(len(self.opt.scales)):
             scaledDepth = F.interpolate(outputs[('depth', 0, i)] * self.STEREO_SCALE_FACTOR, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            hthetai, vthetai = self.localthetadespKitti_scaled.get_theta(depthmap=scaledDepth)
-            # tensor2rgb(outputs[('color', 's', 0)], ind = 0).show()
-            # ssimref = self.ssim(outputs[('color', 's', 0)], inputs[('color', 0, 0)])
+            hloss, vloss = self.localthetadespKitti_scaled.mixed_loss(depthmap=scaledDepth, htheta=htheta_pred_detached, vtheta=vtheta_pred_detached)
             if not self.opt.ban_phoconstrain:
                 phoconstrain = phoconstrain + self.localthetadespKitti_scaled.photometric_loss_on_depth(depthmap=scaledDepth, htheta=htheta_pred_detached, vtheta=vtheta_pred_detached, ks = ks, rgb = inputs[('color', 0, 0)], rgbStereo = inputs[('color', 's', 0)], ssimMsk=outputs['selfOccMask'])
-            l1constrain = l1constrain + torch.sum((torch.abs(hthetai - htheta_pred_detached) + torch.abs(vthetai - vtheta_pred_detached)) * self.thetalossmap) / torch.sum(self.thetalossmap)
+            l1constrain = l1constrain + (hloss + vloss) / 2
         l1constrain = l1constrain / len(self.opt.scales)
         phoconstrain = phoconstrain / len(self.opt.scales)
         losses['l1constrain'] = l1constrain
