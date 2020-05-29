@@ -237,6 +237,8 @@ class MonodepthOptions:
                                  action="store_true")
         self.parser.add_argument("--no_shuffle",
                                  action="store_true")
+        self.parser.add_argument("--addDepthBranch",
+                                 action="store_true")
 
 
 

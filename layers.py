@@ -2951,8 +2951,8 @@ class LocalThetaDesp(nn.Module):
         drawind = random.randint(0, len(xxval))
         accx = xxval[drawind]
         accy = yyval[drawind]
-        accx = 934
-        accy = 275
+        accx = 143
+        accy = 203
         drawx = phoxxnumpy[:, accy, accx]
         drawy = phoyynumpy[:, accy, accx]
 
@@ -2968,8 +2968,10 @@ class LocalThetaDesp(nn.Module):
         opt3 = self.model_optimizer = optim.Adam([dummypredh3] + [dummypredv3], 1e-2)
         depthmap = depthmap.detach()
         for mm in range(40):
-            htheta = torch.sigmoid(dummypredh3) * 2 * float(np.pi)
-            vtheta = torch.sigmoid(dummypredv3) * 2 * float(np.pi)
+            # htheta = torch.sigmoid(dummypredh3) * 2 * float(np.pi)
+            # vtheta = torch.sigmoid(dummypredv3) * 2 * float(np.pi)
+            htheta = htheta_bck
+            vtheta = vtheta_bck
 
             depthmapl = torch.log(torch.clamp(depthmap, min = 1e-3))
             # tensor2disp(depthmap > 0, ind=0, vmax=1).show()
@@ -3114,9 +3116,9 @@ class LocalThetaDesp(nn.Module):
                 phoSelector = (depthmap > 0).float() * inboundh * inboundv * addselector
                 pholoss_scale = torch.sum(pholoss * phoSelector) / (torch.sum(phoSelector) + 1)
 
-                opt3.zero_grad()
-                (pholoss_scale).backward()
-                opt3.step()
+                # opt3.zero_grad()
+                # (pholoss_scale).backward()
+                # opt3.step()
                 # print(pholoss_scale)
                 # print(pholoss_scale, torch.sum(torch.abs(htheta - htheta_bck) * phoSelector) / torch.sum(phoSelector), torch.sum(phoSelector))
                 l1diff = torch.sum(torch.abs(rgb[0,:,accy,accx] - predPho[0,0,:,accy,accx])) + torch.sum(torch.abs(rgb[0,:,accy-1,accx-1] - predPho[0,1,:,accy,accx])) + \
@@ -3166,8 +3168,8 @@ class LocalThetaDesp(nn.Module):
         vlscolors[0,:] = [1,0,0]
         plt.figure()
         plt.imshow(tensor2rgb(rgb, ind = 0))
-        plt.scatter(xxval, yyval, 0.5, z)
-        plt.scatter(drawx, drawy, 2, vlscolors)
+        plt.scatter(xxval, yyval, 5, z)
+        plt.scatter(drawx, drawy, 20, vlscolors)
         # plt.show()
 
         predxxnumpy = predxx.detach().cpu().numpy()[0,:,:,:]
@@ -3177,9 +3179,9 @@ class LocalThetaDesp(nn.Module):
         drawxStereo = predxxnumpy[:, accy, accx]
         drawyStereo = predyynumpy[:, accy, accx]
         plt.figure()
-        plt.scatter(xxStereoval, yyStereoval, 0.5, z)
+        plt.scatter(xxStereoval, yyStereoval, 5, z)
         plt.imshow(tensor2rgb(rgbStereo, ind = 0))
-        plt.scatter(drawxStereo, drawyStereo, 2, vlscolors)
+        plt.scatter(drawxStereo, drawyStereo, 20, vlscolors)
         # plt.show()
 
         print(predDepth_organized[0,:,accy,accx])

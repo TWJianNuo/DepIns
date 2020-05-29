@@ -113,8 +113,13 @@ def export_gt_depths_kitti():
     with torch.no_grad():
         for data in dataloader:
             outputs = dict()
+            outputs_flipped = dict()
             input_color = data[("color", 0, 0)].cuda()
+            input_color_flipped = torch.flip(input_color, dims=[3])
+            # tensor2rgb(input_color, ind=0).show()
+            # tensor2rgb(input_color_flipped, ind=0).show()
             outputs.update(depth_decoder(encoder(input_color)))
+            outputs_flipped.update(depth_decoder(encoder(input_color_flipped)))
 
             for i in range(outputs[('disp', 0)].shape[0]):
                 folder, frame_id, direction, _ = data['entry_tag'][i].split()
@@ -146,6 +151,37 @@ def export_gt_depths_kitti():
                 if not opt.banvls:
                     output_folder_hvls = os.path.join(opt.save_dir, folder, 'htheta_vls', mapping[direction])
                     output_folder_vvls = os.path.join(opt.save_dir, folder, 'vtheta_vls', mapping[direction])
+                    os.makedirs(output_folder_hvls, exist_ok=True)
+                    os.makedirs(output_folder_vvls, exist_ok=True)
+                    figh = tensor2disp(thetah - 1, vmax=4, ind=0)
+                    figv = tensor2disp(thetav - 1, vmax=4, ind=0)
+                    save_path_hvls = os.path.join(output_folder_hvls, str(frame_id).zfill(10) + '.png')
+                    save_path_vvls = os.path.join(output_folder_vvls, str(frame_id).zfill(10) + '.png')
+                    figh.save(save_path_hvls)
+                    figv.save(save_path_vvls)
+
+
+                output_folder_h = os.path.join(opt.save_dir, folder, 'htheta_flipped', mapping[direction])
+                output_folder_v = os.path.join(opt.save_dir, folder, 'vtheta_flipped', mapping[direction])
+                os.makedirs(output_folder_h, exist_ok=True)
+                os.makedirs(output_folder_v, exist_ok=True)
+                save_path_h = os.path.join(output_folder_h, str(frame_id).zfill(10) + '.png')
+                save_path_v = os.path.join(output_folder_v, str(frame_id).zfill(10) + '.png')
+
+                thetah = outputs_flipped[('disp', 0)][i:i+1,0:1,:,:] * 2 * np.pi
+                thetav = outputs_flipped[('disp', 0)][i:i + 1, 1:2, :, :] * 2 * np.pi
+
+                thetahnp = thetah.squeeze(0).squeeze(0).cpu().numpy()
+                thetavnp = thetav.squeeze(0).squeeze(0).cpu().numpy()
+
+                thetahnp_towrite = (thetahnp * 10 * 256).astype(np.uint16)
+                thetavnp_towrite = (thetavnp * 10 * 256).astype(np.uint16)
+                cv2.imwrite(save_path_h, thetahnp_towrite)
+                cv2.imwrite(save_path_v, thetavnp_towrite)
+
+                if not opt.banvls:
+                    output_folder_hvls = os.path.join(opt.save_dir, folder, 'htheta_vls_flipped', mapping[direction])
+                    output_folder_vvls = os.path.join(opt.save_dir, folder, 'vtheta_vls_flipped', mapping[direction])
                     os.makedirs(output_folder_hvls, exist_ok=True)
                     os.makedirs(output_folder_vvls, exist_ok=True)
                     figh = tensor2disp(thetah - 1, vmax=4, ind=0)
