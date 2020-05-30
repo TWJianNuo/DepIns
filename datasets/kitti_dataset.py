@@ -63,17 +63,19 @@ class KITTIRAWDataset(KITTIDataset):
 
     def get_theta_fromfile(self, folder, frame_index, side, do_flip):
         inputs = dict()
-        htheta = pil.open(os.path.join(self.theta_gt_path, folder, "htheta", "image_0{}".format(self.side_map[side]), str(frame_index).zfill(10) + '.png'))
-        htheta = htheta.resize([self.width, self.height], pil.BILINEAR)
         if do_flip:
-            htheta = htheta.transpose(Image.FLIP_LEFT_RIGHT)
+            htheta = pil.open(os.path.join(self.theta_gt_path, folder, "htheta_flipped", "image_0{}".format(self.side_map[side]), str(frame_index).zfill(10) + '.png'))
+        else:
+            htheta = pil.open(os.path.join(self.theta_gt_path, folder, "htheta", "image_0{}".format(self.side_map[side]), str(frame_index).zfill(10) + '.png'))
+        htheta = htheta.resize([self.width, self.height], pil.BILINEAR)
         htheta = np.array(htheta).astype(np.float32) / 10 / 256
         htheta = torch.from_numpy(htheta).unsqueeze(0)
 
-        vtheta = pil.open(os.path.join(self.theta_gt_path, folder, "vtheta", "image_0{}".format(self.side_map[side]), str(frame_index).zfill(10) + '.png'))
-        vtheta = vtheta.resize([self.width, self.height], pil.BILINEAR)
         if do_flip:
-            vtheta = vtheta.transpose(Image.FLIP_LEFT_RIGHT)
+            vtheta = pil.open(os.path.join(self.theta_gt_path, folder, "vtheta_flipped", "image_0{}".format(self.side_map[side]),str(frame_index).zfill(10) + '.png'))
+        else:
+            vtheta = pil.open(os.path.join(self.theta_gt_path, folder, "vtheta", "image_0{}".format(self.side_map[side]), str(frame_index).zfill(10) + '.png'))
+        vtheta = vtheta.resize([self.width, self.height], pil.BILINEAR)
         vtheta = np.array(vtheta).astype(np.float32) / 10 / 256
         vtheta = torch.from_numpy(vtheta).unsqueeze(0)
         # tensor2disp(htheta.unsqueeze(0) -1, vmax=4, ind = 0).show()

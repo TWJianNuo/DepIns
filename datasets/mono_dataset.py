@@ -28,7 +28,7 @@ def pil_loader(path):
         with Image.open(f) as img:
             return img.convert('RGB')
 
-
+np.random.seed(0)
 class MonoDataset(data.Dataset):
     """Superclass for monocular dataloaders
 

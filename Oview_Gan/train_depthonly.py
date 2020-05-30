@@ -37,9 +37,9 @@ def save_grad(name):
         grads[name] = grad
     return hook
 
-# torch.manual_seed(0)
-# torch.backends.cudnn.deterministic = False
-# torch.backends.cudnn.benchmark = False
+torch.manual_seed(0)
+torch.backends.cudnn.deterministic = False
+torch.backends.cudnn.benchmark = False
 class Trainer:
     def __init__(self, options):
         self.opt = options
@@ -288,6 +288,16 @@ class Trainer:
             if not (key == 'entry_tag' or key == 'syn_tag'):
                 inputs[key] = ipt.to(self.device)
 
+        # outputs = dict()
+        # losses = dict()
+        # outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
+        # _, predDepth = disp_to_depth(outputs[('disp', 0)][:, 2:3, :, :], min_depth=self.opt.min_depth,
+        #                              max_depth=self.opt.max_depth)
+        # predDepth = predDepth * self.STEREO_SCALE_FACTOR
+        # predDepth = F.interpolate(predDepth, inputs['depth_gt'].shape[2:4], mode='bilinear')
+        # tensor2disp(outputs['disp', 0][:, 2:3, :, :], vmax=0.1, ind=0).show()
+        # a1 = torch.sum(torch.abs(predDepth - inputs['depth_gt']) * (inputs['depth_gt'] > 0).float())
+        # for i in range(1000):
         outputs = dict()
         losses = dict()
 
@@ -309,6 +319,20 @@ class Trainer:
                             losses['l1constrain'] * self.opt.l1constrainScale + \
                             losses['phoconstrain'] * self.opt.phoconstrainScale
 
+        # self.model_optimizer.zero_grad()
+        # losses['totLoss'].backward()
+        # self.model_optimizer.step()
+        # print(losses['totLoss'])
+        # vind = 0
+        # tensor2disp(outputs['disp', 0][:,2:3,:,:], vmax=0.1, ind=0).show()
+        # _, predDepth = disp_to_depth(outputs[('disp', 0)][:, 2:3, :, :], min_depth=self.opt.min_depth,
+        #                              max_depth=self.opt.max_depth)
+        # predDepth = predDepth * self.STEREO_SCALE_FACTOR
+        # predDepth = F.interpolate(predDepth, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+        # predD2htheta, predD2vtheta = self.localthetadespKitti.get_theta(predDepth)
+        # tensor2disp(predD2htheta - 1, vmax=4, ind=vind).show()
+        # tensor2disp(predD2vtheta - 1, vmax=4, ind=vind).show()
+        # predDepth = F.interpolate(predDepth, inputs['depth_gt'].shape[2:4], mode='bilinear')
         return outputs, losses
 
     def constrain_compute_losses(self, inputs, outputs):
