@@ -87,7 +87,7 @@ def evaluate(opt):
                                 pin_memory=True, drop_last=False)
 
         encoder = networks.ResnetEncoder(opt.num_layers, False)
-        depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
+        depth_decoder = networks.DepthDecoder(encoder.num_ch_enc, num_output_channels=3)
 
         model_dict = encoder.state_dict()
         encoder.load_state_dict({k: v for k, v in encoder_dict.items() if k in model_dict})
@@ -112,6 +112,7 @@ def evaluate(opt):
                     input_color = torch.cat((input_color, torch.flip(input_color, [3])), 0)
 
                 output = depth_decoder(encoder(input_color))
+                output[("disp", 0)] = output[("disp", 0)][:,2:3,:,:]
 
                 pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
                 pred_disp = pred_disp.cpu()[:, 0].numpy()
