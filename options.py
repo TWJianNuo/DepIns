@@ -222,7 +222,7 @@ class MonodepthOptions:
                                  default=1e-2)
         self.parser.add_argument("--phoconstrainScale",
                                  type=float,
-                                 default=1e-2)
+                                 default=1e-3)
         self.parser.add_argument("--ban_phoconstrain",
                                  action="store_true")
 
@@ -326,8 +326,6 @@ class MonodepthOptions:
         self.parser.add_argument("--eval_split",
                                  type=str,
                                  default="eigen",
-                                 choices=[
-                                    "eigen", "eigen_benchmark", "benchmark", "odom_9", "odom_10"],
                                  help="which split to run eval on")
         self.parser.add_argument("--save_pred_disps",
                                  help="if set saves predicted disparities",
@@ -346,6 +344,16 @@ class MonodepthOptions:
                                  help="if set will perform the flipping post processing "
                                       "from the original monodepth paper",
                                  action="store_true")
+        self.parser.add_argument("--do_theta_optimization",
+                                 help="if set will perform the flipping post processing "
+                                      "from the original monodepth paper",
+                                 action="store_true")
+        self.parser.add_argument("--patchw",
+                                 type=int,
+                                 default=15)
+        self.parser.add_argument("--patchh",
+                                 type=int,
+                                 default=3)
 
 
         # Cycle GAN additional

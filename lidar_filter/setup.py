@@ -2,11 +2,11 @@ from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 setup(
-    name='LidarFilterCuda',
+    name='lidar_filter',
     ext_modules=[
-        CUDAExtension('LidarFilterCuda', [
+        CUDAExtension('bnmorph_getcorpts', [
             'lidar_filter.cpp',
-            'lidar_filter_kernel.cu',
+            'lidar_filter.cu',
         ]),
     ],
     cmdclass={

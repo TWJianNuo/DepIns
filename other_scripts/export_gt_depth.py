@@ -62,6 +62,10 @@ def export_gt_depths_kitti():
                         help='path to the root of save folder',
                         required=True)
 
+    parser.add_argument('--surfnorm_dir',
+                        type=str,
+                        default='/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Data/kitti/surface_normal_from_unprocessed_raw_lidar')
+
     opt = parser.parse_args()
 
     lines = collect_all_entries(opt.data_path)
@@ -78,6 +82,7 @@ def export_gt_depths_kitti():
     ts = time.time()
 
     imgCount = 0
+    f = open(os.path.join(opt.save_dir , "addresslisting.txt"), "w")
 
     for line in lines:
 
@@ -86,8 +91,7 @@ def export_gt_depths_kitti():
 
         calib_dir = os.path.join(opt.data_path, folder.split("/")[0])
 
-        velo_filename = os.path.join(opt.data_path, folder,
-                                     "velodyne_points/data", "{:010d}.bin".format(frame_id))
+        velo_filename = os.path.join(opt.data_path, folder, "velodyne_points/data", "{:010d}.bin".format(frame_id))
         if not os.path.isfile(velo_filename):
             continue
 
@@ -108,6 +112,11 @@ def export_gt_depths_kitti():
 
         imgCount = imgCount + 1
 
+        f.writelines(save_path + '\n')
+
         print("%d finished, %f hours left" % (imgCount, (te - ts) / imgCount * (len(lines) - imgCount) / 60 / 60))
+
+        os.makedirs(os.path.join(opt.surfnorm_dir, folder, mapping[direction]), exist_ok=True) # Create Surface Normal Directory
+
 if __name__ == "__main__":
     export_gt_depths_kitti()

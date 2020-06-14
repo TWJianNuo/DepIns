@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from layers import disp_to_depth
+from layers import *
 from utils import readlines
 from options import MonodepthOptions
 import datasets
@@ -98,10 +98,14 @@ def evaluate(opt):
         depth_decoder.cuda()
         depth_decoder.eval()
 
-        pred_disps = []
+        gt_path = os.path.join(splits_dir, opt.eval_split, "gt_depths.npz")
+        gt_depths = np.load(gt_path, fix_imports=True, encoding='latin1', allow_pickle=True)["data"]
 
         print("-> Computing predictions with size {}x{}".format(
             encoder_dict['width'], encoder_dict['height']))
+
+        localgeomDict = dict()
+        preddepths = list()
         count = 0
         with torch.no_grad():
             for data in dataloader:
@@ -112,83 +116,51 @@ def evaluate(opt):
                     input_color = torch.cat((input_color, torch.flip(input_color, [3])), 0)
 
                 output = depth_decoder(encoder(input_color))
-                output[("disp", 0)] = output[("disp", 0)][:,2:3,:,:]
 
-                pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
-                pred_disp = pred_disp.cpu()[:, 0].numpy()
+                htheta = output[("disp", 0)][:,0:1,:,:] * 2 * np.pi
+                vtheta = output[("disp", 0)][:, 1:2, :, :] * 2 * np.pi
+                _, pred_depth = disp_to_depth(output[("disp", 0)][:,2:3,:,:], opt.min_depth, opt.max_depth)
+                preddepth = pred_depth * STEREO_SCALE_FACTOR
 
-                if opt.post_process:
-                    N = pred_disp.shape[0] // 2
-                    pred_disp = batch_post_process_disparity(pred_disp[:N], pred_disp[N:, :, ::-1])
 
-                pred_disps.append(pred_disp)
-                count = count + 1
+                for i in range(htheta.shape[0]):
+                    depth_gt_eval = gt_depths[count]
+                    ch, cw = depth_gt_eval.shape
+                    acckey = str(ch) + '_' + str(cw)
+                    if acckey not in localgeomDict:
+                        kittiw = cw
+                        kittih = ch
+                        intrinsicKitti = np.array([
+                            [0.58 * kittiw, 0, 0.5 * kittiw],
+                            [0, 1.92 * kittih, 0.5 * kittih],
+                            [0, 0, 1]], dtype=np.float32)
+                        localthetadesp = LocalThetaDesp(height=kittih, width=kittiw, batch_size=1, intrinsic=intrinsicKitti).cuda()
+                        localgeomDict[acckey] = localthetadesp
+                    hthetai = htheta[i:i+1,:,:,:]
+                    hthetai = F.interpolate(hthetai, [ch, cw], mode='bilinear', align_corners=True)
+                    vthetai = vtheta[i:i+1,:,:,:]
+                    vthetai = F.interpolate(vthetai, [ch, cw], mode='bilinear', align_corners=True)
+                    preddepthi = preddepth[i:i+1,:,:,:]
+                    preddepthi = F.interpolate(preddepthi, [ch, cw], mode='bilinear', align_corners=True)
 
-        pred_disps = np.concatenate(pred_disps)
+                    if opt.do_theta_optimization:
+                        preddepthi = localgeomDict[acckey].optimize_depth_using_theta(depthmap = preddepthi, htheta = hthetai, vtheta = vthetai)
 
-    else:
-        # Load predictions from file
-        print("-> Loading predictions from {}".format(opt.ext_disp_to_eval))
-        pred_disps = np.load(opt.ext_disp_to_eval)
+                    preddepths.append(preddepthi[0,0,:,:].cpu().numpy())
 
-        if opt.eval_eigen_to_benchmark:
-            eigen_to_benchmark_ids = np.load(
-                os.path.join(splits_dir, "benchmark", "eigen_to_benchmark_ids.npy"))
-
-            pred_disps = pred_disps[eigen_to_benchmark_ids]
-
-    if opt.save_pred_disps:
-        output_path = os.path.join(
-            opt.load_weights_folder, "disps_{}_split.npy".format(opt.eval_split))
-        print("-> Saving predicted disparities to ", output_path)
-        np.save(output_path, pred_disps)
-
-    if opt.no_eval:
-        print("-> Evaluation disabled. Done.")
-        quit()
-
-    elif opt.eval_split == 'benchmark':
-        save_dir = os.path.join(opt.load_weights_folder, "benchmark_predictions")
-        print("-> Saving out benchmark predictions to {}".format(save_dir))
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-
-        for idx in range(len(pred_disps)):
-            disp_resized = cv2.resize(pred_disps[idx], (1216, 352))
-            depth = STEREO_SCALE_FACTOR / disp_resized
-            depth = np.clip(depth, 0, 80)
-            depth = np.uint16(depth * 256)
-            save_path = os.path.join(save_dir, "{:010d}.png".format(idx))
-            cv2.imwrite(save_path, depth)
-
-        print("-> No ground truth is available for the KITTI benchmark, so not evaluating. Done.")
-        quit()
-
-    gt_path = os.path.join(splits_dir, opt.eval_split, "gt_depths.npz")
-    gt_depths = np.load(gt_path, fix_imports=True, encoding='latin1', allow_pickle = True)["data"]
-
+                    count = count + 1
+                # if count > 1:
+                #     break
     print("-> Evaluating")
-
-    if opt.eval_stereo:
-        print("   Stereo evaluation - "
-              "disabling median scaling, scaling by {}".format(STEREO_SCALE_FACTOR))
-        opt.disable_median_scaling = True
-        opt.pred_depth_scale_factor = STEREO_SCALE_FACTOR
-    else:
-        print("   Mono evaluation - using median scaling")
 
     errors = []
     ratios = []
 
-    for i in range(pred_disps.shape[0]):
+    for i in range(len(preddepths)):
 
         gt_depth = gt_depths[i]
         gt_height, gt_width = gt_depth.shape[:2]
-
-        pred_disp = pred_disps[i]
-        pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
-        pred_depth = 1 / pred_disp
-
+        pred_depth = preddepths[i]
         # from utils import tensor2disp
         # tensor2disp(1 / torch.from_numpy(pred_depth).unsqueeze(0).unsqueeze(0), ind = 0, percentile=95).show()
         if opt.eval_split == "eigen":
@@ -206,21 +178,11 @@ def evaluate(opt):
         pred_depth = pred_depth[mask]
         gt_depth = gt_depth[mask]
 
-        pred_depth *= opt.pred_depth_scale_factor
-        if not opt.disable_median_scaling:
-            ratio = np.median(gt_depth) / np.median(pred_depth)
-            ratios.append(ratio)
-            pred_depth *= ratio
 
         pred_depth[pred_depth < MIN_DEPTH] = MIN_DEPTH
         pred_depth[pred_depth > MAX_DEPTH] = MAX_DEPTH
 
         errors.append(compute_errors(gt_depth, pred_depth))
-
-    if not opt.disable_median_scaling:
-        ratios = np.array(ratios)
-        med = np.median(ratios)
-        print(" Scaling ratios | med: {:0.3f} | std: {:0.3f}".format(med, np.std(ratios / med)))
 
     mean_errors = np.array(errors).mean(0)
 

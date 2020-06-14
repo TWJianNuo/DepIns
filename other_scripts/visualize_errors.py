@@ -7,16 +7,18 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from layers import disp_to_depth
-from utils import readlines
+from layers import *
+from utils import *
 from options import MonodepthOptions
 import datasets
 import networks
 import glob
+import matplotlib.pyplot as plt
+
 cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV 3.3.1)
 
 
-splits_dir = os.path.join(os.path.dirname(__file__), "splits")
+splits_dir = os.path.join(os.path.dirname(__file__), '..', "splits")
 
 # Models which were trained with stereo supervision were trained with a nominal
 # baseline of 0.1 units. The KITTI rig has a baseline of 54cm. Therefore,
@@ -42,7 +44,8 @@ def compute_errors(gt, pred):
 
     sq_rel = np.mean(((gt - pred) ** 2) / gt)
 
-    return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3
+    rel = (gt - pred) / gt
+    return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3, rel
 
 
 def batch_post_process_disparity(l_disp, r_disp):
@@ -99,14 +102,16 @@ def evaluate(opt):
         depth_decoder.eval()
 
         pred_disps = []
+        input_rgbs = list()
 
         print("-> Computing predictions with size {}x{}".format(
             encoder_dict['width'], encoder_dict['height']))
+
         count = 0
         with torch.no_grad():
             for data in dataloader:
                 input_color = data[("color", 0, 0)].cuda()
-
+                input_rgbs.append(input_color)
                 if opt.post_process:
                     # Post-processed results require each image to have two forward passes
                     input_color = torch.cat((input_color, torch.flip(input_color, [3])), 0)
@@ -122,9 +127,12 @@ def evaluate(opt):
                     pred_disp = batch_post_process_disparity(pred_disp[:N], pred_disp[N:, :, ::-1])
 
                 pred_disps.append(pred_disp)
+                # if count > 2:
+                #     break
                 count = count + 1
 
         pred_disps = np.concatenate(pred_disps)
+        input_rgbs = torch.cat(input_rgbs, dim=0)
 
     else:
         # Load predictions from file
@@ -179,18 +187,23 @@ def evaluate(opt):
 
     errors = []
     ratios = []
-
+    hist_sta = list()
+    import matplotlib.pyplot as plt
+    cm = plt.get_cmap('bwr')
+    dirmapping = {'l': 'image_02', 'r': 'image_03'}
     for i in range(pred_disps.shape[0]):
 
-        gt_depth = gt_depths[i]
+        dat, frame, dir = filenames[i].split(' ')
+        gt_depth = pil.open(os.path.join("/home/shengjie/Documents/Data/Kitti/filtered_lidar", dat, dirmapping[dir], frame + '.png'))
+        gt_depth = np.array(gt_depth).astype(np.float32) / 256
+        # gt_depth = gt_depths[i]
         gt_height, gt_width = gt_depth.shape[:2]
+
 
         pred_disp = pred_disps[i]
         pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
         pred_depth = 1 / pred_disp
 
-        # from utils import tensor2disp
-        # tensor2disp(1 / torch.from_numpy(pred_depth).unsqueeze(0).unsqueeze(0), ind = 0, percentile=95).show()
         if opt.eval_split == "eigen":
             mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
 
@@ -215,7 +228,23 @@ def evaluate(opt):
         pred_depth[pred_depth < MIN_DEPTH] = MIN_DEPTH
         pred_depth[pred_depth > MAX_DEPTH] = MAX_DEPTH
 
-        errors.append(compute_errors(gt_depth, pred_depth))
+        err_metric = compute_errors(gt_depth, pred_depth)
+        errors.append(err_metric[:-1])
+
+        # Error Visualizations
+        figrgb = tensor2rgb(input_rgbs, ind=i).resize([gt_width, gt_height])
+        xx, yy = np.meshgrid(range(gt_width), range(gt_height), indexing='xy')
+        xxdraw = xx[mask]
+        yydraw = yy[mask]
+        rel = (err_metric[-1] * 3 + 1) / 2
+        relvls = cm(rel)
+
+        fig, ax = plt.subplots(figsize=(16, 12), dpi=100)
+        plt.imshow(figrgb)
+        plt.scatter(xxdraw, yydraw, 2, relvls)
+        plt.savefig(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/err_analysis', str(i).zfill(10) + '.png'))
+        plt.close()
+
 
     if not opt.disable_median_scaling:
         ratios = np.array(ratios)

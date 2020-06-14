@@ -1322,3 +1322,188 @@ sudo woeusb --device /media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Downlo
 11904.9277 1e-2
 9324.2246 1e-3
 10211.1270 1e-3
+
+
+--load_weights_folders /home/shengjie/Documents/Project_SemanticDepth/tmp/trainOnKitti2/models --split eigen --eval_stereo --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --height 320 --width 1024
+
+CUDA_VISIBLE_DEVICES=3 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/trainOnKitti1/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/trainOnKitti1/models/weights_12/
+-> Computing predictions with size 1024x320
+-> Evaluating
+   Stereo evaluation - disabling median scaling, scaling by 5.4
+
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.095  &   0.588  &   4.117  &   0.176  &   0.893  &   0.965  &   0.984  \\
+CUDA_VISIBLE_DEVICES=6 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/trainOnKitti2/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/trainOnKitti2/models/weights_11/
+-> Computing predictions with size 1024x320
+-> Evaluating
+   Stereo evaluation - disabling median scaling, scaling by 5.4
+
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.092  &   0.580  &   4.205  &   0.176  &   0.893  &   0.966  &   0.985  \\
+CUDA_VISIBLE_DEVICES=7 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthonly_pho/models
+/research/cvl-zhusheng/DepIns/tmp/depthonly_pho/models/weights_22/
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthonly_pho/models/weights_22/
+-> Computing predictions with size 1024x320
+-> Evaluating
+   Stereo evaluation - disabling median scaling, scaling by 5.4
+
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.101  &   0.803  &   4.650  &   0.194  &   0.881  &   0.959  &   0.979  \\
+
+CUDA_VISIBLE_DEVICES=3 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthonly_l1_pho/models
+/research/cvl-zhusheng/DepIns/tmp/depthonly_l1_pho/models/weights_7/
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthonly_l1_pho/models/weights_7/
+-> Computing predictions with size 1024x320
+-> Evaluating
+   Stereo evaluation - disabling median scaling, scaling by 5.4
+
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.096  &   0.597  &   4.236  &   0.183  &   0.890  &   0.964  &   0.983  \\
+
+CUDA_VISIBLE_DEVICES=6 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthonly_l1_pho_l1c_6/models
+/research/cvl-zhusheng/DepIns/tmp/depthonly_l1_pho_l1c_6/models/weights_2/
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthonly_l1_pho_l1c_6/models/weights_2/
+-> Computing predictions with size 1024x320
+-> Evaluating
+   Stereo evaluation - disabling median scaling, scaling by 5.4
+
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.095  &   0.593  &   4.221  &   0.176  &   0.892  &   0.966  &   0.985  \\
+
+CUDA_VISIBLE_DEVICES=7 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthonly_l1_pho_phoc_2/models
+/research/cvl-zhusheng/DepIns/tmp/depthonly_l1_pho_phoc_2/models/weights_15/
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthonly_l1_pho_phoc_2/models/weights_15/
+-> Computing predictions with size 1024x320
+-> Evaluating
+   Stereo evaluation - disabling median scaling, scaling by 5.4
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.095  &   0.603  &   4.238  &   0.183  &   0.893  &   0.964  &   0.982  \\
+
+
+
+
+
+--load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/trainOnKitti2/models/weights_11/ --split eigen --eval_stereo --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --height 320 --width 1024 --num_workers 0
+
+
+--load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/trainOnKitti2/models/weights_11/ --split eigen --eval_stereo --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --height 320 --width 1024 --num_workers 0 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/kitti_gtDepthMap
+
+
+--model_name semantics_trial8 --frame_ids 0 --use_stereo --split eigen_full_tmp --log_dir /home/shengjie/Documents/Project_SemanticDepth/tmp --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2 --num_epochs 20  --height 320 --width 1024 --num_workers 0 --PreSIL_path /home/shengjie/Documents/Data/PreSIL_organized --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/depthonly_l1_pho_phoc_2/tmp/trainOnKitti2/models/weights_15 --l1constrainScale 0 --l1lossScale 0 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --ban_phoconstrain --no_aug --pholossScale 1e-2
+
+--model_name semantics_trial8 --frame_ids 0 --use_stereo --split eigen_full_tmp --log_dir /home/shengjie/Documents/Project_SemanticDepth/tmp --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2 --num_epochs 20  --height 320 --width 1024 --num_workers 0 --PreSIL_path /home/shengjie/Documents/Data/PreSIL_organized --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/depthonly_l1_pho_phoc_2/models/weights_15 --l1constrainScale 0 --l1lossScale 0 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --no_aug --pholossScale 1e-2 --phoconstrainScale 1e-4
+
+44319.8594
+40259.1680
+
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/depthonly_l1_pho_phoc_2 /media/shengjie/other/Downloads/
+
+
+--load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/trainOnKitti2/models/weights_11/ --eval_split debug_vls --eval_stereo --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --height 320 --width 1024 --num_workers 0 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/kitti_gtDepthMap
+
+--load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/trainOnKitti2/models/weights_11/ --eval_split debug_vls --eval_stereo --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --height 320 --width 1024 --num_workers 0 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar/
+
+--load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/trainOnKitti2/models/weights_11/ --split eigen --eval_stereo --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --height 320 --width 1024
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.092  &   0.579  &   4.203  &   0.176  &   0.893  &   0.966  &   0.985  \\
+
+--load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/trainOnKitti2/models/weights_11/ --split eigen --eval_stereo --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --height 320 --width 1024
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.092  &   0.579  &   4.203  &   0.176  &   0.893  &   0.966  &   0.985  \\
+
+--do_theta_optimization, 3
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.092  &   0.577  &   4.194  &   0.175  &   0.893  &   0.966  &   0.985  \\
+
+--do_theta_optimization, 4
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.092  &   0.576  &   4.190  &   0.175  &   0.892  &   0.966  &   0.985  \\
+
+--do_theta_optimization, 5
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.092  &   0.576  &   4.186  &   0.175  &   0.892  &   0.966  &   0.985  \\
+
+--do_theta_optimization, 6
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.092  &   0.576  &   4.186  &   0.175  &   0.892  &   0.966  &   0.985  \\
+
+
+
+--load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/depthonly_l1_pho_phoc_2/models/weights_15 --eval_split debug_vls --eval_stereo --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --height 320 --width 1024 --num_workers 0 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar/
+
+
+--load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/depthonly_l1_pho_phoc_2/models/weights_15 --split eigen --eval_stereo --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --height 320 --width 1024
+
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.095  &   0.603  &   4.238  &   0.183  &   0.893  &   0.964  &   0.982  \\
+
+--load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/trainOnKitti2/models/weights_11/ --eval_split debug_vls --eval_stereo --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --height 320 --width 1024 --num_workers 0 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar/
+
+
+
+
+cmake -D CMAKE_BUILD_TYPE=Release -D CMAKE_INSTALL_PREFIX=/usr/local /home/shengjie/Documents/opencv-2.4.9
+
+$ sudo apt-get install build-essential cmake git libgtk2.0-dev pkg-config libavcodec-dev libavformat-dev libswscale-dev
+
+$ sudo apt-get install python3.5-dev python3-numpy libtbb2 libtbb-dev
+
+$ sudo apt-get install libjpeg-dev libpng-dev libtiff5-dev libjasper-dev libdc1394-22-dev libeigen3-dev libtheora-dev libvorbis-dev libxvidcore-dev libx264-dev sphinx-common libtbb-dev yasm libfaac-dev libopencore-amrnb-dev libopencore-amrwb-dev libopenexr-dev libgstreamer-plugins-base1.0-dev libavutil-dev libavfilter-dev libavresample-dev
+
+/opt$ cd opencv
+
+/opt/opencv$ mkdir release
+
+/opt/opencv$ cd release
+
+/opt/opencv/release$ cmake -D BUILD_TIFF=ON -D WITH_CUDA=OFF -D ENABLE_AVX=OFF -D WITH_OPENGL=OFF -D WITH_OPENCL=OFF -D WITH_IPP=OFF -D WITH_TBB=ON -D BUILD_TBB=ON -D WITH_EIGEN=OFF -D WITH_V4L=OFF -D WITH_VTK=OFF -D BUILD_TESTS=OFF -D BUILD_PERF_TESTS=OFF -D CMAKE_BUILD_TYPE=RELEASE -D -DBUILD_LIBPROTOBUF_FROM_SOURCES=ON -D CMAKE_INSTALL_PREFIX=/usr/local -D OPENCV_EXTRA_MODULES_PATH=/home/shengjie/Documents/opencv/opencv_contrib/modules /home/shengjie/Documents/opencv/opencv/
+
+/opt/opencv/release$ make -j4
+
+/opt/opencv/release$ make install
+
+/opt/opencv/release$ ldconfig
+
+/opt/opencv/release$ exit
+
+/opt/opencv/release$ cd ~
+
+
+cmake -D CMAKE_BUILD_TYPE=RELEASE \
+      -D CMAKE_INSTALL_PREFIX=/usr/local \
+      -D INSTALL_C_EXAMPLES=ON \
+      -D INSTALL_PYTHON_EXAMPLES=OFF \
+      -D WITH_TBB=OFF \
+      -D WITH_V4L=OFF \
+      -D WITH_QT=FF \
+      -D WITH_OPENGL=FF \
+      -D WITH_CUDA=OFF \
+      -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules \
+      -D BUILD_TIFF=ON \
+      -D BUILD_EXAMPLES=ON ..
+
+
+
+
+
+g++ -shared -fpic clean.hpp -o hello.so
+
+
+__conda_setup="$('/home/shengjie/anaconda3/bin/conda' 'shell.bash' 'hook' 2> /d$
+if [ $? -eq 0 ]; then
+    eval "$__conda_setup"
+else
+    if [ -f "/home/shengjie/anaconda3/etc/profile.d/conda.sh" ]; then
+        . "/home/shengjie/anaconda3/etc/profile.d/conda.sh"
+    else
+        export PATH="/home/shengjie/anaconda3/bin:$PATH"
+    fi
+fi
+unset __conda_setup
+
+
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/home/shengjie/anaconda3/lib" 
+
+

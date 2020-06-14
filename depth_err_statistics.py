@@ -42,7 +42,9 @@ def compute_errors(gt, pred):
 
     sq_rel = np.mean(((gt - pred) ** 2) / gt)
 
-    return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3
+    rel = (gt - pred) / gt
+    hist, bin_edges = np.histogram(rel, bins = 100, range = [-0.5,0.5])
+    return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3, hist
 
 
 def batch_post_process_disparity(l_disp, r_disp):
@@ -102,6 +104,7 @@ def evaluate(opt):
 
         print("-> Computing predictions with size {}x{}".format(
             encoder_dict['width'], encoder_dict['height']))
+
         count = 0
         with torch.no_grad():
             for data in dataloader:
@@ -179,6 +182,7 @@ def evaluate(opt):
 
     errors = []
     ratios = []
+    hist_sta = list()
 
     for i in range(pred_disps.shape[0]):
 
@@ -189,8 +193,6 @@ def evaluate(opt):
         pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
         pred_depth = 1 / pred_disp
 
-        # from utils import tensor2disp
-        # tensor2disp(1 / torch.from_numpy(pred_depth).unsqueeze(0).unsqueeze(0), ind = 0, percentile=95).show()
         if opt.eval_split == "eigen":
             mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
 
@@ -215,7 +217,16 @@ def evaluate(opt):
         pred_depth[pred_depth < MIN_DEPTH] = MIN_DEPTH
         pred_depth[pred_depth > MAX_DEPTH] = MAX_DEPTH
 
-        errors.append(compute_errors(gt_depth, pred_depth))
+        err_metric = compute_errors(gt_depth, pred_depth)
+        errors.append(err_metric[:-1])
+        hist_sta.append(err_metric[-1])
+
+    hist_stanp = np.stack(hist_sta, axis=0)
+    hist_stanp = np.sum(hist_stanp, axis=0)
+    xaxis = np.linspace(-0.5 ,0.5, 100)
+    import matplotlib.pyplot as plt
+    plt.stem(xaxis, hist_stanp)
+    plt.show()
 
     if not opt.disable_median_scaling:
         ratios = np.array(ratios)
