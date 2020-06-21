@@ -240,6 +240,18 @@ class MonodepthOptions:
         self.parser.add_argument("--addDepthBranch",
                                  action="store_true")
 
+        self.parser.add_argument("--patchw",
+                                 type=int,
+                                 default=15)
+        self.parser.add_argument("--patchh",
+                                 type=int,
+                                 default=3)
+
+        self.parser.add_argument("--surfnorm_gt_path",
+                                 type=str,
+                                 default='None')
+
+
 
 
         # ABLATION options
@@ -348,12 +360,10 @@ class MonodepthOptions:
                                  help="if set will perform the flipping post processing "
                                       "from the original monodepth paper",
                                  action="store_true")
-        self.parser.add_argument("--patchw",
-                                 type=int,
-                                 default=15)
-        self.parser.add_argument("--patchh",
-                                 type=int,
-                                 default=3)
+        self.parser.add_argument("--dokb_crop",
+                                 help="if set will perform the flipping post processing "
+                                      "from the original monodepth paper",
+                                 action="store_true")
 
 
         # Cycle GAN additional
