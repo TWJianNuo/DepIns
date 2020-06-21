@@ -67,7 +67,7 @@ class KITTIRAWDataset(KITTIDataset):
         if do_flip:
             surfnorm_gt = surfnorm_gt.transpose(Image.FLIP_LEFT_RIGHT)
         surfnorm_gt = surfnorm_gt.resize(self.full_res_shape, pil.NEAREST)
-        surfnorm_gt_mask = np.sum(np.array(surfnorm_gt).astype(np.float32), axis=2, keepdims=True) > 1e-3
+        surfnorm_gt_mask = (np.sum(np.array(surfnorm_gt).astype(np.float32), axis=2, keepdims=True) > 1e-3).astype(np.float32)
         surfnorm_gt = np.array(surfnorm_gt).astype(np.float32) / 127.5 - 1.0
 
         # == Debug Code == #
@@ -82,7 +82,7 @@ class KITTIRAWDataset(KITTIDataset):
         # print(np.sum(surfnorm_gt[sely, selx, :] * surfnorm_gt[sely, selx, :]))
 
         surfnorm_gt = torch.from_numpy(surfnorm_gt).permute([2,0,1]).contiguous()
-        surfnorm_gt_mask = torch.from_numpy(surfnorm_gt_mask).permute([2,0,1]).contiguous().float()
+        surfnorm_gt_mask = torch.from_numpy(surfnorm_gt_mask).permute([2,0,1]).contiguous()
         inputs['surfnorm_gt'] = surfnorm_gt
         inputs['surfnorm_gt_mask'] = surfnorm_gt_mask
         return inputs
