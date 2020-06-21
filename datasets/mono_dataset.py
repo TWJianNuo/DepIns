@@ -64,7 +64,8 @@ class MonoDataset(data.Dataset):
                  syn_root = '',
                  PreSIL_root = None,
                  kitti_gt_path = None,
-                 theta_gt_path=None
+                 theta_gt_path=None,
+                 surfnorm_gt_path=None
                  ):
         super(MonoDataset, self).__init__()
 
@@ -141,6 +142,11 @@ class MonoDataset(data.Dataset):
             self.theta_gt_path = theta_gt_path
         else:
             self.theta_gt_path = None
+
+        if surfnorm_gt_path is not 'None':
+            self.surfnorm_gt_path = surfnorm_gt_path
+        else:
+            self.surfnorm_gt_path = None
 
 
     def preprocess(self, inputs, color_aug):
@@ -335,6 +341,9 @@ class MonoDataset(data.Dataset):
 
         if self.theta_gt_path is not None:
             inputs.update(self.get_theta_fromfile(folder, frame_index, side, do_flip))
+
+        if self.surfnorm_gt_path is not None:
+            inputs.update(self.get_surfnorm_fromfile(folder, frame_index, side, do_flip))
         return inputs
 
     def get_color(self, folder, frame_index, side, do_flip):
@@ -377,4 +386,7 @@ class MonoDataset(data.Dataset):
         raise NotImplementedError
 
     def get_theta_fromfile(self, folder, frame_index, side, do_flip):
+        raise NotImplementedError
+
+    def get_surfnorm_fromfile(self, folder, frame_index, side, do_flip):
         raise NotImplementedError

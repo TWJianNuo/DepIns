@@ -61,6 +61,34 @@ class KITTIRAWDataset(KITTIDataset):
     def __init__(self, *args, **kwargs):
         super(KITTIRAWDataset, self).__init__(*args, **kwargs)
 
+    def get_surfnorm_fromfile(self, folder, frame_index, side, do_flip):
+        inputs = dict()
+        surfnorm_gt = pil.open(os.path.join(self.surfnorm_gt_path, folder, "image_0{}".format(self.side_map[side]), str(frame_index).zfill(10) + '.png'))
+        if do_flip:
+            surfnorm_gt = surfnorm_gt.transpose(Image.FLIP_LEFT_RIGHT)
+        surfnorm_gt = surfnorm_gt.resize(self.full_res_shape, pil.NEAREST)
+        surfnorm_gt_mask = np.sum(np.array(surfnorm_gt).astype(np.float32), axis=2, keepdims=True) > 1e-3
+        surfnorm_gt = np.array(surfnorm_gt).astype(np.float32) / 127.5 - 1.0
+
+        # == Debug Code == #
+        # selector = np.sum(np.array(surfnorm_gt), axis=2) > 0
+        # height, width = selector.shape
+        # xx, yy = np.meshgrid(range(width), range(height), indexing='xy')
+        # xxval = xx[selector]
+        # yyval = yy[selector]
+        # selind = np.random.randint(len(xxval))
+        # selx = xxval[selind]
+        # sely = yyval[selind]
+        # print(np.sum(surfnorm_gt[sely, selx, :] * surfnorm_gt[sely, selx, :]))
+
+        surfnorm_gt = torch.from_numpy(surfnorm_gt).permute([2,0,1]).contiguous()
+        surfnorm_gt_mask = torch.from_numpy(surfnorm_gt_mask).permute([2,0,1]).contiguous().float()
+        inputs['surfnorm_gt'] = surfnorm_gt
+        inputs['surfnorm_gt_mask'] = surfnorm_gt_mask
+        return inputs
+
+
+
     def get_theta_fromfile(self, folder, frame_index, side, do_flip):
         inputs = dict()
         if do_flip:
