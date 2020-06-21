@@ -300,11 +300,15 @@ class Trainer:
 
             norm = torch.cat([norm1, norm2, norm3], dim=1)
 
-            normloss = normloss + torch.sum(torch.sum(norm * inputs['surfnorm_gt'], dim=1, keepdim=True) * inputs['surfnorm_gt_mask']) / torch.sum(inputs['surfnorm_gt_mask'])
+            normloss = normloss + torch.sum(torch.sum(1 - norm * inputs['surfnorm_gt'], dim=1, keepdim=True) * inputs['surfnorm_gt_mask']) / torch.sum(inputs['surfnorm_gt_mask'])
             if i == 0:
                 outputs['pred_norm'] = norm
+
         normloss = normloss / len(self.opt.scales)
         losses['totLoss'] = normloss
+
+
+
         # # == Code For Debug == #
         # sample_dense = 100
         # serialangle = np.linspace(0, 1, sample_dense) * 2 * np.pi
