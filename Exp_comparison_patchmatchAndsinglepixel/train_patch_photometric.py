@@ -547,7 +547,7 @@ class Trainer:
             fig_keptmask = tensor2disp(outputs['fullsize_stereomask'], vmax=1, ind=0)
             fig_maskcombined = np.concatenate([np.array(fig_grad), np.array(fig_greadmask), np.array(fig_keptmask)], axis=0)
             self.writers['train'].add_image('mask', (torch.from_numpy(fig_maskcombined).float() / 255).permute([2, 0, 1]), self.step)
-            pil.fromarray(fig_maskcombined).show()
+            # pil.fromarray(fig_maskcombined).show()
 
             figrgb_stereo = tensor2rgb(inputs[('color', 's', 0)], ind=vind)
             figrgb2 = tensor2rgb(inputs[('color', 0, 0)], ind=vind)
