@@ -13,6 +13,7 @@ from options import MonodepthOptions
 import datasets
 import networks
 import glob
+from utils import *
 cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV 3.3.1)
 
 
@@ -112,7 +113,8 @@ def evaluate(opt):
                     input_color = torch.cat((input_color, torch.flip(input_color, [3])), 0)
 
                 output = depth_decoder(encoder(input_color))
-                output[("disp", 0)] = output[("disp", 0)][:,2:3,:,:]
+                if output[("disp", 0)].shape[1] > 1:
+                    output[("disp", 0)] = output[("disp", 0)][:,2:3,:,:]
 
                 pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
                 pred_disp = pred_disp.cpu()[:, 0].numpy()
@@ -183,6 +185,7 @@ def evaluate(opt):
     for i in range(pred_disps.shape[0]):
 
         gt_depth = gt_depths[i]
+
         gt_height, gt_width = gt_depth.shape[:2]
 
         pred_disp = pred_disps[i]

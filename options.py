@@ -250,6 +250,9 @@ class MonodepthOptions:
         self.parser.add_argument("--surfnorm_gt_path",
                                  type=str,
                                  default='None')
+        self.parser.add_argument("--depthgrad_mask_threshold",
+                                 type=float,
+                                 default=1e10)
 
 
 

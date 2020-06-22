@@ -136,6 +136,8 @@ class Trainer:
 
             self.thetalossmap = torch.zeros([1, 1, self.opt.height, self.opt.width]).expand([self.opt.batch_size, -1, -1, -1]).cuda()
             self.thetalossmap[:,:,110::,:] = 1
+
+            self.gradcomp_tool = grad_computation_tools(batch_size = self.opt.batch_size, height = self.kittih, width = self.kittiw).cuda()
         else:
             intrinsic = np.array([
                 [512., 0., 512.],
@@ -321,16 +323,25 @@ class Trainer:
 
         if not self.opt.ban_phoconstrain:
             fullsize_ks = self.unitFK * self.kittiw * inputs['stereo_T'][:, 0, 3] * self.STEREO_SCALE_FACTOR
-            # fullsize_depthprediction = F.interpolate(outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            import pickle
-            resnet50pred = pickle.load( open( "/home/shengjie/Documents/Project_SemanticDepth/predepth.p", "rb" ) )
-            resnet50pred = torch.from_numpy(resnet50pred).cuda()
-            fullsize_depthprediction = F.interpolate(resnet50pred, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+            fullsize_depthprediction = F.interpolate(outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+
+
             fullsize_htheta = F.interpolate(htheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
             fullsize_vtheta = F.interpolate(vtheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+
             fullsize_stereomask = F.interpolate(outputs['reprojection_loss_mask'], [self.kittih, self.kittiw], mode='nearest')
-            phoconstrain = self.localthetadespKitti.phtotmetricloss_nbym(depthmap=fullsize_depthprediction, htheta=fullsize_htheta, vtheta=fullsize_vtheta, ks=fullsize_ks, rgb=inputs[('color', 0, -1)], rgbStereo=inputs[('color', 's', -1)], ssimMask = fullsize_stereomask, depthmap_lidar = inputs['depth_gt'])
+            normed_depth_grad = self.gradcomp_tool.get_gradient(fullsize_depthprediction) / fullsize_depthprediction
+            maskedout_grad = (normed_depth_grad > self.opt.depthgrad_mask_threshold).float()
+            fullsize_stereomask = fullsize_stereomask * (1 - maskedout_grad)
+            outputs['normed_depth_grad'] = normed_depth_grad
+            outputs['maskedout_grad'] = maskedout_grad
+            outputs['fullsize_stereomask'] = fullsize_stereomask
+
+
+
+            phoconstrain = self.localthetadespKitti.phtotmetricloss_nbym(depthmap=fullsize_depthprediction, htheta=fullsize_htheta, vtheta=fullsize_vtheta, ks=fullsize_ks, rgb=inputs[('color', 0, -1)], rgbStereo=inputs[('color', 's', -1)], ssimMask = fullsize_stereomask)
             losses['phoconstrain'] = phoconstrain
+
         else:
             losses['phoconstrain'] = 0
         return losses
@@ -528,9 +539,15 @@ class Trainer:
             figvpred_fromD = tensor2disp(predD2vtheta - 1, vmax=4, ind=vind).resize(figdisp.size, pil.BILINEAR)
             figcombined1 = np.concatenate([np.array(figrgb), np.array(fighpred), np.array(figvpred)], axis=0)
             figcombined2 = np.concatenate([np.array(figdisp), np.array(fighpred_fromD), np.array(figvpred_fromD)], axis=0)
-            figcombined = np.concatenate([figcombined1, figcombined2], axis=1)
+            figcombined = np.concatenate([figcombined1, figcombined2], axis=0)
             self.writers['train'].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2,0,1]), self.step)
 
+            fig_grad = tensor2disp(outputs['normed_depth_grad'], percentile=95, ind=0)
+            fig_greadmask = tensor2disp(outputs['maskedout_grad'], vmax=1, ind=0)
+            fig_keptmask = tensor2disp(outputs['fullsize_stereomask'], vmax=1, ind=0)
+            fig_maskcombined = np.concatenate([np.array(fig_grad), np.array(fig_greadmask), np.array(fig_keptmask)], axis=0)
+            self.writers['train'].add_image('mask', (torch.from_numpy(fig_maskcombined).float() / 255).permute([2, 0, 1]), self.step)
+            pil.fromarray(fig_maskcombined).show()
 
             figrgb_stereo = tensor2rgb(inputs[('color', 's', 0)], ind=vind)
             figrgb2 = tensor2rgb(inputs[('color', 0, 0)], ind=vind)
@@ -543,6 +560,9 @@ class Trainer:
             combined2 = np.concatenate([figrgb2, figrgb_stereo, color_recon, occmask])
             self.writers['train'].add_image('rgb', (torch.from_numpy(combined2).float() / 255).permute([2,0,1]), self.step)
             # pil.fromarray(combined2).show()
+
+
+
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
         """

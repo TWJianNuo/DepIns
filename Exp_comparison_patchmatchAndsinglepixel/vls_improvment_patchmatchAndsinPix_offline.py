@@ -240,46 +240,19 @@ class Trainer:
         """
         self.epoch = 0
         self.step = 0
-        self.start_time = time.time()
-        for self.epoch in range(self.opt.num_epochs):
-            self.run_epoch()
-            if (self.epoch + 1) % self.opt.save_frequency == 0:
-                self.save_model()
+        self.set_eval()
+
+        self.run_epoch()
 
 
     def run_epoch(self):
         """Run a single epoch of training and validation
         """
-        self.model_lr_scheduler.step()
-        self.set_train()
-        # self.set_eval()
-
         for batch_idx, inputs in enumerate(self.train_loader):
-
-            before_op_time = time.time()
 
             outputs, losses = self.process_batch(inputs)
 
-            self.model_optimizer.zero_grad()
-            losses['totLoss'].backward()
-            self.model_optimizer.step()
-
-            duration = time.time() - before_op_time
-
-            if self.step % 500 == 0:
-                self.record_img(inputs, outputs)
-
-            if self.step % 100 == 0:
-                self.log_time(batch_idx, duration, losses["totLoss"])
-
-            if self.step % 2 == 0:
-                self.log("train", inputs, outputs, losses, writeImage=False)
-
-            # if self.step % 100 == 0:
-            #     self.val()
-
             self.step += 1
-            # print(self.step)
 
     def process_batch(self, inputs, isval = False):
         """Pass a minibatch through the network and generate images and losses
@@ -293,21 +266,11 @@ class Trainer:
 
         outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
 
-        # Depth Branch
+        # Constrain Branch
         self.generate_images_pred(inputs, outputs)
         losses.update(self.depth_compute_losses(inputs, outputs))
-
-        # Theta Branch
-        # losses.update(self.theta_compute_losses(inputs, outputs))
-
-        # Constrain Branch
         losses.update(self.constrain_compute_losses(inputs, outputs))
 
-
-        losses['totLoss'] = losses['l1loss'] * self.opt.l1lossScale + \
-                            losses['pholoss'] * self.opt.pholossScale + \
-                            losses['l1constrain'] * self.opt.l1constrainScale + \
-                            losses['phoconstrain'] * self.opt.phoconstrainScale
         return outputs, losses
 
     def constrain_compute_losses(self, inputs, outputs):
@@ -315,24 +278,15 @@ class Trainer:
         htheta_pred_detached = inputs['htheta']
         vtheta_pred_detached = inputs['vtheta']
 
-        hloss, vloss = self.localthetadespKitti_scaled.mixed_loss(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, htheta=htheta_pred_detached, vtheta=vtheta_pred_detached)
-        l1constrain = (hloss + vloss) / 2
-        losses['l1constrain'] = l1constrain
 
-        if not self.opt.ban_phoconstrain:
-            fullsize_ks = self.unitFK * self.kittiw * inputs['stereo_T'][:, 0, 3] * self.STEREO_SCALE_FACTOR
-            # fullsize_depthprediction = F.interpolate(outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            import pickle
-            resnet50pred = pickle.load( open( "/home/shengjie/Documents/Project_SemanticDepth/predepth.p", "rb" ) )
-            resnet50pred = torch.from_numpy(resnet50pred).cuda()
-            fullsize_depthprediction = F.interpolate(resnet50pred, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            fullsize_htheta = F.interpolate(htheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            fullsize_vtheta = F.interpolate(vtheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            fullsize_stereomask = F.interpolate(outputs['reprojection_loss_mask'], [self.kittih, self.kittiw], mode='nearest')
-            phoconstrain = self.localthetadespKitti.phtotmetricloss_nbym(depthmap=fullsize_depthprediction, htheta=fullsize_htheta, vtheta=fullsize_vtheta, ks=fullsize_ks, rgb=inputs[('color', 0, -1)], rgbStereo=inputs[('color', 's', -1)], ssimMask = fullsize_stereomask, depthmap_lidar = inputs['depth_gt'])
-            losses['phoconstrain'] = phoconstrain
-        else:
-            losses['phoconstrain'] = 0
+        fullsize_ks = self.unitFK * self.kittiw * inputs['stereo_T'][:, 0, 3] * self.STEREO_SCALE_FACTOR
+        fullsize_depthprediction = F.interpolate(outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+        fullsize_htheta = F.interpolate(htheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+        fullsize_vtheta = F.interpolate(vtheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+        fullsize_stereomask = F.interpolate(outputs['reprojection_loss_mask'], [self.kittih, self.kittiw], mode='nearest')
+        phoconstrain = self.localthetadespKitti.vls_patchImproveOverSingle(depthmap=fullsize_depthprediction, htheta=fullsize_htheta, vtheta=fullsize_vtheta, ks=fullsize_ks, rgb=inputs[('color', 0, -1)], rgbStereo=inputs[('color', 's', -1)], ssimMask = fullsize_stereomask, depthmap_lidar = inputs['depth_gt'], labelinfo = inputs['entry_tag'])
+        losses['phoconstrain'] = phoconstrain
+
         return losses
 
     def theta_compute_losses(self, inputs, outputs):
