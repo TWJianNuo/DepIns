@@ -309,7 +309,7 @@ class Trainer:
         losses['totLoss'] = losses['l1loss'] * self.opt.l1lossScale + \
                             losses['pholoss'] * self.opt.pholossScale + \
                             losses['l1constrain'] * self.opt.l1constrainScale + \
-                            losses['phoconstrain'] * self.opt.phoconstrainScale
+                            losses['phoconstrain'] * self.opt.phoconstrainScale / 3
         return outputs, losses
 
     def constrain_compute_losses(self, inputs, outputs):

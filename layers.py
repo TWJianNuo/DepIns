@@ -3628,6 +3628,12 @@ class LocalThetaDesp(nn.Module):
         plt.savefig(os.path.join(svfolder, 'scattered_pts', figname))
         plt.close()
 
+        import cv2
+        optdepthmap_pixelnp = (optPixelDepth[0,0,:,:].detach().cpu().numpy() * 256).astype(np.uint16)
+        optdepthmap_patchnp = (optPatchDepth[0, 0, :, :].detach().cpu().numpy() * 256).astype(np.uint16)
+        cv2.imwrite(os.path.join(svfolder, 'depthmap', 'pixel', figname), optdepthmap_pixelnp)
+        cv2.imwrite(os.path.join(svfolder, 'depthmap', 'patch', figname), optdepthmap_patchnp)
+
         return 0
     def phtotmetricloss_nbym(self, depthmap, htheta, vtheta, ks, rgb, rgbStereo, ssimMask):
         depthmapl = torch.log(torch.clamp(depthmap, min=1e-3))
