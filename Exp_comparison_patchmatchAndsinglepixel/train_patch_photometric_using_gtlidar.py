@@ -306,10 +306,7 @@ class Trainer:
         losses.update(self.constrain_compute_losses(inputs, outputs))
 
 
-        losses['totLoss'] = losses['l1loss'] * self.opt.l1lossScale + \
-                            losses['pholoss'] * self.opt.pholossScale + \
-                            losses['l1constrain'] * self.opt.l1constrainScale + \
-                            losses['phoconstrain'] * self.opt.phoconstrainScale
+        losses['totLoss'] = losses['pholoss'] * self.opt.pholossScale + losses['phoconstrain'] * self.opt.phoconstrainScale
         return outputs, losses
 
     def constrain_compute_losses(self, inputs, outputs):
@@ -333,6 +330,7 @@ class Trainer:
             losses['phoconstrain'] = phoconstrain
         else:
             losses['phoconstrain'] = 0
+
 
         return losses
 
