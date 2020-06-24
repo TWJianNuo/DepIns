@@ -3461,180 +3461,6 @@ class LocalThetaDesp(nn.Module):
         self.patchw = patchw
         self.patchh = patchh
 
-
-
-    def vls_patchImproveOverSingle(self, depthmap, htheta, vtheta, ks, rgb, rgbStereo, ssimMask, depthmap_lidar = None, labelinfo = None):
-        import torch.optim as optim
-        depthmap_bck = depthmap.clone()
-        ch = int((self.patchh - 1) / 2)
-        cw = int((self.patchw - 1) / 2)
-        lind = ch * self.patchw + cw
-        testtime = 2000
-
-        # Optimize Using Patch Loss
-        depthmap = depthmap_bck.clone().detach()
-        depthmap = nn.Parameter(depthmap, requires_grad = True)
-        optimizer = optim.Adam([depthmap], 1e-3)
-
-        loss_curve_patch = list()
-        eval_curve_patch = list()
-        minpatchLoss = 1e10
-        for i in range(testtime):
-            depthmapl = torch.log(torch.clamp(depthmap, min=1e-3))
-
-            bk_htheta = self.backconvert_htheta(htheta)
-            npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
-                bk_htheta) * self.npts3d_p_h[:, :, :, 0, 0].unsqueeze(1)
-            npts3d_pdiff_downh = torch.cos(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
-                bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 0, 0].unsqueeze(1)
-            ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min=1e-4)) - torch.log(
-                torch.clamp(torch.abs(npts3d_pdiff_downh), min=1e-4))
-
-            bk_vtheta = self.backconvert_vtheta(vtheta)
-            npts3d_pdiff_upv = torch.cos(bk_vtheta) * self.npts3d_p_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
-                bk_vtheta) * self.npts3d_p_v[:, :, :, 0, 0].unsqueeze(1)
-            npts3d_pdiff_downv = torch.cos(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
-                bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 0, 0].unsqueeze(1)
-            ratiovl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_upv), min=1e-4)) - torch.log(
-                torch.clamp(torch.abs(npts3d_pdiff_downv), min=1e-4))
-
-            predDepthl = self.patchphoto_h(ratiohl) + self.patchphoto_v(ratiovl)
-            predDepth = torch.exp(predDepthl + depthmapl)
-            predDisp_organized = ks.view(self.batch_size, 1, 1, 1).expand([-1, int(self.patchw * self.patchh), self.height, self.width]) / predDepth
-            predxx = self.patch_phoxx.unsqueeze(0).expand([self.batch_size, -1, -1, -1]) + predDisp_organized
-            predyy = self.patch_phoyy.unsqueeze(0).expand([self.batch_size, -1, -1, -1])
-            predpixels = torch.stack([(predxx.view([-1, self.height, self.width]) / (self.width - 1) - 0.5) * 2, (predyy.contiguous().view([-1, self.height, self.width]) / (self.height - 1) - 0.5) * 2], dim=3)
-            rgbStereoExtended = rgbStereo.unsqueeze(1).expand([-1, int(self.patchh * self.patchw), -1, -1, -1]).contiguous().view(-1, 3, self.height, self.width)
-            predPho = F.grid_sample(rgbStereoExtended, predpixels, padding_mode="border")
-            predPho = predPho.view([self.batch_size, int(self.patchh * self.patchw), 3, self.height, self.width])
-            gtPho = torch.stack([self.pixelmover(rgb[:, 0:1, :, :]), self.pixelmover(rgb[:, 1:2, :, :]), self.pixelmover(rgb[:, 2:3, :, :])], dim=2)
-
-            mu_x = torch.mean(gtPho, dim=1)
-            mu_y = torch.mean(predPho, dim=1)
-
-            sigma_x = torch.mean(gtPho ** 2, dim=1) - mu_x ** 2
-            sigma_y = torch.mean(predPho ** 2, dim=1) - mu_y ** 2
-            sigma_xy = torch.mean(gtPho * predPho, dim=1) - mu_x * mu_y
-
-            SSIM_n = (2 * mu_x * mu_y + self.C1) * (2 * sigma_xy + self.C2)
-            SSIM_d = (mu_x ** 2 + mu_y ** 2 + self.C1) * (sigma_x + sigma_y + self.C2)
-            SSIMl = torch.clamp((1 - SSIM_n / SSIM_d) / 2, 0, 1)
-
-            l1l = torch.mean(torch.abs(gtPho - predPho), dim=1)
-            pholoss = SSIMl * 0.85 + l1l * 0.15
-            pholoss = torch.sum(pholoss * ssimMask) / torch.sum(ssimMask)
-            selectedloss = pholoss
-
-            evalLoss = torch.sum(torch.abs(depthmap_lidar - depthmap) * (depthmap_lidar > 0).float()).detach().cpu().numpy()
-            if evalLoss < minpatchLoss:
-                optPatchDepth = depthmap
-                minpatchLoss = evalLoss
-
-            optimizer.zero_grad()
-            selectedloss.backward()
-            optimizer.step()
-            eval_curve_patch.append(evalLoss)
-            loss_curve_patch.append(selectedloss.detach().cpu().numpy())
-
-            print("PatchLoss, Iteration : %d" % i)
-
-
-        depthmap = depthmap_bck.clone().detach()
-        depthmap = nn.Parameter(depthmap, requires_grad = True)
-        optimizer = optim.Adam([depthmap], 1e-3)
-
-        loss_curve_pixel = list()
-        eval_curve_pixel = list()
-        minpixelLoss = 1e10
-        for i in range(testtime):
-            depthmapl = torch.log(torch.clamp(depthmap, min=1e-3))
-
-            bk_htheta = self.backconvert_htheta(htheta)
-            npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
-                bk_htheta) * self.npts3d_p_h[:, :, :, 0, 0].unsqueeze(1)
-            npts3d_pdiff_downh = torch.cos(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
-                bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 0, 0].unsqueeze(1)
-            ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min=1e-4)) - torch.log(
-                torch.clamp(torch.abs(npts3d_pdiff_downh), min=1e-4))
-
-            bk_vtheta = self.backconvert_vtheta(vtheta)
-            npts3d_pdiff_upv = torch.cos(bk_vtheta) * self.npts3d_p_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
-                bk_vtheta) * self.npts3d_p_v[:, :, :, 0, 0].unsqueeze(1)
-            npts3d_pdiff_downv = torch.cos(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
-                bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 0, 0].unsqueeze(1)
-            ratiovl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_upv), min=1e-4)) - torch.log(
-                torch.clamp(torch.abs(npts3d_pdiff_downv), min=1e-4))
-
-            predDepthl = self.patchphoto_h(ratiohl) + self.patchphoto_v(ratiovl)
-            predDepth = torch.exp(predDepthl + depthmapl)
-            predDisp_organized = ks.view(self.batch_size, 1, 1, 1).expand([-1, int(self.patchw * self.patchh), self.height, self.width]) / predDepth
-            predxx = self.patch_phoxx.unsqueeze(0).expand([self.batch_size, -1, -1, -1]) + predDisp_organized
-            predyy = self.patch_phoyy.unsqueeze(0).expand([self.batch_size, -1, -1, -1])
-            predpixels = torch.stack([(predxx.view([-1, self.height, self.width]) / (self.width - 1) - 0.5) * 2, (predyy.contiguous().view([-1, self.height, self.width]) / (self.height - 1) - 0.5) * 2], dim=3)
-            rgbStereoExtended = rgbStereo.unsqueeze(1).expand([-1, int(self.patchh * self.patchw), -1, -1, -1]).contiguous().view(-1, 3, self.height, self.width)
-            predPho = F.grid_sample(rgbStereoExtended, predpixels, padding_mode="border")
-            predPho = predPho.view([self.batch_size, int(self.patchh * self.patchw), 3, self.height, self.width])
-            gtPho = torch.stack([self.pixelmover(rgb[:, 0:1, :, :]), self.pixelmover(rgb[:, 1:2, :, :]), self.pixelmover(rgb[:, 2:3, :, :])], dim=2)
-
-            selectedloss = torch.sum(torch.abs(gtPho - predPho)[0,lind:lind+1,:,:,:] * ssimMask) / torch.sum(ssimMask)
-
-            evalLoss = torch.sum(torch.abs(depthmap_lidar - depthmap) * (depthmap_lidar > 0).float()).detach().cpu().numpy()
-            if evalLoss < minpixelLoss:
-                optPixelDepth = depthmap
-                minpixelLoss = evalLoss
-
-            optimizer.zero_grad()
-            selectedloss.backward()
-            optimizer.step()
-            eval_curve_pixel.append(evalLoss)
-            loss_curve_pixel.append(selectedloss.detach().cpu().numpy())
-
-            print("Iteration : %d" % i)
-
-        dirmapping = {'l':'image_02', 'r':'image_03'}
-        seq, frame, dir, _ = labelinfo[0].split(' ')
-        figname = seq.split('/')[1] + '_' + frame + '_' + dirmapping[dir] + '.png'
-        svfolder = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare/'
-        plt.figure()
-        plt.plot(list(range(testtime)), eval_curve_patch)
-        plt.plot(list(range(testtime)), eval_curve_pixel)
-        plt.legend(["Patch", "Pixel"])
-        plt.savefig(os.path.join(svfolder, 'eval_curve', figname))
-        plt.close()
-
-
-        fig1 = tensor2disp(1 / optPixelDepth, ind = 0, percentile=95)
-        fig2 = tensor2disp(1 / optPatchDepth, ind=0, percentile=95)
-        pil.fromarray(np.concatenate([np.array(fig1), np.array(fig2)], axis=0)).save(os.path.join(svfolder, 'disp_figure', figname))
-
-        vlsSel = depthmap_lidar[0,0,:,:].detach().cpu().numpy() > 0
-        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
-        xxval = xx[vlsSel]
-        yyval = yy[vlsSel]
-
-        vls_gtlidar = depthmap_lidar[0,0,:,:].cpu().numpy()[vlsSel]
-        vls_optPatchDepth = optPatchDepth[0,0,:,:].cpu().detach().numpy()[vlsSel]
-        vls_optPixelDepth = optPixelDepth[0,0,:,:].cpu().detach().numpy()[vlsSel]
-        abs_rel_pixel = np.abs(vls_gtlidar - vls_optPixelDepth) / vls_gtlidar
-        abs_rel_patch = np.abs(vls_gtlidar - vls_optPatchDepth) / vls_gtlidar
-        imporvment = (abs_rel_patch - abs_rel_pixel) * 10 + 0.5# Negative is improvment
-
-        cm = plt.get_cmap('bwr')
-        colorMap = cm(imporvment)
-
-        plt.figure(figsize=(24, 18), dpi=80)
-        plt.imshow(tensor2rgb(rgb, ind = 0))
-        plt.scatter(xxval, yyval, 1, colorMap[:,0:3])
-        plt.savefig(os.path.join(svfolder, 'scattered_pts', figname))
-        plt.close()
-
-        import cv2
-        optdepthmap_pixelnp = (optPixelDepth[0,0,:,:].detach().cpu().numpy() * 256).astype(np.uint16)
-        optdepthmap_patchnp = (optPatchDepth[0, 0, :, :].detach().cpu().numpy() * 256).astype(np.uint16)
-        cv2.imwrite(os.path.join(svfolder, 'depthmap', 'pixel', figname), optdepthmap_pixelnp)
-        cv2.imwrite(os.path.join(svfolder, 'depthmap', 'patch', figname), optdepthmap_patchnp)
-
-        return 0
     def phtotmetricloss_nbym(self, depthmap, htheta, vtheta, ks, rgb, rgbStereo, ssimMask):
         depthmapl = torch.log(torch.clamp(depthmap, min=1e-3))
 
@@ -4367,3 +4193,239 @@ class LocalThetaDesp(nn.Module):
         ratiov = ratiov.unsqueeze(1)
         ratiovl = ratiovl.unsqueeze(1)
         return ratioh, ratiohl, ratiov, ratiovl
+
+    # Additional Losses #
+    def phtotmetricloss_nbym_lidar(self, depthmap, depthmap_lidar, htheta, vtheta, ks, rgb, rgbStereo, ssimMask):
+        depthmapl = torch.log(torch.clamp(depthmap, min=1e-3))
+
+        depthmap_lidar_clampped = torch.clamp(depthmap_lidar, min=1e-3)
+        depthmap_lidar_moved = self.pixelmover(depthmap_lidar)
+        predDepthl = torch.log(depthmap_lidar_moved / depthmap_lidar_clampped)
+
+        predDepth = torch.exp(predDepthl + depthmapl)
+        # depthmapl_lidar = torch.log(depthmap_lidar_clampped)
+        # predDepth = torch.exp(predDepthl + depthmapl_lidar)
+
+
+        # Debug Section
+        # testbatch = 1
+        # depthmap_lidar_testbatch_np = depthmap_lidar[testbatch,0,:,:].detach().cpu().numpy()
+        # vlsSel = depthmap_lidar_testbatch_np > 0
+        # xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        # xxval = xx[vlsSel]
+        # yyval = yy[vlsSel]
+        #
+        # tot_val_time = 30
+        # import random
+        # wn = random.randint(0, len(yyval) - 1)
+        # xxsel = xxval[wn]
+        # yysel = yyval[wn]
+        # for m in range(self.patchh):
+        #     if tot_val_time == 0:
+        #         break
+        #     for n in range(self.patchw):
+        #         if tot_val_time == 0:
+        #             break
+        #         deltay = int(m - (self.patchh - 1) / 2)
+        #         deltax = int(n - (self.patchw - 1) / 2)
+        #         if depthmap_lidar_testbatch_np[deltay + yysel, deltax + xxsel] > 0:
+        #             lind = m * self.patchw + n
+        #             print(torch.abs(predDepth[testbatch, lind, yysel, xxsel] - depthmap_lidar[testbatch, 0, yysel + deltay, xxsel + deltax]))
+        #             tot_val_time = tot_val_time - 1
+        #
+        # selector = self.pixelmover((depthmap_lidar > 0).float()) * ((depthmap_lidar > 0).float())
+        # print(predDepth[selector == 1].min())
+        # print(predDepth[selector == 1].max())
+
+
+        selector = self.pixelmover((depthmap_lidar > 0).float()) * ((depthmap_lidar > 0).float())
+        # tensor2disp(selector[:,lind:lind+1,:,:], vmax = 1, ind = 0).show()
+        predDisp_organized = ks.view(self.batch_size, 1, 1, 1).expand([-1, int(self.patchw * self.patchh), self.height, self.width]) / predDepth
+        predxx = self.patch_phoxx.unsqueeze(0).expand([self.batch_size, -1, -1, -1]) + predDisp_organized
+        predyy = self.patch_phoyy.unsqueeze(0).expand([self.batch_size, -1, -1, -1])
+        predpixels = torch.stack([(predxx.view([-1, self.height, self.width]) / (self.width - 1) - 0.5) * 2, (predyy.contiguous().view([-1, self.height, self.width]) / (self.height - 1) - 0.5) * 2], dim=3)
+        rgbStereoExtended = rgbStereo.unsqueeze(1).expand([-1, int(self.patchh * self.patchw), -1, -1, -1]).contiguous().view(-1, 3, self.height, self.width)
+        predPho = F.grid_sample(rgbStereoExtended, predpixels, padding_mode="border")
+        predPho = predPho.view([self.batch_size, int(self.patchh * self.patchw), 3, self.height, self.width])
+        gtPho = torch.stack([self.pixelmover(rgb[:, 0:1, :, :]), self.pixelmover(rgb[:, 1:2, :, :]), self.pixelmover(rgb[:, 2:3, :, :])], dim=2)
+
+        pholoss = torch.mean(torch.abs(gtPho - predPho), dim=2)
+        pholoss = torch.sum(pholoss * selector, dim=1, keepdim=True)
+        # tensor2disp(pholoss > 0, vmax=1, ind=0).show()
+        pholoss = torch.sum(pholoss * ssimMask) / torch.sum(pholoss > 0)
+
+        return pholoss
+
+    # Visualization Experiment #
+    def vls_patchImproveOverSingle(self, depthmap, htheta, vtheta, ks, rgb, rgbStereo, ssimMask, depthmap_lidar = None, labelinfo = None):
+        import torch.optim as optim
+        depthmap_bck = depthmap.clone()
+        ch = int((self.patchh - 1) / 2)
+        cw = int((self.patchw - 1) / 2)
+        lind = ch * self.patchw + cw
+        testtime = 2000
+
+        # Optimize Using Patch Loss
+        depthmap = depthmap_bck.clone().detach()
+        depthmap = nn.Parameter(depthmap, requires_grad = True)
+        optimizer = optim.Adam([depthmap], 1e-3)
+
+        loss_curve_patch = list()
+        eval_curve_patch = list()
+        minpatchLoss = 1e10
+        for i in range(testtime):
+            depthmapl = torch.log(torch.clamp(depthmap, min=1e-3))
+
+            bk_htheta = self.backconvert_htheta(htheta)
+            npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+                bk_htheta) * self.npts3d_p_h[:, :, :, 0, 0].unsqueeze(1)
+            npts3d_pdiff_downh = torch.cos(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+                bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 0, 0].unsqueeze(1)
+            ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min=1e-4)) - torch.log(
+                torch.clamp(torch.abs(npts3d_pdiff_downh), min=1e-4))
+
+            bk_vtheta = self.backconvert_vtheta(vtheta)
+            npts3d_pdiff_upv = torch.cos(bk_vtheta) * self.npts3d_p_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+                bk_vtheta) * self.npts3d_p_v[:, :, :, 0, 0].unsqueeze(1)
+            npts3d_pdiff_downv = torch.cos(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+                bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 0, 0].unsqueeze(1)
+            ratiovl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_upv), min=1e-4)) - torch.log(
+                torch.clamp(torch.abs(npts3d_pdiff_downv), min=1e-4))
+
+            predDepthl = self.patchphoto_h(ratiohl) + self.patchphoto_v(ratiovl)
+            predDepth = torch.exp(predDepthl + depthmapl)
+            predDisp_organized = ks.view(self.batch_size, 1, 1, 1).expand([-1, int(self.patchw * self.patchh), self.height, self.width]) / predDepth
+            predxx = self.patch_phoxx.unsqueeze(0).expand([self.batch_size, -1, -1, -1]) + predDisp_organized
+            predyy = self.patch_phoyy.unsqueeze(0).expand([self.batch_size, -1, -1, -1])
+            predpixels = torch.stack([(predxx.view([-1, self.height, self.width]) / (self.width - 1) - 0.5) * 2, (predyy.contiguous().view([-1, self.height, self.width]) / (self.height - 1) - 0.5) * 2], dim=3)
+            rgbStereoExtended = rgbStereo.unsqueeze(1).expand([-1, int(self.patchh * self.patchw), -1, -1, -1]).contiguous().view(-1, 3, self.height, self.width)
+            predPho = F.grid_sample(rgbStereoExtended, predpixels, padding_mode="border")
+            predPho = predPho.view([self.batch_size, int(self.patchh * self.patchw), 3, self.height, self.width])
+            gtPho = torch.stack([self.pixelmover(rgb[:, 0:1, :, :]), self.pixelmover(rgb[:, 1:2, :, :]), self.pixelmover(rgb[:, 2:3, :, :])], dim=2)
+
+            mu_x = torch.mean(gtPho, dim=1)
+            mu_y = torch.mean(predPho, dim=1)
+
+            sigma_x = torch.mean(gtPho ** 2, dim=1) - mu_x ** 2
+            sigma_y = torch.mean(predPho ** 2, dim=1) - mu_y ** 2
+            sigma_xy = torch.mean(gtPho * predPho, dim=1) - mu_x * mu_y
+
+            SSIM_n = (2 * mu_x * mu_y + self.C1) * (2 * sigma_xy + self.C2)
+            SSIM_d = (mu_x ** 2 + mu_y ** 2 + self.C1) * (sigma_x + sigma_y + self.C2)
+            SSIMl = torch.clamp((1 - SSIM_n / SSIM_d) / 2, 0, 1)
+
+            l1l = torch.mean(torch.abs(gtPho - predPho), dim=1)
+            pholoss = SSIMl * 0.85 + l1l * 0.15
+            pholoss = torch.sum(pholoss * ssimMask) / torch.sum(ssimMask)
+            selectedloss = pholoss
+
+            evalLoss = torch.sum(torch.abs(depthmap_lidar - depthmap) * (depthmap_lidar > 0).float()).detach().cpu().numpy()
+            if evalLoss < minpatchLoss:
+                optPatchDepth = depthmap
+                minpatchLoss = evalLoss
+
+            optimizer.zero_grad()
+            selectedloss.backward()
+            optimizer.step()
+            eval_curve_patch.append(evalLoss)
+            loss_curve_patch.append(selectedloss.detach().cpu().numpy())
+
+            print("PatchLoss, Iteration : %d" % i)
+
+
+        depthmap = depthmap_bck.clone().detach()
+        depthmap = nn.Parameter(depthmap, requires_grad = True)
+        optimizer = optim.Adam([depthmap], 1e-3)
+
+        loss_curve_pixel = list()
+        eval_curve_pixel = list()
+        minpixelLoss = 1e10
+        for i in range(testtime):
+            depthmapl = torch.log(torch.clamp(depthmap, min=1e-3))
+
+            bk_htheta = self.backconvert_htheta(htheta)
+            npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+                bk_htheta) * self.npts3d_p_h[:, :, :, 0, 0].unsqueeze(1)
+            npts3d_pdiff_downh = torch.cos(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+                bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 0, 0].unsqueeze(1)
+            ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min=1e-4)) - torch.log(
+                torch.clamp(torch.abs(npts3d_pdiff_downh), min=1e-4))
+
+            bk_vtheta = self.backconvert_vtheta(vtheta)
+            npts3d_pdiff_upv = torch.cos(bk_vtheta) * self.npts3d_p_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+                bk_vtheta) * self.npts3d_p_v[:, :, :, 0, 0].unsqueeze(1)
+            npts3d_pdiff_downv = torch.cos(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+                bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 0, 0].unsqueeze(1)
+            ratiovl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_upv), min=1e-4)) - torch.log(
+                torch.clamp(torch.abs(npts3d_pdiff_downv), min=1e-4))
+
+            predDepthl = self.patchphoto_h(ratiohl) + self.patchphoto_v(ratiovl)
+            predDepth = torch.exp(predDepthl + depthmapl)
+            predDisp_organized = ks.view(self.batch_size, 1, 1, 1).expand([-1, int(self.patchw * self.patchh), self.height, self.width]) / predDepth
+            predxx = self.patch_phoxx.unsqueeze(0).expand([self.batch_size, -1, -1, -1]) + predDisp_organized
+            predyy = self.patch_phoyy.unsqueeze(0).expand([self.batch_size, -1, -1, -1])
+            predpixels = torch.stack([(predxx.view([-1, self.height, self.width]) / (self.width - 1) - 0.5) * 2, (predyy.contiguous().view([-1, self.height, self.width]) / (self.height - 1) - 0.5) * 2], dim=3)
+            rgbStereoExtended = rgbStereo.unsqueeze(1).expand([-1, int(self.patchh * self.patchw), -1, -1, -1]).contiguous().view(-1, 3, self.height, self.width)
+            predPho = F.grid_sample(rgbStereoExtended, predpixels, padding_mode="border")
+            predPho = predPho.view([self.batch_size, int(self.patchh * self.patchw), 3, self.height, self.width])
+            gtPho = torch.stack([self.pixelmover(rgb[:, 0:1, :, :]), self.pixelmover(rgb[:, 1:2, :, :]), self.pixelmover(rgb[:, 2:3, :, :])], dim=2)
+
+            selectedloss = torch.sum(torch.abs(gtPho - predPho)[0,lind:lind+1,:,:,:] * ssimMask) / torch.sum(ssimMask)
+
+            evalLoss = torch.sum(torch.abs(depthmap_lidar - depthmap) * (depthmap_lidar > 0).float()).detach().cpu().numpy()
+            if evalLoss < minpixelLoss:
+                optPixelDepth = depthmap
+                minpixelLoss = evalLoss
+
+            optimizer.zero_grad()
+            selectedloss.backward()
+            optimizer.step()
+            eval_curve_pixel.append(evalLoss)
+            loss_curve_pixel.append(selectedloss.detach().cpu().numpy())
+
+            print("Iteration : %d" % i)
+
+        dirmapping = {'l':'image_02', 'r':'image_03'}
+        seq, frame, dir, _ = labelinfo[0].split(' ')
+        figname = seq.split('/')[1] + '_' + frame + '_' + dirmapping[dir] + '.png'
+        svfolder = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare/'
+        plt.figure()
+        plt.plot(list(range(testtime)), eval_curve_patch)
+        plt.plot(list(range(testtime)), eval_curve_pixel)
+        plt.legend(["Patch", "Pixel"])
+        plt.savefig(os.path.join(svfolder, 'eval_curve', figname))
+        plt.close()
+
+
+        fig1 = tensor2disp(1 / optPixelDepth, ind = 0, percentile=95)
+        fig2 = tensor2disp(1 / optPatchDepth, ind=0, percentile=95)
+        pil.fromarray(np.concatenate([np.array(fig1), np.array(fig2)], axis=0)).save(os.path.join(svfolder, 'disp_figure', figname))
+
+        vlsSel = depthmap_lidar[0,0,:,:].detach().cpu().numpy() > 0
+        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        xxval = xx[vlsSel]
+        yyval = yy[vlsSel]
+
+        vls_gtlidar = depthmap_lidar[0,0,:,:].cpu().numpy()[vlsSel]
+        vls_optPatchDepth = optPatchDepth[0,0,:,:].cpu().detach().numpy()[vlsSel]
+        vls_optPixelDepth = optPixelDepth[0,0,:,:].cpu().detach().numpy()[vlsSel]
+        abs_rel_pixel = np.abs(vls_gtlidar - vls_optPixelDepth) / vls_gtlidar
+        abs_rel_patch = np.abs(vls_gtlidar - vls_optPatchDepth) / vls_gtlidar
+        imporvment = (abs_rel_patch - abs_rel_pixel) * 10 + 0.5# Negative is improvment
+
+        cm = plt.get_cmap('bwr')
+        colorMap = cm(imporvment)
+
+        plt.figure(figsize=(24, 18), dpi=80)
+        plt.imshow(tensor2rgb(rgb, ind = 0))
+        plt.scatter(xxval, yyval, 1, colorMap[:,0:3])
+        plt.savefig(os.path.join(svfolder, 'scattered_pts', figname))
+        plt.close()
+
+        import cv2
+        optdepthmap_pixelnp = (optPixelDepth[0,0,:,:].detach().cpu().numpy() * 256).astype(np.uint16)
+        optdepthmap_patchnp = (optPatchDepth[0, 0, :, :].detach().cpu().numpy() * 256).astype(np.uint16)
+        cv2.imwrite(os.path.join(svfolder, 'depthmap', 'pixel', figname), optdepthmap_pixelnp)
+        cv2.imwrite(os.path.join(svfolder, 'depthmap', 'patch', figname), optdepthmap_patchnp)
+
+        return 0
