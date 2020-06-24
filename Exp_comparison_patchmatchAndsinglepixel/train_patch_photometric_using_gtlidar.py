@@ -304,9 +304,10 @@ class Trainer:
 
         # Constrain Branch
         losses.update(self.constrain_compute_losses(inputs, outputs))
-
-
         losses['totLoss'] = losses['pholoss'] * self.opt.pholossScale + losses['phoconstrain'] * self.opt.phoconstrainScale
+        # losses['totLoss'] = losses['pholoss'] * self.opt.pholossScale
+        # losses['totLoss'] = losses['phoconstrain'] * self.opt.phoconstrainScale
+        # print(losses)
         return outputs, losses
 
     def constrain_compute_losses(self, inputs, outputs):

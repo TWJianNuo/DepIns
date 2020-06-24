@@ -4199,8 +4199,8 @@ class LocalThetaDesp(nn.Module):
         depthmapl = torch.log(torch.clamp(depthmap, min=1e-3))
 
         depthmap_lidar_clampped = torch.clamp(depthmap_lidar, min=1e-3)
-        depthmap_lidar_moved = self.pixelmover(depthmap_lidar)
-        predDepthl = torch.log(depthmap_lidar_moved / depthmap_lidar_clampped)
+        depthmap_lidar_moved = self.pixelmover(depthmap_lidar_clampped)
+        predDepthl = torch.log(torch.clamp(depthmap_lidar_moved, min=1e-3) / depthmap_lidar_clampped)
 
         predDepth = torch.exp(predDepthl + depthmapl)
         # depthmapl_lidar = torch.log(depthmap_lidar_clampped)
