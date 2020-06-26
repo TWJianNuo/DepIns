@@ -8,8 +8,15 @@ import warnings
 
 import torch.optim as optim
 from torch.utils.data import DataLoader
-# from tensorboardX import SummaryWriter
-from torch.utils.tensorboard import SummaryWriter
+
+import torch
+version_num = torch.__version__
+version_num = ''.join(i for i in version_num if i.isdigit())
+version_num = int(version_num.ljust(10, '0'))
+if version_num > 1100000000:
+    from torch.utils.tensorboard import SummaryWriter
+else:
+    from tensorboardX import SummaryWriter
 
 from layers import *
 
@@ -487,7 +494,7 @@ class Trainer:
         figcombined1 = np.concatenate([np.array(figrgb), np.array(fighpred), np.array(figvpred)], axis=0)
         figcombined2 = np.concatenate([np.array(figdisp), np.array(fighpred_fromD), np.array(figvpred_fromD)], axis=0)
         figcombined = np.concatenate([figcombined1, figcombined2], axis=1)
-        self.writers['train'].add_image('overview', torch.from_numpy(figcombined).float() / 255, dataformats='HWC', global_step=self.step)
+        self.writers['train'].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
 
 
         figrgb_stereo = tensor2rgb(inputs[('color', 's', 0)], ind=vind)
@@ -499,7 +506,7 @@ class Trainer:
         occmask = tensor2disp(outputs['selfOccMask'], vmax = 1, ind=vind)
         color_recon = tensor2rgb(outputs[('color', 's', 0)], ind=vind)
         combined2 = np.concatenate([figrgb2, figrgb_stereo, color_recon, occmask])
-        self.writers['train'].add_image('rgb', torch.from_numpy(combined2).float() / 255, dataformats='HWC', global_step=self.step)
+        self.writers['train'].add_image('rgb', (torch.from_numpy(combined2).float() / 255).permute([2, 0, 1]), self.step)
         # pil.fromarray(combined2).show()
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
