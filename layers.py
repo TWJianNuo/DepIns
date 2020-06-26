@@ -2861,129 +2861,6 @@ class LocalThetaDesp(nn.Module):
         self.opt_depth_copyks_h = torch.nn.Conv2d(1, int(2 * optimize_width), [1, int(2 * optimize_width + 1)], padding=[0, optimize_width], bias=False)
         self.opt_depth_copyks_h.weight = torch.nn.Parameter(opt_depth_copyks_h.unsqueeze(1).unsqueeze(2), requires_grad=False)
 
-    def optimize_depth_using_theta(self, depthmap, htheta, vtheta, rgb = None, depthmaplidar = None):
-        # depthmap = depthmaplidar
-        # htheta, vtheta = self.get_theta(depthmap)
-        # depthmapl = torch.log(torch.clamp(depthmap, min=1e-3))
-
-        pts3d = depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
-        hcord = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ pts3d
-
-        pts3d_lidar = depthmaplidar.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
-        hcord_lidar = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ pts3d_lidar
-
-        bk_htheta = self.backconvert_htheta(htheta)
-        npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_h[:, :, :, 0, 0].unsqueeze(1)
-        npts3d_pdiff_downh = torch.cos(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 0, 0].unsqueeze(1)
-        ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min=1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downh), min=1e-4))
-
-        opt_accumratio_h = torch.exp(self.opt_ratio_accumks_h(ratiohl))
-        opt_accumed_depth_h = self.opt_depth_copyks_h(depthmap)
-        opted_depth_h = (torch.sum(opt_accumratio_h * opt_accumed_depth_h, dim=1, keepdim=True) + depthmap) / (torch.sum(opt_accumratio_h ** 2, dim = 1, keepdim=True) + 1)
-        tensor2disp(htheta -1, vmax = 4, ind = 0).show()
-        # import random
-        # testchannel = random.randint(0, opt_accumed_depth_h.shape[1] -1)
-        # ckx = random.randint(0, self.width)
-        # cky = random.randint(0, self.height)
-        # print(opt_accumed_depth_h[0,testchannel,cky,ckx] / depthmap[0,0,cky,ckx], opt_accumratio_h[0,testchannel,cky,ckx])
-        # print(opted_depth_h[0, 0, cky, ckx], depthmap[0, 0, cky, ckx])
-        #
-        htheta_bs, vtheta_bs = self.get_theta(depthmap)
-        htheta_opted, vtheta_opted = self.get_theta(opted_depth_h)
-        tensor2disp(htheta_bs - 1, vmax=4, ind=0).show()
-        tensor2disp(htheta_opted - 1, vmax=4, ind=0).show()
-        tensor2disp(1 / depthmap, vmax=0.2, ind=0).show()
-        tensor2disp(1 / opted_depth_h, vmax=0.2, ind=0).show()
-        print(torch.sum(torch.abs(depthmaplidar - depthmap) * (depthmaplidar > 0).float()))
-        print(torch.sum(torch.abs(depthmaplidar - opted_depth_h) * (depthmaplidar > 0).float()))
-
-        vlsSel = depthmaplidar[0,0,:,:].detach().cpu().numpy() > 0
-        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
-        xxval = xx[vlsSel]
-        yyval = yy[vlsSel]
-
-        hcordxxvls = hcord[0,:,:,0,0].cpu().numpy()[vlsSel]
-        hcordyyvls = hcord[0, :, :, 1, 0].cpu().numpy()[vlsSel]
-
-        selyy = 216
-        xmax = 346
-        xmin = 323
-        addselector = (xxval > xmin) * (xxval < xmax) * (yyval == selyy)
-        addxx = xxval[addselector]
-        addyy = yyval[addselector]
-        hcordaddxx = hcordxxvls[addselector]
-        hcordaddyy = hcordyyvls[addselector]
-
-        hcordxxvls_lidar = hcord_lidar[0,:,:,0,0].cpu().numpy()[vlsSel]
-        hcordyyvls_lidar = hcord_lidar[0, :, :, 1, 0].cpu().numpy()[vlsSel]
-        hcordaddxx_lidar = hcordxxvls_lidar[addselector]
-        hcordaddyy_lidar = hcordyyvls_lidar[addselector]
-
-        depthmapreplaced = depthmaplidar.clone()
-        for ind in range(xmin+2, xmax):
-            depthmapreplaced[0, 0, selyy, ind] = depthmapreplaced[0,0,selyy,ind-1] * torch.exp(ratiohl[0,0,selyy,ind-1])
-        pts3d_replaced = depthmapreplaced.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
-        hcord_replaced = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ pts3d_replaced
-        hcordxxvls_replaced = hcord_replaced[0,selyy,xmin+1:xmax,0,0].cpu().numpy()
-        hcordyyvls_replaced = hcord_replaced[0,selyy,xmin+1:xmax, 1, 0].cpu().numpy()
-
-        depthmap_opted = depthmaplidar.clone()
-        top = depthmap[0, 0, selyy, xmin + 1]
-        bot = 1
-        accum_rat = 1
-        for ind in range(xmin+2, xmax):
-            accum_rat = accum_rat * torch.exp(ratiohl[0,0,selyy,ind-1])
-            top = top + depthmap[0, 0, selyy, ind] * accum_rat
-            bot = bot + accum_rat * accum_rat
-        optdepth = top / bot
-
-        depthmap_opted[0, 0, selyy, xmin + 1] = optdepth
-        for ind in range(xmin+2, xmax):
-            depthmap_opted[0, 0, selyy, ind] = depthmap_opted[0,0,selyy,ind-1] * torch.exp(ratiohl[0,0,selyy,ind-1])
-
-        pts3d_opted = depthmap_opted.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
-        hcord_opted = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ pts3d_opted
-        hcordxxvls_opted = hcord_opted[0,selyy,xmin+1:xmax,0,0].cpu().numpy()
-        hcordyyvls_opted = hcord_opted[0,selyy,xmin+1:xmax, 1, 0].cpu().numpy()
-
-
-        pts3d_opted2 = opted_depth_h.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
-        hcord_opted2 = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ pts3d_opted2
-        hcord_optedxxvls2 = hcord_opted2[0,selyy,xmin+1:xmax,0,0].cpu().numpy()
-        hcord_optedyyvls2 = hcord_opted2[0,selyy,xmin+1:xmax, 1, 0].cpu().numpy()
-
-        z = depthmaplidar[0,0,:,:].detach().cpu().numpy()[vlsSel]
-        z = 5 / z
-        cm = plt.get_cmap('magma')
-        z = cm(z)
-
-        plt.figure()
-        plt.imshow(tensor2rgb(rgb, ind = 0))
-        plt.scatter(xxval, yyval, 5, z)
-        plt.scatter(addxx, addyy, 5, 'r')
-
-        plt.figure()
-        plt.plot(hcordaddxx, hcordaddyy, 5, 'r')
-        plt.plot(hcordaddxx_lidar, hcordaddyy_lidar, 5, 'r')
-        plt.plot(hcordxxvls_replaced, hcordyyvls_replaced, 5, 'g')
-        plt.plot(hcordxxvls_opted, hcordyyvls_opted, 5, 'c')
-        plt.plot(hcord_optedxxvls2, hcord_optedyyvls2, 5, 'c')
-        plt.axis('equal')
-
-
-        before_err = torch.abs(depthmaplidar - depthmap)[0,0,:,:].cpu().numpy()[vlsSel] / depthmaplidar[0,0,:,:].cpu().numpy()[vlsSel]
-        after_err = torch.abs(depthmaplidar - opted_depth_h)[0,0,:,:].cpu().numpy()[vlsSel] / depthmaplidar[0,0,:,:].cpu().numpy()[vlsSel]
-        cm = plt.get_cmap('bwr')
-        maxr = 0.01
-        rel = ((after_err - before_err) / maxr + 1) / 2
-        relvls = cm(rel)
-        plt.figure()
-        plt.imshow(tensor2rgb(rgb, ind=0))
-        plt.scatter(xxval, yyval, 5, relvls)
-
-
-
-        return opted_depth_h
     def recover_depth(self, depthmap, htheta, vtheta, preddepthi):
         depthmapl = torch.log(torch.clamp(depthmap, min = 1e-3))
 
@@ -4256,6 +4133,42 @@ class LocalThetaDesp(nn.Module):
 
         return pholoss
 
+
+    def optimize_depth_using_theta(self, depthmap, htheta, vtheta):
+
+        # htheta, vtheta = self.get_theta(depthmap)
+        bk_htheta = self.backconvert_htheta(htheta)
+        npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+            bk_htheta) * self.npts3d_p_h[:, :, :, 0, 0].unsqueeze(1)
+        npts3d_pdiff_downh = torch.cos(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+            bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 0, 0].unsqueeze(1)
+        ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min=1e-4)) - torch.log(
+            torch.clamp(torch.abs(npts3d_pdiff_downh), min=1e-4))
+
+        bk_vtheta = self.backconvert_vtheta(vtheta)
+        npts3d_pdiff_upv = torch.cos(bk_vtheta) * self.npts3d_p_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+            bk_vtheta) * self.npts3d_p_v[:, :, :, 0, 0].unsqueeze(1)
+        npts3d_pdiff_downv = torch.cos(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
+            bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 0, 0].unsqueeze(1)
+        ratiovl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_upv), min=1e-4)) - torch.log(
+            torch.clamp(torch.abs(npts3d_pdiff_downv), min=1e-4))
+
+        predDepthl = self.patchphoto_h(ratiohl) + self.patchphoto_v(ratiovl)
+        surroundDepth = self.pixelmover(depthmap)
+        surroundDepthl = torch.log(surroundDepth)
+        predDepth_opted_mulchannel = torch.exp(surroundDepthl - predDepthl)
+
+        selector = self.pixelmover((depthmap > 0).float())
+        predDepth_opted = torch.sum(predDepth_opted_mulchannel * selector, dim=[1], keepdim=True) / torch.sum(selector, dim=[1], keepdim=True)
+
+        # import random
+        # bz = random.randint(0, self.batch_size-1)
+        # h = random.randint(0, self.height - 1)
+        # w = random.randint(0, self.width - 1)
+        # print(torch.abs(predDepth_opted[bz,0,h,w] - depthmap[bz,0,h,w]))
+        # tensor2disp(htheta - 1, vmax=4, ind = 0).show()
+        return predDepth_opted
+
     # Visualization Experiment #
     def vls_patchImproveOverSingle(self, depthmap, htheta, vtheta, ks, rgb, rgbStereo, ssimMask, depthmap_lidar = None, labelinfo = None):
         import torch.optim as optim
@@ -4303,19 +4216,8 @@ class LocalThetaDesp(nn.Module):
             predPho = predPho.view([self.batch_size, int(self.patchh * self.patchw), 3, self.height, self.width])
             gtPho = torch.stack([self.pixelmover(rgb[:, 0:1, :, :]), self.pixelmover(rgb[:, 1:2, :, :]), self.pixelmover(rgb[:, 2:3, :, :])], dim=2)
 
-            mu_x = torch.mean(gtPho, dim=1)
-            mu_y = torch.mean(predPho, dim=1)
-
-            sigma_x = torch.mean(gtPho ** 2, dim=1) - mu_x ** 2
-            sigma_y = torch.mean(predPho ** 2, dim=1) - mu_y ** 2
-            sigma_xy = torch.mean(gtPho * predPho, dim=1) - mu_x * mu_y
-
-            SSIM_n = (2 * mu_x * mu_y + self.C1) * (2 * sigma_xy + self.C2)
-            SSIM_d = (mu_x ** 2 + mu_y ** 2 + self.C1) * (sigma_x + sigma_y + self.C2)
-            SSIMl = torch.clamp((1 - SSIM_n / SSIM_d) / 2, 0, 1)
-
-            l1l = torch.mean(torch.abs(gtPho - predPho), dim=1)
-            pholoss = SSIMl * 0.85 + l1l * 0.15
+            pholoss = torch.mean(torch.abs(gtPho - predPho), dim=1)
+            pholoss = torch.mean(pholoss, dim=1, keepdim=True)
             pholoss = torch.sum(pholoss * ssimMask) / torch.sum(ssimMask)
             selectedloss = pholoss
 
@@ -4388,7 +4290,7 @@ class LocalThetaDesp(nn.Module):
         dirmapping = {'l':'image_02', 'r':'image_03'}
         seq, frame, dir, _ = labelinfo[0].split(' ')
         figname = seq.split('/')[1] + '_' + frame + '_' + dirmapping[dir] + '.png'
-        svfolder = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare/'
+        svfolder = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare_l1only/'
         plt.figure()
         plt.plot(list(range(testtime)), eval_curve_patch)
         plt.plot(list(range(testtime)), eval_curve_pixel)

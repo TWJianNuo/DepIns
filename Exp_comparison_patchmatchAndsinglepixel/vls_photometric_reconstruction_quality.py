@@ -240,47 +240,54 @@ class Trainer:
         """
         self.epoch = 0
         self.step = 0
-        self.start_time = time.time()
-        for self.epoch in range(self.opt.num_epochs):
-            self.run_epoch()
-            if (self.epoch + 1) % self.opt.save_frequency == 0:
-                self.save_model()
+        self.set_eval()
+        self.run_epoch()
 
 
     def run_epoch(self):
         """Run a single epoch of training and validation
         """
-        self.model_lr_scheduler.step()
-        self.set_train()
-        # self.set_eval()
+        self.count = 0
+        tot_count = 100
+
+        self.tot_scanned_pts = 0
+        self.num_bins = 200
+        self.prediction_photometric_recod = np.zeros(self.num_bins)
+        self.gt_photometric_recod = np.zeros(self.num_bins)
+        self.bins = np.linspace(0,1,self.num_bins)
+
+
+        xx, yy = np.meshgrid(range(self.kittiw), range(self.kittih), indexing='xy')
+        self.patch_phoxx = torch.from_numpy(xx).unsqueeze(0).unsqueeze(0).expand([self.opt.batch_size,-1,-1,-1]).float().cuda()
+        self.patch_phoyy = torch.from_numpy(yy).unsqueeze(0).unsqueeze(0).expand([self.opt.batch_size,-1,-1,-1]).float().cuda()
 
         for batch_idx, inputs in enumerate(self.train_loader):
 
-            before_op_time = time.time()
-
             outputs, losses = self.process_batch(inputs)
 
-            self.model_optimizer.zero_grad()
-            losses['totLoss'].backward()
-            self.model_optimizer.step()
+            if self.count == tot_count:
+                break
 
-            duration = time.time() - before_op_time
+        # fig, axs = plt.subplots(2)
+        # fig.suptitle('Compare Photometric Differences between gt Lidar and prediction')
+        # axs[0].scatter(self.bins, self.prediction_photometric_recod / (self.tot_scanned_pts + 1), s = 5)
+        # axs[0].set_title("prediction")
+        # axs[1].scatter(self.bins, self.gt_photometric_recod / (self.tot_scanned_pts + 1), s = 5)
+        # axs[1].set_title("lidar")
+        # plt.savefig(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_photometricLoss_compare_lidarAndPred', 'cmp.png'))
+        # plt.close()
 
-            if self.step % 500 == 0:
-                self.record_img(inputs, outputs)
-
-            if self.step % 100 == 0:
-                self.log_time(batch_idx, duration, losses["totLoss"])
-
-            if self.step % 2 == 0:
-                self.log("train", inputs, outputs, losses, writeImage=False)
-
-            # if self.step % 100 == 0:
-            #     self.val()
-
-            self.step += 1
-            # print(self.step)
-
+        diff_integrated = (np.sum(self.prediction_photometric_recod / (self.tot_scanned_pts + 1) * self.bins) - np.sum(self.gt_photometric_recod / (self.tot_scanned_pts + 1) * self.bins))
+        plt.figure()
+        plt.title('Difference in Integration: %s' % str(diff_integrated))
+        plt.plot(self.bins, self.prediction_photometric_recod / (self.tot_scanned_pts + 1), linewidth = 1)
+        plt.plot(self.bins, self.gt_photometric_recod / (self.tot_scanned_pts + 1), linewidth = 1)
+        plt.legend(['Prediction', 'Lidar'])
+        plt.xlim([0, 1])
+        plt.xlabel("Photoemtric Difference")
+        plt.ylabel("Percentage")
+        plt.savefig(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_photometricLoss_compare_lidarAndPred', 'cmp.png'))
+        plt.close()
     def process_batch(self, inputs, isval = False):
         """Pass a minibatch through the network and generate images and losses
         """
@@ -290,24 +297,54 @@ class Trainer:
 
         outputs = dict()
         losses = dict()
+        selector = inputs['depth_gt'] > 0
+        self.tot_scanned_pts = self.tot_scanned_pts + torch.sum(selector).detach().cpu().numpy()
 
         outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
 
-        # Depth Branch
+        # Compute the Photometric Losses of Prediction
         self.generate_images_pred(inputs, outputs)
-        losses.update(self.depth_compute_losses(inputs, outputs))
 
-        # Theta Branch
-        # losses.update(self.theta_compute_losses(inputs, outputs))
+        resized_reconstructed_rgb = F.interpolate(outputs[('color', 's', 0)], [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+        resized_gt_rgb = F.interpolate(inputs[('color', 0, 0)], [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+        resized_stereo_rgb = F.interpolate(inputs[('color', 's', 0)], [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
 
-        # Constrain Branch
-        losses.update(self.constrain_compute_losses(inputs, outputs))
+        # For Prediction
+        photometric_loss_prediction = torch.mean(torch.abs(resized_reconstructed_rgb - resized_gt_rgb), dim=[1], keepdim=True)[selector]
+        photometric_loss_prediction_np = photometric_loss_prediction.detach().cpu().numpy()
+        self.prediction_photometric_recod = self.prediction_photometric_recod + np.histogram(photometric_loss_prediction_np, bins=self.num_bins, range=[0,1])[0]
+        # tensor2rgb(resized_gt_rgb, ind=0).show()
+        # tensor2rgb(resized_reconstructed_rgb, ind=0).show()
+
+        # For Lidar Gt
+        fullsize_ks = self.unitFK * self.kittiw * inputs['stereo_T'][:, 0, 3] * self.STEREO_SCALE_FACTOR
+        predDisp_organized = fullsize_ks.view(self.opt.batch_size, 1, 1, 1).expand([-1, 1, self.kittih, self.kittiw]) / torch.clamp(inputs['depth_gt'], min=1e-3)
+        predxx = self.patch_phoxx + predDisp_organized
+        predyy = self.patch_phoyy
+        predpixels = torch.stack([(predxx.view([-1, self.kittih, self.kittiw]) / (self.kittiw - 1) - 0.5) * 2, (predyy.contiguous().view([-1, self.kittih, self.kittiw]) / (self.kittih - 1) - 0.5) * 2], dim=3)
+        gt_reconstructed_Pho = F.grid_sample(resized_stereo_rgb, predpixels, padding_mode="border")
+        photometric_loss_gt = torch.mean(torch.abs(gt_reconstructed_Pho - resized_gt_rgb), dim=[1], keepdim=True)[selector]
+        photometric_loss_gt_np = photometric_loss_gt.detach().cpu().numpy()
+        self.gt_photometric_recod = self.gt_photometric_recod + np.histogram(photometric_loss_gt_np, bins=self.num_bins, range=[0, 1])[0]
 
 
-        losses['totLoss'] = losses['l1loss'] * self.opt.l1lossScale + \
-                            losses['pholoss'] * self.opt.pholossScale + \
-                            losses['l1constrain'] * self.opt.l1constrainScale + \
-                            losses['phoconstrain'] * self.opt.phoconstrainScale
+
+
+
+        # Save the reconstructed rgb image
+        save_root = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_photometric_reconstruction'
+        for i in range(self.opt.batch_size):
+            fig1 = tensor2rgb(inputs[('color', 0, 0)], ind = i)
+            fig2 = tensor2rgb(outputs[('color', 's', 0)], ind = i)
+            fig_combined = np.concatenate([np.array(fig1), np.array(fig2)], axis=0)
+            comps = inputs['entry_tag'][0].split(' ')
+            sv_path = os.path.join(save_root, comps[0].split('/')[1] + '_' + comps[1] + '_' + comps[2] + '.png')
+            pil.fromarray(fig_combined).save(sv_path)
+            self.count = self.count + 1
+
+
+
+
         return outputs, losses
 
     def constrain_compute_losses(self, inputs, outputs):
@@ -315,24 +352,15 @@ class Trainer:
         htheta_pred_detached = inputs['htheta']
         vtheta_pred_detached = inputs['vtheta']
 
-        hloss, vloss = self.localthetadespKitti_scaled.mixed_loss(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, htheta=htheta_pred_detached, vtheta=vtheta_pred_detached)
-        l1constrain = (hloss + vloss) / 2
-        losses['l1constrain'] = l1constrain
 
-        if not self.opt.ban_phoconstrain:
-            fullsize_ks = self.unitFK * self.kittiw * inputs['stereo_T'][:, 0, 3] * self.STEREO_SCALE_FACTOR
-            # fullsize_depthprediction = F.interpolate(outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            import pickle
-            resnet50pred = pickle.load( open( "/home/shengjie/Documents/Project_SemanticDepth/predepth.p", "rb" ) )
-            resnet50pred = torch.from_numpy(resnet50pred).cuda()
-            fullsize_depthprediction = F.interpolate(resnet50pred, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            fullsize_htheta = F.interpolate(htheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            fullsize_vtheta = F.interpolate(vtheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            fullsize_stereomask = F.interpolate(outputs['reprojection_loss_mask'], [self.kittih, self.kittiw], mode='nearest')
-            phoconstrain = self.localthetadespKitti.phtotmetricloss_nbym(depthmap=fullsize_depthprediction, htheta=fullsize_htheta, vtheta=fullsize_vtheta, ks=fullsize_ks, rgb=inputs[('color', 0, -1)], rgbStereo=inputs[('color', 's', -1)], ssimMask = fullsize_stereomask)
-            losses['phoconstrain'] = phoconstrain
-        else:
-            losses['phoconstrain'] = 0
+        fullsize_ks = self.unitFK * self.kittiw * inputs['stereo_T'][:, 0, 3] * self.STEREO_SCALE_FACTOR
+        fullsize_depthprediction = F.interpolate(outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+        fullsize_htheta = F.interpolate(htheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+        fullsize_vtheta = F.interpolate(vtheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+        fullsize_stereomask = F.interpolate(outputs['reprojection_loss_mask'], [self.kittih, self.kittiw], mode='nearest')
+        phoconstrain = self.localthetadespKitti.vls_patchImproveOverSingle(depthmap=fullsize_depthprediction, htheta=fullsize_htheta, vtheta=fullsize_vtheta, ks=fullsize_ks, rgb=inputs[('color', 0, -1)], rgbStereo=inputs[('color', 's', -1)], ssimMask = fullsize_stereomask, depthmap_lidar = inputs['depth_gt'], labelinfo = inputs['entry_tag'])
+        losses['phoconstrain'] = phoconstrain
+
         return losses
 
     def theta_compute_losses(self, inputs, outputs):

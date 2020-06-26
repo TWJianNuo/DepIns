@@ -86,7 +86,7 @@ depth_decoder.eval()
 
 raw_data_root = '/home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data'
 depth_gt_root = '/home/shengjie/Documents/Data/Kitti/filtered_lidar'
-depth_pred_root = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare/depthmap'
+depth_pred_root = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare_l1only/depthmap'
 patch_img_paths = glob(os.path.join(depth_pred_root, 'patch', '*.png'))
 numbins = len(distarr) + 1
 num_for_eachbin = np.zeros(numbins)
@@ -156,7 +156,7 @@ plt.setp(markerline1, 'markerfacecolor', 'b')
 markerline2, stemlines, _ = plt.stem(distarr.tolist()+[81], absrel_pixel_mean, use_line_collection = True)
 plt.setp(markerline2, 'markerfacecolor', 'r')
 plt.legend(['patch', 'pixel'])
-plt.savefig(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare', 'compare_edgedistance'))
+plt.savefig(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare_l1only', 'compare_edgedistance'))
 
 
 

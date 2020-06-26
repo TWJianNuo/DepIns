@@ -25,7 +25,7 @@ def compute_errors(gt, pred):
 
 full_res_shape = (1242, 375)
 depth_gt_root = '/home/shengjie/Documents/Data/Kitti/filtered_lidar'
-depth_pred_root = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare/depthmap'
+depth_pred_root = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare_l1only/depthmap'
 patch_img_paths = glob(os.path.join(depth_pred_root, 'patch', '*.png'))
 bins = np.linspace(0, 100, 100)
 num_for_eachbin = np.zeros(len(bins))
@@ -67,7 +67,7 @@ plt.setp(markerline2, 'markerfacecolor', 'r')
 # plt.plot(bins, absrel_patch_mean)
 # plt.plot(bins, absrel_pixel_mean)
 plt.legend(['patch', 'pixel'])
-plt.savefig(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare', 'compare_distance_wise'))
+plt.savefig(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_patchpixelCompare_l1only', 'compare_distance_wise'))
 
 
 

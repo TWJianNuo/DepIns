@@ -7,17 +7,9 @@ from options import MonodepthOptions
 import warnings
 
 import torch.optim as optim
-import torch
 from torch.utils.data import DataLoader
-
-
-version_num = torch.__version__
-version_num = ''.join(i for i in version_num if i.isdigit())
-version_num = int(version_num.ljust(10, '0'))
-if version_num > 1100000000:
-    from torch.utils.tensorboard import SummaryWriter
-else:
-    from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 from layers import *
 
@@ -37,9 +29,9 @@ def save_grad(name):
         grads[name] = grad
     return hook
 
-torch.manual_seed(0)
-torch.backends.cudnn.deterministic = False
-torch.backends.cudnn.benchmark = False
+# torch.manual_seed(0)
+# torch.backends.cudnn.deterministic = False
+# torch.backends.cudnn.benchmark = False
 class Trainer:
     def __init__(self, options):
         self.opt = options
@@ -118,31 +110,23 @@ class Trainer:
 
 
         self.unitFK = 0.58
-        if self.opt.localGeomMode == 'lidarSupKitti':
-            self.kittiw = 1242
-            self.kittih = 375
-            intrinsicKitti = np.array([
-                [0.58 * self.kittiw, 0, 0.5 * self.kittiw],
-                [0, 1.92 * self.kittih, 0.5 * self.kittih],
-                [0, 0, 1]], dtype=np.float32)
-            self.localthetadespKitti = LocalThetaDesp(height=self.kittih, width=self.kittiw,batch_size=self.opt.batch_size, intrinsic=intrinsicKitti, patchw=self.opt.patchw, patchh=self.opt.patchh).cuda()
+        self.kittiw = 1242
+        self.kittih = 375
+        intrinsicKitti = np.array([
+            [0.58 * self.kittiw, 0, 0.5 * self.kittiw],
+            [0, 1.92 * self.kittih, 0.5 * self.kittih],
+            [0, 0, 1]], dtype=np.float32)
+        self.localthetadespKitti = LocalThetaDesp(height=self.kittih, width=self.kittiw,batch_size=self.opt.batch_size, intrinsic=intrinsicKitti).cuda()
 
 
-            intrinsicKitti_scaled = np.array([
-                [0.58 * self.opt.width, 0, 0.5 * self.opt.width],
-                [0, 1.92 * self.opt.height, 0.5 * self.opt.height],
-                [0, 0, 1]], dtype=np.float32)
-            self.localthetadespKitti_scaled = LocalThetaDesp(height=self.opt.height, width=self.opt.width,batch_size=self.opt.batch_size, intrinsic=intrinsicKitti_scaled, patchw=self.opt.patchw, patchh=self.opt.patchh).cuda()
+        intrinsicKitti_scaled = np.array([
+            [0.58 * self.opt.width, 0, 0.5 * self.opt.width],
+            [0, 1.92 * self.opt.height, 0.5 * self.opt.height],
+            [0, 0, 1]], dtype=np.float32)
+        self.localthetadespKitti_scaled = LocalThetaDesp(height=self.opt.height, width=self.opt.width,batch_size=self.opt.batch_size, intrinsic=intrinsicKitti_scaled).cuda()
 
-            self.thetalossmap = torch.zeros([1, 1, self.opt.height, self.opt.width]).expand([self.opt.batch_size, -1, -1, -1]).cuda()
-            self.thetalossmap[:,:,110::,:] = 1
-        else:
-            intrinsic = np.array([
-                [512., 0., 512.],
-                [0., 512., 160.],
-                [0., 0.,   1.]]
-            )
-            self.localthetadesp = LocalThetaDesp(height=self.prsil_h, width=self.prsil_w, batch_size=self.opt.batch_size, intrinsic=intrinsic).cuda()
+        self.thetalossmap = torch.zeros([1, 1, self.opt.height, self.opt.width]).expand([self.opt.batch_size, -1, -1, -1]).cuda()
+        self.thetalossmap[:,:,110::,:] = 1
 
 
     def set_layers(self):
@@ -189,13 +173,13 @@ class Trainer:
         train_dataset = datasets.KITTIRAWDataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=not self.opt.no_aug, load_seman = True, load_hints = self.opt.load_hints, hints_path = self.opt.hints_path, PreSIL_root = self.opt.PreSIL_path,
-            kitti_gt_path = self.opt.kitti_gt_path, theta_gt_path=self.opt.theta_gt_path
+            kitti_gt_path = self.opt.kitti_gt_path
         )
 
         val_dataset = datasets.KITTIRAWDataset(
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=False, load_seman = True, load_hints = self.opt.load_hints, hints_path = self.opt.hints_path, PreSIL_root = self.opt.PreSIL_path,
-            kitti_gt_path=self.opt.kitti_gt_path, theta_gt_path=self.opt.theta_gt_path
+            kitti_gt_path=self.opt.kitti_gt_path
         )
 
         self.train_loader = DataLoader(
@@ -252,7 +236,6 @@ class Trainer:
         """
         self.model_lr_scheduler.step()
         self.set_train()
-        # self.set_eval()
 
         for batch_idx, inputs in enumerate(self.train_loader):
 
@@ -298,41 +281,29 @@ class Trainer:
         losses.update(self.depth_compute_losses(inputs, outputs))
 
         # Theta Branch
-        # losses.update(self.theta_compute_losses(inputs, outputs))
+        losses.update(self.theta_compute_losses(inputs, outputs))
 
         # Constrain Branch
         losses.update(self.constrain_compute_losses(inputs, outputs))
 
-
-        losses['totLoss'] = losses['l1loss'] * self.opt.l1lossScale + \
+        losses['totLoss'] = losses['ltheta'] * self.opt.lthetaScale + \
+                            losses['sclLoss'] * self.opt.sclLossScale + \
+                            losses['l1loss'] * self.opt.l1lossScale + \
                             losses['pholoss'] * self.opt.pholossScale + \
-                            losses['l1constrain'] * self.opt.l1constrainScale + \
-                            losses['phoconstrain'] * self.opt.phoconstrainScale
+                            losses['l1constrain'] * self.opt.l1constrainScale
         return outputs, losses
 
     def constrain_compute_losses(self, inputs, outputs):
         losses = dict()
-        htheta_pred_detached = inputs['htheta']
-        vtheta_pred_detached = inputs['vtheta']
-
-        hloss, vloss = self.localthetadespKitti_scaled.mixed_loss(depthmap=outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, htheta=htheta_pred_detached, vtheta=vtheta_pred_detached)
-        l1constrain = (hloss + vloss) / 2
+        l1constrain = 0
+        htheta_pred_detached = outputs['htheta_pred'].detach()
+        vtheta_pred_detached = outputs['vtheta_pred'].detach()
+        for i in range(len(self.opt.scales)):
+            scaledDepth = F.interpolate(outputs[('depth', 0, i)] * self.STEREO_SCALE_FACTOR, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
+            hthetai, vthetai = self.localthetadespKitti_scaled.get_theta(depthmap=scaledDepth)
+            l1constrain = l1constrain + torch.sum((torch.abs(hthetai - htheta_pred_detached) + torch.abs(vthetai - vtheta_pred_detached)) * self.thetalossmap) / torch.sum(self.thetalossmap)
+        l1constrain = l1constrain / len(self.opt.scales)
         losses['l1constrain'] = l1constrain
-
-        if not self.opt.ban_phoconstrain:
-            fullsize_ks = self.unitFK * self.kittiw * inputs['stereo_T'][:, 0, 3] * self.STEREO_SCALE_FACTOR
-            # fullsize_depthprediction = F.interpolate(outputs[('depth', 0, 0)] * self.STEREO_SCALE_FACTOR, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            import pickle
-            resnet50pred = pickle.load( open( "/home/shengjie/Documents/Project_SemanticDepth/predepth.p", "rb" ) )
-            resnet50pred = torch.from_numpy(resnet50pred).cuda()
-            fullsize_depthprediction = F.interpolate(resnet50pred, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            fullsize_htheta = F.interpolate(htheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            fullsize_vtheta = F.interpolate(vtheta_pred_detached, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            fullsize_stereomask = F.interpolate(outputs['reprojection_loss_mask'], [self.kittih, self.kittiw], mode='nearest')
-            phoconstrain = self.localthetadespKitti.phtotmetricloss_nbym(depthmap=fullsize_depthprediction, htheta=fullsize_htheta, vtheta=fullsize_vtheta, ks=fullsize_ks, rgb=inputs[('color', 0, -1)], rgbStereo=inputs[('color', 's', -1)], ssimMask = fullsize_stereomask)
-            losses['phoconstrain'] = phoconstrain
-        else:
-            losses['phoconstrain'] = 0
         return losses
 
     def theta_compute_losses(self, inputs, outputs):
@@ -428,8 +399,6 @@ class Trainer:
             combined = torch.cat((reprojection_loss, identity_reprojection_loss), dim=1)
             to_optimise, idxs = torch.min(combined, dim=1, keepdim=True)
             reprojection_loss_mask = (idxs != 1).float() * (1 - outputs['selfOccMask'])
-            if scale == 0:
-                outputs['reprojection_loss_mask'] = reprojection_loss_mask
             pholoss = pholoss + (reprojection_loss * reprojection_loss_mask).sum() / (reprojection_loss_mask.sum() + 1)
             # if scale == 0:
             #     outputs['reprojection_loss'] = reprojection_loss
@@ -502,47 +471,36 @@ class Trainer:
 
     def record_img(self, inputs, outputs):
         vind = 0
-        if not self.opt.localGeomMode == 'lidarSupKitti':
-            figrgb = tensor2rgb(inputs['pSIL_rgb'], ind=vind)
-            figh = tensor2disp(outputs['htheta'] - outputs['htheta'].min(), percentile=95, ind=vind)
-            fighpred = tensor2disp(outputs['htheta_pred'] - outputs['htheta_pred'].min(), percentile=95, ind=vind)
-            figv = tensor2disp(outputs['vtheta'] - outputs['vtheta'].min(), percentile=95, ind=vind)
-            figvpred = tensor2disp(outputs['vtheta_pred'] - outputs['vtheta_pred'].min(), percentile=95, ind=vind)
-            figcombined = np.concatenate([np.array(figrgb), np.array(figh), np.array(fighpred), np.array(figv), np.array(figvpred)], axis=0)
-            self.writers['train'].add_image('rgb', (torch.from_numpy(figcombined).float() / 255)).permute([2,0,1], self.step)
-            # self.writers['train'].add_image('rgb', torch.from_numpy(figcombined).float().permute([2,0,1]) / 255, self.step)
-        else:
-            figrgb = tensor2rgb(inputs[('color', 0, 0)], ind=vind)
-            fighpred = tensor2disp(inputs['htheta'] - 1, vmax = 4, ind=vind)
-            figvpred = tensor2disp(inputs['vtheta'] - 1, vmax = 4, ind=vind)
-            # fighpred = tensor2disp(outputs['htheta_pred'] - 1, vmax = 4, ind=vind)
-            # figvpred = tensor2disp(outputs['vtheta_pred'] - 1, vmax = 4, ind=vind)
 
-            figdisp = tensor2disp(outputs[('disp', 0)][:,2:3,:,:], vmax=0.1, ind=0)
-            # tensor2disp(outputs[('disp', 0)], vmax=1, ind=0).show()
-            _, predDepth = disp_to_depth(outputs[('disp', 0)][:,2:3,:,:], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
-            predDepth = predDepth * self.STEREO_SCALE_FACTOR
-            predDepth = F.interpolate(predDepth, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            predD2htheta, predD2vtheta = self.localthetadespKitti.get_theta(predDepth)
-            fighpred_fromD = tensor2disp(predD2htheta - 1, vmax=4, ind=vind).resize(figdisp.size, pil.BILINEAR)
-            figvpred_fromD = tensor2disp(predD2vtheta - 1, vmax=4, ind=vind).resize(figdisp.size, pil.BILINEAR)
-            figcombined1 = np.concatenate([np.array(figrgb), np.array(fighpred), np.array(figvpred)], axis=0)
-            figcombined2 = np.concatenate([np.array(figdisp), np.array(fighpred_fromD), np.array(figvpred_fromD)], axis=0)
-            figcombined = np.concatenate([figcombined1, figcombined2], axis=1)
-            self.writers['train'].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2,0,1]), self.step)
+        figrgb = tensor2rgb(inputs[('color', 0, 0)], ind=vind)
+        fighpred = tensor2disp(outputs['htheta_pred'] - 1, vmax = 4, ind=vind)
+        figvpred = tensor2disp(outputs['vtheta_pred'] - 1, vmax = 4, ind=vind)
+
+        figdisp = tensor2disp(outputs[('disp', 0)][:,2:3,:,:], vmax=0.1, ind=0)
+        # tensor2disp(outputs[('disp', 0)], vmax=1, ind=0).show()
+        _, predDepth = disp_to_depth(outputs[('disp', 0)][:,2:3,:,:], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
+        predDepth = predDepth * self.STEREO_SCALE_FACTOR
+        predDepth = F.interpolate(predDepth, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+        predD2htheta, predD2vtheta = self.localthetadespKitti.get_theta(predDepth)
+        fighpred_fromD = tensor2disp(predD2htheta - 1, vmax=4, ind=vind).resize(figdisp.size, pil.BILINEAR)
+        figvpred_fromD = tensor2disp(predD2vtheta - 1, vmax=4, ind=vind).resize(figdisp.size, pil.BILINEAR)
+        figcombined1 = np.concatenate([np.array(figrgb), np.array(fighpred), np.array(figvpred)], axis=0)
+        figcombined2 = np.concatenate([np.array(figdisp), np.array(fighpred_fromD), np.array(figvpred_fromD)], axis=0)
+        figcombined = np.concatenate([figcombined1, figcombined2], axis=1)
+        self.writers['train'].add_image('overview', torch.from_numpy(figcombined).float() / 255, dataformats='HWC', global_step=self.step)
 
 
-            figrgb_stereo = tensor2rgb(inputs[('color', 's', 0)], ind=vind)
-            figrgb2 = tensor2rgb(inputs[('color', 0, 0)], ind=vind)
-            mask = 1 - outputs['selfOccMask'][vind, 0, :, :].detach().cpu().numpy()
-            mask = np.expand_dims(mask, axis=2)
-            mask = np.repeat(mask, axis=2, repeats=3)
-            figrgb2 = pil.fromarray((np.array(figrgb2).astype(np.float) * mask).astype(np.uint8))
-            occmask = tensor2disp(outputs['selfOccMask'], vmax = 1, ind=vind)
-            color_recon = tensor2rgb(outputs[('color', 's', 0)], ind=vind)
-            combined2 = np.concatenate([figrgb2, figrgb_stereo, color_recon, occmask])
-            self.writers['train'].add_image('rgb', (torch.from_numpy(combined2).float() / 255).permute([2,0,1]), self.step)
-            # pil.fromarray(combined2).show()
+        figrgb_stereo = tensor2rgb(inputs[('color', 's', 0)], ind=vind)
+        figrgb2 = tensor2rgb(inputs[('color', 0, 0)], ind=vind)
+        mask = 1 - outputs['selfOccMask'][vind, 0, :, :].detach().cpu().numpy()
+        mask = np.expand_dims(mask, axis=2)
+        mask = np.repeat(mask, axis=2, repeats=3)
+        figrgb2 = pil.fromarray((np.array(figrgb2).astype(np.float) * mask).astype(np.uint8))
+        occmask = tensor2disp(outputs['selfOccMask'], vmax = 1, ind=vind)
+        color_recon = tensor2rgb(outputs[('color', 's', 0)], ind=vind)
+        combined2 = np.concatenate([figrgb2, figrgb_stereo, color_recon, occmask])
+        self.writers['train'].add_image('rgb', torch.from_numpy(combined2).float() / 255, dataformats='HWC', global_step=self.step)
+        # pil.fromarray(combined2).show()
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
         """
