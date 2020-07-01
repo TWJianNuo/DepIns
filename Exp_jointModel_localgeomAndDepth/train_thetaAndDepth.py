@@ -136,6 +136,16 @@ class Trainer:
         self.thetalossmap[:,:,110::,:] = 1
 
 
+        self.prsil_w = 1024
+        self.prsil_h = 448
+        intrinsic = np.array([
+            [512., 0., 512.],
+            [0., 512., 160.],
+            [0., 0., 1.]]
+        )
+        self.presil_localthetadesp = LocalThetaDesp(height=self.prsil_h, width=self.prsil_w, batch_size=self.opt.batch_size, intrinsic=intrinsic).cuda()
+
+
     def set_layers(self):
         """properly handle layer initialization under multiple dataset situation
         """
@@ -305,10 +315,13 @@ class Trainer:
         l1constrain = 0
         htheta_pred_detached = outputs['htheta_pred'].detach()
         vtheta_pred_detached = outputs['vtheta_pred'].detach()
+
+        # htheta, vtheta = self.presil_localthetadesp.get_theta(inputs['pSIL_depth'])
+        # self.presil_localthetadesp.depth_localgeom_consistency(inputs['pSIL_depth'], htheta, vtheta)
         for i in range(len(self.opt.scales)):
             scaledDepth = F.interpolate(outputs[('depth', 0, i)] * self.STEREO_SCALE_FACTOR, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            hthetai, vthetai = self.localthetadespKitti_scaled.get_theta(depthmap=scaledDepth)
-            l1constrain = l1constrain + torch.sum((torch.abs(hthetai - htheta_pred_detached) + torch.abs(vthetai - vtheta_pred_detached)) * self.thetalossmap) / torch.sum(self.thetalossmap)
+            l1constrain = l1constrain + self.localthetadespKitti_scaled.depth_localgeom_consistency(scaledDepth, htheta_pred_detached, vtheta_pred_detached, mask=self.thetalossmap)
+            # l1constrain = l1constrain + torch.sum((torch.abs(hthetai - htheta_pred_detached) + torch.abs(vthetai - vtheta_pred_detached)) * self.thetalossmap) / torch.sum(self.thetalossmap)
         l1constrain = l1constrain / len(self.opt.scales)
         losses['l1constrain'] = l1constrain
         return losses

@@ -2145,12 +2145,13 @@ class LocalThetaDesp(nn.Module):
         self.boundStabh = 0.02
         self.boundStabv = 0.02
         self.invIn = nn.Parameter(torch.from_numpy(np.linalg.inv(intrinsic)).float(), requires_grad = False)
+        self.intrinsic = nn.Parameter(torch.from_numpy(intrinsic).float(), requires_grad=False)
         # self.ptspair = ptspair
 
         # Init grid points
         xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
-        self.xx = torch.from_numpy(xx).float()
-        self.yy = torch.from_numpy(yy).float()
+        self.xx = nn.Parameter(torch.from_numpy(xx).float(), requires_grad=False)
+        self.yy = nn.Parameter(torch.from_numpy(yy).float(), requires_grad=False)
         self.pixelLocs = nn.Parameter(torch.stack([self.xx, self.yy, torch.ones_like(self.xx)], dim=2), requires_grad=False)
 
         # Compute Horizontal Direciton
@@ -2564,6 +2565,16 @@ class LocalThetaDesp(nn.Module):
         # self.get_optimization_kernel(optimize_width)
         self.construct_nbym_photometricmatch_kernels(patchw = patchw, patchh = patchh)
         # self.texture_weight = TextureIndicatorM()
+
+
+        sobelx = np.array([[-1, 0, 1],
+                           [-2, 0, 2],
+                           [-1, 0, 1]])
+        sobelx = sobelx / 4 / 2
+        self.sobelx = nn.Conv2d(in_channels=1,out_channels=1,kernel_size=3,stride=1,padding=1,bias=False)
+        self.sobelx.weight = nn.Parameter(torch.from_numpy(sobelx).float().unsqueeze(0).unsqueeze(0), requires_grad = False)
+        self.sobelx = self.sobelx.cuda()
+
     def translate_path(self, phopath):
         phoind = list()
         phosel = list()
@@ -4135,7 +4146,6 @@ class LocalThetaDesp(nn.Module):
 
 
     def optimize_depth_using_theta(self, depthmap, htheta, vtheta):
-
         # htheta, vtheta = self.get_theta(depthmap)
         bk_htheta = self.backconvert_htheta(htheta)
         npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(
@@ -4331,3 +4341,52 @@ class LocalThetaDesp(nn.Module):
         cv2.imwrite(os.path.join(svfolder, 'depthmap', 'patch', figname), optdepthmap_patchnp)
 
         return 0
+
+    def depth_localgeom_consistency(self, depthmap, htheta, vtheta, mask=None):
+        bk_htheta = self.backconvert_htheta(htheta)
+        dirx_h = torch.cos(bk_htheta)
+        diry_h = torch.sin(bk_htheta)
+        dir3d_h = self.hM[:,:,0,:].unsqueeze(0).expand([self.batch_size, -1, -1, -1]) * dirx_h.squeeze(1).unsqueeze(3).expand([-1, -1, -1, 3]) + \
+                  self.hM[:,:,1,:].unsqueeze(0).expand([self.batch_size, -1, -1, -1]) * diry_h.squeeze(1).unsqueeze(3).expand([-1, -1, -1, 3])
+        dir3d_h = dir3d_h / torch.sqrt(torch.sum(dir3d_h * dir3d_h, dim=3, keepdim=True))
+
+        u0 = self.xx.unsqueeze(0).unsqueeze(0).expand([self.batch_size, -1, -1, -1])
+        bx = self.intrinsic[0,2]
+        fx = self.intrinsic[0,0]
+        nx_nz_rat = (dir3d_h[:,:,:,0] / dir3d_h[:,:,:,2]).unsqueeze(1)
+
+        derivx = -(u0 - bx - nx_nz_rat * fx) / torch.clamp((u0 - nx_nz_rat * fx - bx)**2, min=1e-10) * depthmap
+        num_grad = self.sobelx(depthmap)
+
+
+        # tensor2grad(derivx, percentile=80, viewind=0).show()
+        # tensor2grad(num_grad, percentile=80, viewind=0).show()
+        # tensor2disp(htheta-1, vmax=4, ind=0).show()
+        # tensor2disp(torch.abs(derivx), vmax=0.1, ind=0).show()
+        # tensor2disp(torch.abs(num_grad), vmax=0.1, ind=0).show()
+        # tensor2disp(1 / depthmap, percentile=95, ind=0).show()
+        #
+        # # Check for correctness of the derivation
+        # pts3d = depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
+        #
+        # rndw = np.random.randint(0, self.width - 1)
+        # rndh = np.random.randint(0, self.height - 1)
+        # pts3d_ck = pts3d[0, rndh, rndw, :, 0]
+        # dirck = dir3d_h[0, rndh, rndw, :]
+        # devt = 0.001
+        #
+        # pts3d_ck_dev = pts3d_ck + dirck * devt
+        # projected_pts3d_ck_dev = self.intrinsic @ pts3d_ck_dev.unsqueeze(1)
+        # projected_pts3d_ck_dev[0] = projected_pts3d_ck_dev[0] / projected_pts3d_ck_dev[2]
+        # projected_pts3d_ck_dev[1] = projected_pts3d_ck_dev[1] / projected_pts3d_ck_dev[2]
+        #
+        # num_grad = (projected_pts3d_ck_dev[2] - depthmap[0,0,rndh,rndw]) / (projected_pts3d_ck_dev[0] - rndw)
+        # computed_grad = derivx[0,0,rndh,rndw]
+        # print(num_grad / computed_grad)
+
+        if mask is not None:
+            closs = torch.sum(torch.abs(derivx - num_grad) * mask) / (torch.sum(mask) + 1)
+        else:
+            closs = torch.mean(torch.abs(derivx - num_grad))
+
+        return closs
