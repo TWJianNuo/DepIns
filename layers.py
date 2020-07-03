@@ -4342,7 +4342,7 @@ class LocalThetaDesp(nn.Module):
 
         return 0
 
-    def depth_localgeom_consistency(self, depthmap, htheta, vtheta, mask=None):
+    def depth_localgeom_consistency(self, depthmap, htheta, vtheta, mask=None, isoutput_grads=False):
         bk_htheta = self.backconvert_htheta(htheta)
         dirx_h = torch.cos(bk_htheta)
         diry_h = torch.sin(bk_htheta)
@@ -4389,4 +4389,27 @@ class LocalThetaDesp(nn.Module):
         else:
             closs = torch.mean(torch.abs(derivx - num_grad))
 
-        return closs
+        if not isoutput_grads:
+            return closs
+        else:
+            return closs, derivx, num_grad
+
+
+
+    def surfnorm_from_localgeom(self, depthmap, htheta, vtheta):
+        bk_htheta = self.backconvert_htheta(htheta)
+        dirx_h = torch.cos(bk_htheta)
+        diry_h = torch.sin(bk_htheta)
+        dir3d_h = self.hM[:,:,0,:].unsqueeze(0).expand([self.batch_size, -1, -1, -1]) * dirx_h.squeeze(1).unsqueeze(3).expand([-1, -1, -1, 3]) + \
+                  self.hM[:,:,1,:].unsqueeze(0).expand([self.batch_size, -1, -1, -1]) * diry_h.squeeze(1).unsqueeze(3).expand([-1, -1, -1, 3])
+        dir3d_h = dir3d_h / torch.sqrt(torch.sum(dir3d_h * dir3d_h, dim=3, keepdim=True))
+
+        bk_vtheta = self.backconvert_vtheta(vtheta)
+        dirx_v = torch.cos(bk_vtheta)
+        diry_v = torch.sin(bk_vtheta)
+        dir3d_v = self.vM[:,:,0,:].unsqueeze(0).expand([self.batch_size, -1, -1, -1]) * dirx_v.squeeze(1).unsqueeze(3).expand([-1, -1, -1, 3]) + \
+                  self.vM[:,:,1,:].unsqueeze(0).expand([self.batch_size, -1, -1, -1]) * diry_v.squeeze(1).unsqueeze(3).expand([-1, -1, -1, 3])
+        dir3d_v = dir3d_v / torch.sqrt(torch.sum(dir3d_v * dir3d_v, dim=3, keepdim=True))
+
+        dir3d = torch.cross(dir3d_h, dir3d_v, dim=3)
+        return dir3d
