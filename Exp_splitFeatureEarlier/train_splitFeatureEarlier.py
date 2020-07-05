@@ -285,13 +285,13 @@ class Trainer:
 
         train_dataset = datasets.KITTIRAWDataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, is_train=not self.opt.no_aug, load_seman = True, load_hints = self.opt.load_hints, hints_path = self.opt.hints_path, PreSIL_root = self.opt.PreSIL_path,
+            self.opt.frame_ids, 4, is_train=not self.opt.no_aug, load_seman = False, load_hints = self.opt.load_hints, hints_path = self.opt.hints_path, PreSIL_root = self.opt.PreSIL_path,
             kitti_gt_path = self.opt.kitti_gt_path
         )
 
         val_dataset = datasets.KITTIRAWDataset(
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, is_train=False, load_seman = True, load_hints = self.opt.load_hints, hints_path = self.opt.hints_path, PreSIL_root = self.opt.PreSIL_path,
+            self.opt.frame_ids, 4, is_train=False, load_seman = False, load_hints = self.opt.load_hints, hints_path = self.opt.hints_path, PreSIL_root = self.opt.PreSIL_path,
             kitti_gt_path=self.opt.kitti_gt_path
         )
 
