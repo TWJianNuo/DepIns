@@ -253,6 +253,9 @@ class MonodepthOptions:
         self.parser.add_argument("--depthgrad_mask_threshold",
                                  type=float,
                                  default=1e10)
+        self.parser.add_argument("--split_level",
+                                 type=int,
+                                 default=-1)
 
 
 
