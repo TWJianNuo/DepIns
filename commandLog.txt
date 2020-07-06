@@ -1616,6 +1616,9 @@ tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/patchmatch_bs --samples_p
 
 
 
+
+
+
 --model_name semantics_trial8 --frame_ids 0 --use_stereo --split debug_cyclist_only_splits --log_dir /home/shengjie/Documents/Project_SemanticDepth/tmp --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2 --num_epochs 20  --height 320 --width 1024 --num_workers 0 --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/trainOnKitti2/models/weights_11 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --no_aug --patchw 9 --patchh 3
 
 
@@ -1776,3 +1779,369 @@ tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th01 --sa
 
 CUDA_VISIBLE_DEVICES=5 python Exp_comparison_patchmatchAndsinglepixel/train_patch_photometric.py --model_name patchmatch_3by7_th005 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --theta_gt_path /scratch1/zhusheng/theta_pred --l1constrainScale 0 --patchw 7 --patchh 3 --depthgrad_mask_threshold 0.05
 tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th005 --samples_per_plugin=images=100 --port 2704
+
+
+
+CUDA_VISIBLE_DEVICES=4 python Exp_comparison_patchmatchAndsinglepixel/train_patch_photometric.py --model_name patchmatch_3by7_phoonly_bs --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --theta_gt_path /scratch1/zhusheng/theta_pred --l1lossScale 0 --l1constrainScale 0 --pholossScale 1 --phoconstrainScale 0 --patchw 7 --patchh 3
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_phoonly_bs --samples_per_plugin=images=100 --port 2800
+/research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_phoonly_bs/models/weights_20/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.101  &   0.795  &   4.617  &   0.194  &   0.882  &   0.958  &   0.979  \\
+
+
+CUDA_VISIBLE_DEVICES=5 python Exp_comparison_patchmatchAndsinglepixel/train_patch_photometric.py --model_name patchmatch_3by7_phoonly_cp --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --theta_gt_path /scratch1/zhusheng/theta_pred --l1lossScale 0 --l1constrainScale 0 --pholossScale 0.5 --phoconstrainScale 0.5 --patchw 7 --patchh 3
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_phoonly_cp --samples_per_plugin=images=100 --port 2801
+/research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_phoonly_cp/models/weights_20/
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_phoonly_cp/models/weights_20/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.102  &   0.831  &   4.711  &   0.198  &   0.881  &   0.956  &   0.978  \\
+
+
+
+CUDA_VISIBLE_DEVICES=6 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_phoonly_bs/models
+CUDA_VISIBLE_DEVICES=7 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_phoonly_cp/models
+
+
+
+CUDA_VISIBLE_DEVICES=2 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th10/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th10/models/weights_11/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.094  &   0.593  &   4.198  &   0.181  &   0.894  &   0.964  &   0.983  \\
+CUDA_VISIBLE_DEVICES=3 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th07/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th07/models/weights_12/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.091  &   0.584  &   4.150  &   0.178  &   0.894  &   0.965  &   0.983  \\
+CUDA_VISIBLE_DEVICES=4 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th03/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th03/models/weights_15/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.094  &   0.590  &   4.202  &   0.182  &   0.896  &   0.964  &   0.983  \\
+CUDA_VISIBLE_DEVICES=6 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th01/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th01/models/weights_11/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.093  &   0.594  &   4.174  &   0.182  &   0.894  &   0.963  &   0.983  \\
+CUDA_VISIBLE_DEVICES=7 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th005/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th005/models/weights_15/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.096  &   0.598  &   4.212  &   0.183  &   0.893  &   0.964  &   0.983  \\
+
+
+CUDA_VISIBLE_DEVICES=4 python Exp_comparison_patchmatchAndsinglepixel/train_patch_photometric_using_gtlidar.py --model_name patchmatch_3by7_pholidar_bs --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --theta_gt_path /scratch1/zhusheng/theta_pred --l1lossScale 0 --l1constrainScale 0 --pholossScale 1 --phoconstrainScale 0 --patchw 7 --patchh 3
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_pholidar_bs --samples_per_plugin=images=100 --port 2802
+
+CUDA_VISIBLE_DEVICES=5 python Exp_comparison_patchmatchAndsinglepixel/train_patch_photometric_using_gtlidar.py --model_name patchmatch_3by7_pholidar_cp --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --theta_gt_path /scratch1/zhusheng/theta_pred --l1lossScale 0 --l1constrainScale 0 --pholossScale 0.5 --phoconstrainScale 0.5 --patchw 7 --patchh 3
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_pholidar_cp --samples_per_plugin=images=100 --port 2803
+
+CUDA_VISIBLE_DEVICES=6 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_pholidar_bs/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_pholidar_bs/models/weights_19/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.102  &   0.813  &   4.652  &   0.196  &   0.882  &   0.957  &   0.979  \\
+
+CUDA_VISIBLE_DEVICES=7 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_pholidar_cp/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_pholidar_cp/models/weights_20/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.099  &   0.737  &   4.530  &   0.194  &   0.882  &   0.958  &   0.979  \\
+
+
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/patchmatch_3by7_th03/models/weights_15 /media/shengjie/other/Downloads/
+
+
+--model_name semantics_trial8 --frame_ids 0 --use_stereo --split eigen_full --log_dir /home/shengjie/Documents/Project_SemanticDepth/tmp --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2 --num_epochs 20  --height 320 --width 1024 --num_workers 0 --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/patchmatch_3by7_th03/models/weights_15 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --no_aug --patchw 11 --patchh 3
+
+
+--model_name semantics_trial8 --frame_ids 0 --use_stereo --split eigen_full --log_dir /home/shengjie/Documents/Project_SemanticDepth/tmp --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2 --num_epochs 20  --height 320 --width 1024 --num_workers 0 --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --no_aug --patchw 11 --patchh 3
+
+
+--model_name semantics_trial8 --frame_ids 0 --use_stereo --split eigen_full --log_dir /home/shengjie/Documents/Project_SemanticDepth/tmp --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2 --num_epochs 20  --height 320 --width 1024 --num_workers 0 --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/trainOnKitti2/models/weights_5 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --no_aug --patchw 11 --patchh 3
+
+
+--eval_stereo --frame_ids 0 --use_stereo --split eigen --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --localGeomMode lidarSupKitti --learning_rate 1e-4 --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/patchmatch_3by7_th03/models/weights_15 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --patchw 11 --patchh 3
+
+
+--eval_stereo --frame_ids 0 --use_stereo --split eigen --png --batch_size 12  --height 320 --width 1024 --num_workers 12 --localGeomMode lidarSupKitti --learning_rate 1e-4 --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/patchmatch_3by7_th03/models/weights_15 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --patchw 11 --patchh 3 
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.094  &   0.589  &   4.196  &   0.182  &   0.896  &   0.964  &   0.983  \\
+
+--eval_stereo --frame_ids 0 --use_stereo --split eigen --png --batch_size 12  --height 320 --width 1024 --num_workers 12 --localGeomMode lidarSupKitti --learning_rate 1e-4 --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/patchmatch_3by7_th03/models/weights_15 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --patchw 11 --patchh 3 --do_theta_optimization
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.095  &   0.580  &   4.163  &   0.178  &   0.893  &   0.965  &   0.984  \\
+
+--eval_stereo --frame_ids 0 --use_stereo --split eigen --png --batch_size 12  --height 320 --width 1024 --num_workers 12 --localGeomMode lidarSupKitti --learning_rate 1e-4 --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/patchmatch_3by7_th03/models/weights_15 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --patchw 3 --patchh 1 --do_theta_optimization
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.094  &   0.587  &   4.189  &   0.181  &   0.896  &   0.964  &   0.983  \\
+
+
+--eval_stereo --frame_ids 0 --use_stereo --split eigen --png --batch_size 12  --height 320 --width 1024 --num_workers 12 --localGeomMode lidarSupKitti --learning_rate 1e-4 --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/patchmatch_3by7_th03/models/weights_15 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --patchw 3 --patchh 3 --do_theta_optimization
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.094  &   0.587  &   4.194  &   0.181  &   0.896  &   0.964  &   0.983  \\
+
+
+--eval_stereo --frame_ids 0 --use_stereo --split eigen --png --batch_size 12  --height 320 --width 1024 --num_workers 12 --localGeomMode lidarSupKitti --learning_rate 1e-4 --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/patchmatch_3by7_th03/models/weights_15 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred --patchw 5 --patchh 1 --do_theta_optimization
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.094  &   0.585  &   4.180  &   0.181  &   0.896  &   0.964  &   0.983  \\
+
+
+CUDA_VISIBLE_DEVICES=2 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthPredBs --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --lthetaScale 0 --sclLossScale 0 --l1constrainScale 0
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthPredBs --samples_per_plugin=images=100 --port 4000
+
+CUDA_VISIBLE_DEVICES=3 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthPredBs_l1only --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --lthetaScale 0 --sclLossScale 0 --l1constrainScale 0 --pholossScale 0
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthPredBs_l1only --samples_per_plugin=images=100 --port 4001
+
+CUDA_VISIBLE_DEVICES=4 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 0
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta --samples_per_plugin=images=100 --port 4002
+
+CUDA_VISIBLE_DEVICES=5 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta_l1constrain2 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 1e-3
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_l1constrain2 --samples_per_plugin=images=100 --port 4003
+
+CUDA_VISIBLE_DEVICES=4 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta_01 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 0 --lthetaScale 0.1 --sclLossScale 0.1
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_01 --samples_per_plugin=images=100 --port 4004
+
+CUDA_VISIBLE_DEVICES=5 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta_001 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 0 --lthetaScale 0.01 --sclLossScale 0.01
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_001 --samples_per_plugin=images=100 --port 4005
+
+
+CUDA_VISIBLE_DEVICES=4 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta_01_semidense --frame_ids 0 --use_stereo --split semidense_eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/semidense_gt --l1constrainScale 0 --lthetaScale 0.1 --sclLossScale 0.1
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_01_semidense --samples_per_plugin=images=100 --port 4006
+
+
+CUDA_VISIBLE_DEVICES=1 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthPredBs/models
+/research/cvl-zhusheng/DepIns/tmp/depthPredBs/models/weights_19/
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthPredBs/models/weights_19/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.097  &   0.595  &   4.222  &   0.184  &   0.893  &   0.964  &   0.982  \\
+
+CUDA_VISIBLE_DEVICES=2 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthPredBs_l1only/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthPredBs_l1only/models/weights_11/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.093  &   0.593  &   4.207  &   0.180  &   0.894  &   0.965  &   0.983  \\
+
+CUDA_VISIBLE_DEVICES=7 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthAndTheta/models
+/research/cvl-zhusheng/DepIns/tmp/depthAndTheta/models/weights_12/
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthAndTheta/models/weights_12/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.094  &   0.588  &   4.220  &   0.177  &   0.893  &   0.966  &   0.984  \\
+
+CUDA_VISIBLE_DEVICES=1 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_l1constrain2/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_l1constrain2/models/weights_15/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.096  &   0.596  &   4.205  &   0.179  &   0.894  &   0.965  &   0.984  \\
+
+CUDA_VISIBLE_DEVICES=2 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_01/models
+/research/cvl-zhusheng/DepIns/tmp/depthAndTheta_01/models/weights_5/
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_01/models/weights_5/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.094  &   0.580  &   4.170  &   0.179  &   0.897  &   0.966  &   0.984  \\
+
+CUDA_VISIBLE_DEVICES=7 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_001/models
+/research/cvl-zhusheng/DepIns/tmp/depthAndTheta_001/models/weights_9/
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_001/models/weights_9/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.099  &   0.600  &   4.256  &   0.183  &   0.893  &   0.965  &   0.983  \\
+
+CUDA_VISIBLE_DEVICES=7 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_01_semidense/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_01_semidense/models/weights_22/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.099  &   0.645  &   4.297  &   0.188  &   0.887  &   0.962  &   0.981  \\
+
+
+Target:
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.093  &   0.585  &   3.996  &   0.173  &   0.910  &   0.967  &   0.983  \\
+
+
+
+CUDA_VISIBLE_DEVICES=5 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta_newcons_0 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 0
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_0 --samples_per_plugin=images=100 --port 4006
+
+CUDA_VISIBLE_DEVICES=2 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta_newcons_01 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 1e-2
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_01 --samples_per_plugin=images=100 --port 4007
+
+CUDA_VISIBLE_DEVICES=3 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta_newcons_001 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 1e-3
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_001 --samples_per_plugin=images=100 --port 4008
+
+CUDA_VISIBLE_DEVICES=5 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta_newcons_0001 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 1e-4
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_0001 --samples_per_plugin=images=100 --port 4009
+
+CUDA_VISIBLE_DEVICES=6 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta_newcons_00001 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 1e-5
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_00001 --samples_per_plugin=images=100 --port 4010
+
+
+
+CUDA_VISIBLE_DEVICES=4 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_0/models
+/research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_0/models/weights_8/
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_0/models/weights_8/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.092  &   0.574  &   4.108  &   0.172  &   0.895  &   0.967  &   0.986  \\
+CUDA_VISIBLE_DEVICES=2 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_01/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_01/models/weights_13/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.095  &   0.639  &   4.300  &   0.178  &   0.885  &   0.963  &   0.984  \\
+CUDA_VISIBLE_DEVICES=4 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_001/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_001/models/weights_10/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.092  &   0.573  &   4.126  &   0.174  &   0.895  &   0.967  &   0.985  \\
+CUDA_VISIBLE_DEVICES=2 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_0001/models
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_0001/models/weights_7/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.094  &   0.578  &   4.165  &   0.176  &   0.895  &   0.966  &   0.984  \\
+CUDA_VISIBLE_DEVICES=4 python evaluate_depth.py --split eigen --eval_stereo --data_path /scratch1/kitti_data --height 320 --width 1024 --load_weights_folders /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_00001/models
+/research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_00001/models/weights_13/
+-> Loading weights from /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_00001/models/weights_13/
+   abs_rel |   sq_rel |     rmse | rmse_log |       a1 |       a2 |       a3 | 
+&   0.094  &   0.581  &   4.164  &   0.177  &   0.896  &   0.966  &   0.985  \\
+
+
+
+
+
+CUDA_VISIBLE_DEVICES=5 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta_newcons_001_cvl4redo --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 1e-3
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_001_cvl4redo --samples_per_plugin=images=100 --port 4011
+
+CUDA_VISIBLE_DEVICES=2 python Exp_jointModel_localgeomAndDepth/train_thetaAndDepth.py --model_name depthAndTheta_newcons_0_cvl1redo --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 0
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/depthAndTheta_newcons_0_cvl1redo --samples_per_plugin=images=100 --port 4012
+
+CUDA_VISIBLE_DEVICES=0 python Exp_jointModel_localgeomAndDepth/train_depthonly_l1constrain_cp.py --model_name train_depthonly_l1constrain_cp_0 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /localscratch/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /localscratch/zhusheng/filtered_lidar --l1constrainScale 0 --theta_gt_path /localscratch/zhusheng/kitti_theta_pred
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/train_depthonly_l1constrain_cp_0 --samples_per_plugin=images=100 --port 4013
+
+CUDA_VISIBLE_DEVICES=1 python Exp_jointModel_localgeomAndDepth/train_depthonly_l1constrain_cp.py --model_name train_depthonly_l1constrain_cp_01 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /localscratch/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /localscratch/zhusheng/filtered_lidar --l1constrainScale 1e-1 --theta_gt_path /localscratch/zhusheng/kitti_theta_pred
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/train_depthonly_l1constrain_cp_0 --samples_per_plugin=images=100 --port 4013
+
+CUDA_VISIBLE_DEVICES=2 python Exp_jointModel_localgeomAndDepth/train_depthonly_l1constrain_cp.py --model_name train_depthonly_l1constrain_cp_001 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /localscratch/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /localscratch/zhusheng/filtered_lidar --l1constrainScale 1e-2 --theta_gt_path /localscratch/zhusheng/kitti_theta_pred
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/train_depthonly_l1constrain_cp_001 --samples_per_plugin=images=100 --port 4014
+
+CUDA_VISIBLE_DEVICES=3 python Exp_jointModel_localgeomAndDepth/train_depthonly_l1constrain_cp.py --model_name train_depthonly_l1constrain_cp_0001 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /localscratch/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /localscratch/zhusheng/filtered_lidar --l1constrainScale 1e-3 --theta_gt_path /localscratch/zhusheng/kitti_theta_pred
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/train_depthonly_l1constrain_cp_0001 --samples_per_plugin=images=100 --port 4015
+
+CUDA_VISIBLE_DEVICES=4 python Exp_jointModel_localgeomAndDepth/train_depthonly_l1constrain_cp.py --model_name train_depthonly_l1constrain_cp_00001 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /localscratch/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /localscratch/zhusheng/filtered_lidar --l1constrainScale 1e-4 --theta_gt_path /localscratch/zhusheng/kitti_theta_pred
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/train_depthonly_l1constrain_cp_00001 --samples_per_plugin=images=100 --port 4016
+
+CUDA_VISIBLE_DEVICES=5 python Exp_jointModel_localgeomAndDepth/train_depthonly_l1constrain_cp.py --model_name train_depthonly_l1constrain_cp_000001 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /localscratch/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /localscratch/zhusheng/filtered_lidar --l1constrainScale 1e-5 --theta_gt_path /localscratch/zhusheng/kitti_theta_pred
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/train_depthonly_l1constrain_cp_000001 --samples_per_plugin=images=100 --port 4017
+
+
+--frame_ids 0 --use_stereo --split eigen_full --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/patchmatch_bs/weights_13 --theta_gt_path /home/shengjie/Documents/Data/Kitti/theta1pred
+
+
+
+n008-2018-05-21-11-06-59-0400__CAM_FRONT__1526915302412465
+n008-2018-05-21-11-06-59-0400__CAM_FRONT__1526915318012465
+
+
+--model_name mono_model --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data
+--model_name nuscenes_model --data_path /media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Data/Nuscenes_organized --split nuscenes_splits --dataset nuscenes
+
+
+scp /media/shengjie/other/Downloads/Nuscenes_organized.tar zhusheng@cvl1.cse.msu.edu:/scratch1/zhusheng/
+scp /media/shengjie/other/Downloads/Nuscenes_organized_meta.tar zhusheng@cvl1.cse.msu.edu:/scratch1/zhusheng/
+
+tar -xvf Nuscenes_organized.tar
+tar -xvf Nuscenes_organized_meta.tar
+
+
+CUDA_VISIBLE_DEVICES=3 python trainer_nuscenes.py --model_name nuscenesl1 --log_dir /research/cvl-zhusheng/depth_on_nuscenes/tmp --data_path /scratch1/zhusheng/Nuscenes_organized --split nuscenes_filename_splits --dataset nuscenes --batch_size 3
+tensorboard --logdir /research/cvl-zhusheng/depth_on_nuscenes/tmp/nuscenesl1 --samples_per_plugin=images=100 --port 5000
+CUDA_VISIBLE_DEVICES=6 python trainer_nuscenes.py --model_name nuscenes_bs --log_dir /research/cvl-zhusheng/depth_on_nuscenes/tmp --data_path /scratch1/zhusheng/Nuscenes_organized --split nuscenes_filename_splits --dataset nuscenes --batch_size 3 --l1scale 0
+tensorboard --logdir /research/cvl-zhusheng/depth_on_nuscenes/tmp/nuscenes_bs --samples_per_plugin=images=100 --port 5001
+
+CUDA_VISIBLE_DEVICES=4 python trainer_nuscenes.py --model_name nuscenes_l1_001 --log_dir /research/cvl-zhusheng/depth_on_nuscenes/tmp --data_path /scratch1/zhusheng/Nuscenes_organized --split nuscenes_filename_splits --dataset nuscenes --batch_size 3 --l1scale 1e-3
+tensorboard --logdir /research/cvl-zhusheng/depth_on_nuscenes/tmp/nuscenes_l1_001 --samples_per_plugin=images=100 --port 5002
+
+--model_name nuscenes_model --data_path /media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Data/Nuscenes_organized --split nuscenes_filename_splits --dataset nuscenes --batch_size 2
+
+
+--model_name semantics_trial8 --frame_ids 0 --use_stereo --split eigen_full --log_dir /home/shengjie/Documents/Project_SemanticDepth/tmp --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2 --num_epochs 20  --height 320 --width 1024 --num_workers 0 --PreSIL_path /home/shengjie/Documents/Data/PreSIL_organized --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/trainOnKitti2/models/weights_11/ --PreSIL_path /home/shengjie/Documents/Data/PreSIL_organized
+
+
+--frame_ids 0 --use_stereo --split eigen_full/train_files.txt --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/patchmatch_bs/weights_13 --theta_gt_path /home/shengjie/Documents/Data/Kitti/theta1pred
+
+
+CUDA_VISIBLE_DEVICES=7 python Oview_Gan/train_patchwise_photometric_match.py --model_name patchmatch_bs_retrain --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --localGeomMode lidarSupKitti --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --theta_gt_path /scratch1/zhusheng/theta_pred --l1constrainScale 0 --ban_phoconstrain
+tensorboard --logdir /research/cvl-zhusheng/depth_on_nuscenes/tmp/patchmatch_bs_retrain --samples_per_plugin=images=100 --port 4011
+
+
+cd /media/shengjie/other/Downloads/
+rm -rf tovls
+mkdir tovls
+cd tovls
+mkdir depthPredBs
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/depthPredBs/models/weights_19 /media/shengjie/other/Downloads/tovls/depthPredBs
+
+mkdir depthPredBs_l1only
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/depthPredBs_l1only/models/weights_11 /media/shengjie/other/Downloads/tovls/depthPredBs_l1only
+
+mkdir depthAndTheta
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/depthAndTheta/models/weights_12 /media/shengjie/other/Downloads/tovls/depthAndTheta
+
+mkdir depthAndTheta_l1constrain2
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/depthAndTheta_l1constrain2/models/weights_15 /media/shengjie/other/Downloads/tovls/depthAndTheta_l1constrain2
+
+mkdir depthAndTheta_01
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/depthAndTheta_01/models/weights_5 /media/shengjie/other/Downloads/tovls/depthAndTheta_01
+
+mkdir depthAndTheta_001
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/depthAndTheta_001/models/weights_9 /media/shengjie/other/Downloads/tovls/depthAndTheta_001
+
+mkdir depthAndTheta_01_semidense
+scp -r zhusheng@cvl4.cse.msu.edu:/research/cvl-zhusheng/DepIns/tmp/depthPredBs/models/weights_22 /media/shengjie/other/Downloads/tovls/depthAndTheta_01_semidense
+
+
+
+--frame_ids 0 --use_stereo --split eigen_full/train_files.txt --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/depthPredBs/weights_19 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred
+
+python Exp_jointModel_localgeomAndDepth/vls_num_theoretical_grad.py --frame_ids 0 --use_stereo --split eigen_full/train_files.txt --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/depthPredBs_l1only/weights_11 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred
+
+python Exp_jointModel_localgeomAndDepth/vls_num_theoretical_grad.py --frame_ids 0 --use_stereo --split eigen_full/train_files.txt --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/depthAndTheta/weights_12 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred
+
+python Exp_jointModel_localgeomAndDepth/vls_num_theoretical_grad.py --frame_ids 0 --use_stereo --split eigen_full/train_files.txt --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/depthAndTheta_l1constrain2/weights_15 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred
+
+python Exp_jointModel_localgeomAndDepth/vls_num_theoretical_grad.py --frame_ids 0 --use_stereo --split eigen_full/train_files.txt --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/depthAndTheta_01/weights_5 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred
+
+python Exp_jointModel_localgeomAndDepth/vls_num_theoretical_grad.py --frame_ids 0 --use_stereo --split eigen_full/train_files.txt --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/depthAndTheta_001/weights_9 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred
+
+python Exp_jointModel_localgeomAndDepth/vls_num_theoretical_grad.py --frame_ids 0 --use_stereo --split eigen_full/train_files.txt --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/depthAndTheta_01_semidense/weights_22 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred
+
+
+
+scp /media/shengjie/other/Downloads/filtered_lidar.tar zhusheng@cvl5.cse.msu.edu:/localscratch/zhusheng 
+scp /media/shengjie/other/Downloads/kitti_theta_pred.tar zhusheng@cvl5.cse.msu.edu:/localscratch/zhusheng 
+
+
+/localscratch/kitti_data
+
+2020-08-KinematicObjDetection
+2020-08-DisentangleSpoofTraces
+
+
+CUDA_VISIBLE_DEVICES=0 python Exp_jointModel_localgeomAndDepth/vls_num_theoretical_grad.py --frame_ids 0 --use_stereo --split eigen_full/train_files.txt --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/tmp/depthAndTheta/weights_12 --theta_gt_path /home/shengjie/Documents/Data/Kitti/kitti_theta_pred
+
+
+--frame_ids 0 --use_stereo --split eigen_full --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --png --batch_size 2  --height 320 --width 1024 --num_workers 0 --learning_rate 1e-4 --kitti_gt_path /home/shengjie/Documents/Data/Kitti/filtered_lidar --theta_gt_path /home/shengjie/Documents/Data/Kitti/theta1pred --split_level 4 --load_weights_folder /home/shengjie/Documents/Project_SemanticDepth/Exp_splitFeatureEarlier/tmp/mdp/models/weights_0
+
+CUDA_VISIBLE_DEVICES=1 python Exp_splitFeatureEarlier/train_splitFeatureEarlier.py --model_name slevel4_bs --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 0 --split_level 4
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/slevel4_bs --samples_per_plugin=images=100 --port 5000
+
+CUDA_VISIBLE_DEVICES=3 python Exp_splitFeatureEarlier/train_splitFeatureEarlier.py --model_name slevel4_theta01 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 0 --lthetaScale 0.1 --sclLossScale 0.1 --split_level 4
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/slevel4_theta01 --samples_per_plugin=images=100 --port 5001
+
+CUDA_VISIBLE_DEVICES=6 python Exp_splitFeatureEarlier/train_splitFeatureEarlier.py --model_name slevel4_theta001 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /localscratch/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /localscratch/zhusheng/filtered_lidar --l1constrainScale 0 --lthetaScale 0.01 --sclLossScale 0.01 --split_level 4
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/slevel4_theta001 --samples_per_plugin=images=100 --port 5002
+
+
+
+
+CUDA_VISIBLE_DEVICES=4 python Exp_splitFeatureEarlier/train_splitFeatureEarlier.py --model_name theta01_sl4 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 0 --lthetaScale 0.1 --sclLossScale 0.1 --split_level 4
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/theta01_sl4 --samples_per_plugin=images=100 --port 6000
+
+CUDA_VISIBLE_DEVICES=5 python Exp_splitFeatureEarlier/train_splitFeatureEarlier.py --model_name theta01_sl2 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 0 --lthetaScale 0.1 --sclLossScale 0.1 --split_level 2
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/theta01_sl2 --samples_per_plugin=images=100 --port 6001
+
+CUDA_VISIBLE_DEVICES=6 python Exp_splitFeatureEarlier/train_splitFeatureEarlier.py --model_name theta01_sl0 --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 0 --lthetaScale 0.1 --sclLossScale 0.1 --split_level 0
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/theta01_sl0 --samples_per_plugin=images=100 --port 6002
+
+CUDA_VISIBLE_DEVICES=7 python Exp_splitFeatureEarlier/train_splitFeatureEarlier.py --model_name theta01_slbs --frame_ids 0 --use_stereo --split eigen_full --log_dir /research/cvl-zhusheng/DepIns/tmp --dataset kitti --data_path /scratch1/kitti_data --png --batch_size 3 --num_epochs 40 --height 320 --width 1024 --num_workers 6 --learning_rate 1e-4 --kitti_gt_path /scratch1/zhusheng/filtered_lidar --l1constrainScale 0 --lthetaScale 0.1 --sclLossScale 0.1 --split_level -1
+tensorboard --logdir /research/cvl-zhusheng/DepIns/tmp/theta01_slbs --samples_per_plugin=images=100 --port 6003
+
+
+
+
+
+--mode train --model_name bts_eigen_v2_pytorch_test --encoder densenet161_bts --dataset kitti --data_path /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --gt_path /media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Data/kitti/semidense_gt --filenames_file train_test_inputs/eigen_train_files_with_gt.txt --batch_size 4 --num_epochs 50 --learning_rate 1e-4 --weight_decay 1e-2 --adam_eps 1e-3 --num_threads 1 --input_height 352 --input_width 704 --max_depth 80 --do_kb_crop --do_random_rotate --degree 1.0 --log_directory ./models/ --multiprocessing_distributed --dist_url tcp://127.0.0.1:2345 --log_freq 100 --do_online_eval --eval_freq 500 --data_path_eval /home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data --gt_path_eval /media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Data/kitti/semidense_gt --filenames_file_eval train_test_inputs/eigen_test_files_with_gt.txt --min_depth_eval 1e-3 --max_depth_eval 80 --eval_summary_directory ./models/eval/ --garg_crop

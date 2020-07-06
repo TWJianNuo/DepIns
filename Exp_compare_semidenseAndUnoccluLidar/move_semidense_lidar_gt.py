@@ -4,7 +4,7 @@ source_semidense_gt_address = '/home/shengjie/Documents/Data/Kitti/kitti_dense_d
 from glob import glob
 import os
 from shutil import copyfile
-folds = glob(os.path.join(source_semidense_gt_address, 'train', '*'))
+folds = glob(os.path.join(source_semidense_gt_address, 'train', '*')) + glob(os.path.join(source_semidense_gt_address, 'val', '*'))
 dirs = ['image_02', 'image_03']
 count = 0
 for fold in folds:
