@@ -292,7 +292,13 @@ class MonoDataset(data.Dataset):
             if self.kitti_gt_path is None:
                 depth_gt = self.get_depth(folder, frame_index, side, do_flip)
             else:
-                depth_gt = self.get_depth_fromfile(folder, frame_index, side, do_flip)
+                try:
+                    depth_gt = self.get_depth_fromfile(folder, frame_index, side, do_flip)
+                except:
+                    gtpath = os.path.join(folder, str(frame_index).zfill(10), side)
+                    print("problem entry: %s" % gtpath)
+                    import sys
+                    sys.exit(0)
             # depth_gt = self.get_depth(folder, frame_index, side, do_flip)
             # depth_gt_me = self.get_depth_fromfile(folder, frame_index, side, do_flip)
             # tensor2disp(torch.from_numpy(depth_gt).float().unsqueeze(0).unsqueeze(0), vmax = 30, ind = 0).show()
