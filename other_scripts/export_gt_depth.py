@@ -105,7 +105,7 @@ def export_gt_depths_kitti():
 
         print("%d finished, %f hours left" % (imgCount, (te - ts) / imgCount * (len(lines) - imgCount) / 60 / 60))
 
-        os.makedirs(os.path.join(opt.surfnorm_dir, folder, mapping[direction]), exist_ok=True) # Create Surface Normal Directory
+        # os.makedirs(os.path.join(opt.surfnorm_dir, folder, mapping[direction]), exist_ok=True) # Create Surface Normal Directory
 
 if __name__ == "__main__":
     export_gt_depths_kitti()
