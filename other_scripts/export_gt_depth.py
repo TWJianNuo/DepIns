@@ -34,7 +34,6 @@ def get_entry_from_path(imgpath):
 
 def collect_all_entries(folder):
     import glob
-    # folder = '/media/shengjie/other/sceneUnderstanding/monodepth2/kitti_data/kitti_raw'
     subfolders = [f.path for f in os.scandir(folder) if f.is_dir()]
     entries = list()
     for seqs_clusts in subfolders:
@@ -69,11 +68,6 @@ def export_gt_depths_kitti():
     opt = parser.parse_args()
 
     lines = collect_all_entries(opt.data_path)
-    # split_file = '/media/shengjie/other/Depins/Depins/splits/eigen/test_files.txt'
-    # split_file = '/media/shengjie/other/Depins/Depins/splits/sfnorm/trainA.txt'
-    # with open(split_file) as f:
-    #     lines = f.readlines()
-
     print("Exporting ground truth depths")
 
     mapping = {'l': 'image_02', 'r': 'image_03'}
@@ -82,8 +76,6 @@ def export_gt_depths_kitti():
     ts = time.time()
 
     imgCount = 0
-    f = open(os.path.join(opt.save_dir , "addresslisting.txt"), "w")
-
     for line in lines:
 
         folder, frame_id, direction = line.split()
@@ -96,7 +88,6 @@ def export_gt_depths_kitti():
             continue
 
         gt_depth = generate_depth_map(calib_dir, velo_filename, cam=mapping_cam[direction], vel_depth = True)
-        # gt_depth = cv2.resize(gt_depth, (1242, 375), cv2.INTER_NEAREST)
 
         gt_depth = np.uint16(gt_depth * 256)
 
@@ -111,8 +102,6 @@ def export_gt_depths_kitti():
         te = time.time()
 
         imgCount = imgCount + 1
-
-        f.writelines(save_path + '\n')
 
         print("%d finished, %f hours left" % (imgCount, (te - ts) / imgCount * (len(lines) - imgCount) / 60 / 60))
 
