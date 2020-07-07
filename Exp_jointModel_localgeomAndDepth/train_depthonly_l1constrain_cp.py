@@ -30,15 +30,30 @@ warnings.filterwarnings("ignore")
 options = MonodepthOptions()
 opts = options.parse()
 
-grads = {}
-def save_grad(name):
-    def hook(grad):
-        grads[name] = grad
-    return hook
-
 # torch.manual_seed(0)
 # torch.backends.cudnn.deterministic = False
 # torch.backends.cudnn.benchmark = False
+
+def compute_errors(gt, pred):
+    """Computation of error metrics between predicted and ground truth depths
+    """
+    thresh = np.maximum((gt / pred), (pred / gt))
+    a1 = (thresh < 1.25     ).mean()
+    a2 = (thresh < 1.25 ** 2).mean()
+    a3 = (thresh < 1.25 ** 3).mean()
+
+    rmse = (gt - pred) ** 2
+    rmse = np.sqrt(rmse.mean())
+
+    rmse_log = (np.log(gt) - np.log(pred)) ** 2
+    rmse_log = np.sqrt(rmse_log.mean())
+
+    abs_rel = np.mean(np.abs(gt - pred) / gt)
+
+    sq_rel = np.mean(((gt - pred) ** 2) / gt)
+
+    return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3
+
 class Trainer:
     def __init__(self, options):
         self.opt = options
@@ -146,6 +161,10 @@ class Trainer:
         self.presil_localthetadesp = LocalThetaDesp(height=self.prsil_h, width=self.prsil_w, batch_size=self.opt.batch_size, intrinsic=intrinsic).cuda()
 
 
+        self.MIN_DEPTH = 1e-3
+        self.MAX_DEPTH = 80
+        self.minabsrel = 1e10
+        self.maxa1 = -1e10
     def set_layers(self):
         """properly handle layer initialization under multiple dataset situation
         """
@@ -184,8 +203,12 @@ class Trainer:
         """
 
         fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", self.opt.split, "{}_files.txt")
+        test_fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", "eigen", "test_files.txt")
         train_filenames = readlines(fpath.format("train"))
-        val_filenames = readlines(fpath.format("val"))
+        val_filenames = readlines(test_fpath)
+
+        gt_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", "eigen",  "gt_depths.npz")
+        self.gt_depths = np.load(gt_path, fix_imports=True, encoding='latin1', allow_pickle=True)["data"]
 
         train_dataset = datasets.KITTIRAWDataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
@@ -195,34 +218,20 @@ class Trainer:
 
         val_dataset = datasets.KITTIRAWDataset(
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, is_train=False, load_seman = False,
-            kitti_gt_path=self.opt.kitti_gt_path, theta_gt_path=self.opt.theta_gt_path
+            self.opt.frame_ids, 4, is_train=False, load_seman = False
         )
 
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, shuffle=not self.opt.no_shuffle,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_loader = DataLoader(
-            val_dataset, self.opt.batch_size, shuffle=True,
-            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
-        self.val_iter = iter(self.val_loader)
+            val_dataset, self.opt.batch_size, shuffle=False,
+            num_workers=self.opt.num_workers, pin_memory=True, drop_last=False)
 
         self.train_num = train_dataset.__len__()
         self.val_num = val_dataset.__len__()
         self.num_total_steps = self.train_num // self.opt.batch_size * self.opt.num_epochs
 
-
-    def set_train_D(self):
-        """Convert all models to training mode
-        """
-        for m in self.models_D.values():
-            m.train()
-
-    def set_eval_D(self):
-        """Convert all models to testing/evaluation mode
-        """
-        for m in self.models_D.values():
-            m.eval()
 
     def set_train(self):
         """Convert all models to training mode
@@ -275,8 +284,8 @@ class Trainer:
             if self.step % 2 == 0:
                 self.log("train", inputs, outputs, losses, writeImage=False)
 
-            # if self.step % 100 == 0:
-            #     self.val()
+            if self.step % 2000 == 0 and self.step > 1999:
+                self.val()
 
             self.step += 1
             # print(self.step)
@@ -348,17 +357,62 @@ class Trainer:
     def val(self):
         """Validate the model on a single minibatch
         """
+        count = 0
         self.set_eval()
-        try:
-            inputs = self.val_iter.next()
-        except StopIteration:
-            self.val_iter = iter(self.val_loader)
-            inputs = self.val_iter.next()
-
+        errors = list()
         with torch.no_grad():
-            outputs, losses = self.process_batch(inputs, isval=True)
-            self.log("val", inputs, outputs, losses, False)
-            del inputs, outputs, losses
+            for batch_idx, inputs in enumerate(self.val_loader):
+                input_color = inputs[("color", 0, 0)].cuda()
+                outputs = self.models['depth'](self.models['encoder'](input_color))
+                _, pred_depth = disp_to_depth(outputs[("disp", 0)][:,2:3,:,:], self.opt.min_depth, self.opt.max_depth)
+                pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
+                for i in range(input_color.shape[0]):
+                    gt_depth = self.gt_depths[count]
+                    gt_height, gt_width = gt_depth.shape
+                    cur_pred_depth = pred_depth[i:i+1,:,:,:]
+                    cur_pred_depth = F.interpolate(cur_pred_depth, [gt_height,gt_width], mode='bilinear', align_corners=True)
+                    cur_pred_depth = cur_pred_depth[0,0,:,:].cpu().numpy()
+
+                    mask = np.logical_and(gt_depth > self.MIN_DEPTH, gt_depth < self.MAX_DEPTH)
+                    crop = np.array([0.40810811 * gt_height, 0.99189189 * gt_height,
+                                     0.03594771 * gt_width, 0.96405229 * gt_width]).astype(np.int32)
+                    crop_mask = np.zeros(mask.shape)
+                    crop_mask[crop[0]:crop[1], crop[2]:crop[3]] = 1
+                    mask = np.logical_and(mask, crop_mask)
+
+                    cur_pred_depth = cur_pred_depth[mask]
+                    gt_depth = gt_depth[mask]
+
+                    cur_pred_depth[cur_pred_depth < self.MIN_DEPTH] = self.MIN_DEPTH
+                    cur_pred_depth[cur_pred_depth > self.MAX_DEPTH] = self.MAX_DEPTH
+
+                    errors.append(compute_errors(gt_depth, cur_pred_depth))
+                    # tensor2disp(outputs[("disp", 0)][:,2:3,:,:], ind=0, vmax=0.1).show()
+                    count = count + 1
+            del inputs, outputs
+        mean_errors = np.array(errors).mean(0)
+
+        if mean_errors[0] < self.minabsrel:
+            self.minabsrel_perform = mean_errors
+            self.minabsrel = mean_errors[0]
+            self.save_model("best_absrel_models")
+        if mean_errors[4] > self.maxa1:
+            self.maxa1_perform = mean_errors
+            self.maxa1 = mean_errors[4]
+            self.save_model("best_a1_models")
+
+        print("\nCurrent Performance:")
+        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+        print(("&{: 8.3f}  " * 7).format(*mean_errors.tolist()) + "\\\\")
+
+        print("\nBest Absolute Relative Performance:")
+        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+        print(("&{: 8.3f}  " * 7).format(*self.minabsrel_perform.tolist()) + "\\\\")
+
+        print("\nBest A1 Relative Performance:")
+        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+        print(("&{: 8.3f}  " * 7).format(*self.maxa1_perform.tolist()) + "\\\\")
+
         self.set_train()
 
     def generate_images_pred(self, inputs, outputs):
@@ -533,10 +587,10 @@ class Trainer:
         with open(os.path.join(models_dir, 'opt.json'), 'w') as f:
             json.dump(to_save, f, indent=2)
 
-    def save_model(self):
+    def save_model(self, keyword):
         """Save model weights to disk
         """
-        save_folder = os.path.join(self.log_path, "models", "weights_{}".format(self.epoch))
+        save_folder = os.path.join(self.log_path, "models", "{}".format(keyword))
         # save_folder = os.path.join(self.log_path, "models", "weights_{}".format(self.step))
         if not os.path.exists(save_folder):
             os.makedirs(save_folder)
