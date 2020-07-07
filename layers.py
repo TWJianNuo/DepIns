@@ -452,12 +452,12 @@ class Conv2d(torch.nn.Conv2d):
 
 
 class ComputeSurfaceNormal(nn.Module):
-    def __init__(self, height, width, batch_size, minDepth, maxDepth):
+    def __init__(self, height, width, batch_size):
         super(ComputeSurfaceNormal, self).__init__()
         self.height = height
         self.width = width
         self.batch_size = batch_size
-        xx, yy = np.meshgrid(np.arange(self.width), np.arange(self.height))
+        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
         xx = xx.flatten().astype(np.float32)
         yy = yy.flatten().astype(np.float32)
         self.pix_coords = np.expand_dims(np.stack([xx, yy, np.ones(self.width * self.height).astype(np.float32)], axis=1), axis=0).repeat(self.batch_size, axis=0)
@@ -466,10 +466,6 @@ class ComputeSurfaceNormal(nn.Module):
         self.pix_coords = self.pix_coords.cuda()
         self.ones = self.ones.cuda()
         self.init_gradconv()
-
-        self.minDepth = minDepth
-        self.maxDepth = maxDepth
-
 
     def init_gradconv(self):
         weightsx = torch.Tensor([[-1., 0., 1.],
@@ -487,9 +483,6 @@ class ComputeSurfaceNormal(nn.Module):
 
 
     def forward(self, depthMap, invcamK):
-        depthMap = depthMap * 0.5 + 0.5
-        depthMap = depthMap * (self.maxDepth - self.minDepth) + self.minDepth
-
         depthMap = depthMap.view(self.batch_size, -1)
         cam_coords = self.pix_coords * torch.stack([depthMap, depthMap, depthMap], dim=1)
         cam_coords = torch.cat([cam_coords, self.ones], dim=1)
@@ -4396,7 +4389,7 @@ class LocalThetaDesp(nn.Module):
 
 
 
-    def surfnorm_from_localgeom(self, depthmap, htheta, vtheta):
+    def surfnorm_from_localgeom(self, htheta, vtheta):
         bk_htheta = self.backconvert_htheta(htheta)
         dirx_h = torch.cos(bk_htheta)
         diry_h = torch.sin(bk_htheta)

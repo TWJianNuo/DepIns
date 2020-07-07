@@ -127,6 +127,8 @@ def evaluate(opt):
 
         diff_bf = 0
         diff_af = 0
+
+        save_vls_theta = True
         for data in dataloader:
             input_color = data[("color", 0, 0)].cuda()
 
@@ -180,8 +182,31 @@ def evaluate(opt):
                 preddepths_bs.append(preddepth_bsi[0,0,:,:].detach().cpu().numpy())
                 count = count + 1
 
-            # if count > 10:
-            #     break
+            if save_vls_theta:
+                _, derivx, num_grad_old = predsize_localdesp.depth_localgeom_consistency(preddepth_cp, htheta, vtheta, isoutput_grads=True)
+                _, derivx, num_grad_new = predsize_localdesp.depth_localgeom_consistency(preddepth, htheta, vtheta, isoutput_grads=True)
+                fig_derivx = tensor2disp(torch.abs(derivx), vmax=0.1, ind=0)
+                fig_numgrad_old = tensor2disp(torch.abs(num_grad_old), vmax=0.1, ind=0)
+                fig_numgrad_new = tensor2disp(torch.abs(num_grad_new), vmax=0.1, ind=0)
+                figcombined_left = pil.fromarray(np.concatenate([np.array(fig_derivx), np.array(fig_numgrad_old), np.array(fig_numgrad_new)], axis=0))
+
+
+                figref_theta = tensor2disp(htheta-1, vmax=4, ind=0)
+                new_theta_h, new_theta_v = predsize_localdesp.get_theta(preddepth[0:1,:,:,:])
+                old_theta_h, old_theta_v = predsize_localdesp.get_theta(preddepth_cp[0:1, :, :, :])
+                fig_new_theta = tensor2disp(new_theta_h - 1, vmax=4, ind=0)
+                fig_old_theta = tensor2disp(old_theta_h - 1, vmax=4, ind=0)
+                figcombined_center = pil.fromarray(np.concatenate([np.array(figref_theta), np.array(fig_old_theta), np.array(fig_new_theta)], axis=0))
+
+                figrgb = tensor2rgb(input_color, ind=0)
+                fig_dispold = tensor2disp(1/preddepth_cp,vmax=0.2,ind=0)
+                fig_dispnew = tensor2disp(1 / preddepth, vmax=0.2, ind=0)
+                figcombined_right = pil.fromarray(
+                    np.concatenate([np.array(figrgb), np.array(fig_dispold), np.array(fig_dispnew)], axis=0))
+
+                figcombined = pil.fromarray(np.concatenate([np.array(figcombined_left), np.array(figcombined_center), np.array(figcombined_right)], axis=1))
+                figcombined.save(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_offline_naivel2',str(count) + '.png'))
+
 
 
     print("-> Evaluating")
