@@ -4350,8 +4350,8 @@ class LocalThetaDesp(nn.Module):
 
     def depth_localgeom_consistency(self, depthmap, htheta, vtheta, isoutput_grads=False):
         htheta_d, vtheta_d = self.get_theta(depthmap)
-        debias_hthtea = self.h_pool(htheta_d) + (htheta - self.h_pool(htheta))
-        debias_vthtea = self.h_pool(vtheta_d) + (vtheta - self.h_pool(vtheta))
+        # debias_hthtea = self.h_pool(htheta_d) + (htheta - self.h_pool(htheta))
+        # debias_vthtea = self.h_pool(vtheta_d) + (vtheta - self.h_pool(vtheta))
 
         optimize_mask = torch.zeros_like(depthmap)
         optimize_mask[:,:,int(0.40810811 * self.height):int(0.99189189 * self.height), int(0.03594771 * self.width):int(0.96405229 * self.width)] = 1
@@ -4361,7 +4361,7 @@ class LocalThetaDesp(nn.Module):
         outrange_mask = depthmap < 30
         optimize_mask = optimize_mask * outrange_mask.float() * non_linear_mask.float()
 
-        bk_htheta = self.backconvert_htheta(debias_hthtea)
+        bk_htheta = self.backconvert_htheta(htheta)
         dirx_h = torch.cos(bk_htheta)
         diry_h = torch.sin(bk_htheta)
         dir3d_h = self.hM[:,:,0,:].unsqueeze(0).expand([self.batch_size, -1, -1, -1]) * dirx_h.squeeze(1).unsqueeze(3).expand([-1, -1, -1, 3]) + \
