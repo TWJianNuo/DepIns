@@ -19,6 +19,8 @@ import math
 import copy
 from Oview_Gan import eppl_render, eppl_render_l2, eppl_render_l1, eppl_render_l1_sfgrad
 from torch import autograd
+import matlab
+import matlab.engine
 def disp_to_depth(disp, min_depth, max_depth):
     """Convert network's sigmoid output into depth prediction
     The formula for this conversion is given in the 'additional considerations'
@@ -472,9 +474,9 @@ class ComputeSurfaceNormal(nn.Module):
                                 [-2., 0., 2.],
                                 [-1., 0., 1.]]).unsqueeze(0).unsqueeze(0)
 
-        weightsy = torch.Tensor([[1., 2., 1.],
+        weightsy = torch.Tensor([[-1., -2., -1.],
                                 [0., 0., 0.],
-                                [-1., -2., -1.]]).unsqueeze(0).unsqueeze(0)
+                                [1., 2., 1.]]).unsqueeze(0).unsqueeze(0)
         self.convx = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
         self.convy = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
 
@@ -2568,6 +2570,17 @@ class LocalThetaDesp(nn.Module):
         self.sobelx.weight = nn.Parameter(torch.from_numpy(sobelx).float().unsqueeze(0).unsqueeze(0), requires_grad = False)
         self.sobelx = self.sobelx.cuda()
 
+        self.eng = None
+
+        # window_sz = 13
+        # nsig = 0.1
+        # op_gaussblur_kernel = gkern(kernlen=window_sz, nsig=nsig)
+        # op_gaussblur_kernel = nn.Parameter(torch.from_numpy(op_gaussblur_kernel).unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
+        # self.op_gaussblur = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=window_sz, padding=int((window_sz-1)/2))
+        # self.op_gaussblur.weight = op_gaussblur_kernel
+
+        w = 21
+        self.h_pool = nn.AvgPool2d(w, 1, padding=int((w-1)/2))
     def translate_path(self, phopath):
         phoind = list()
         phosel = list()
@@ -4335,8 +4348,20 @@ class LocalThetaDesp(nn.Module):
 
         return 0
 
-    def depth_localgeom_consistency(self, depthmap, htheta, vtheta, mask=None, isoutput_grads=False):
-        bk_htheta = self.backconvert_htheta(htheta)
+    def depth_localgeom_consistency(self, depthmap, htheta, vtheta, isoutput_grads=False):
+        htheta_d, vtheta_d = self.get_theta(depthmap)
+        debias_hthtea = self.h_pool(htheta_d) + (htheta - self.h_pool(htheta))
+        debias_vthtea = self.h_pool(vtheta_d) + (vtheta - self.h_pool(vtheta))
+
+        optimize_mask = torch.zeros_like(depthmap)
+        optimize_mask[:,:,int(0.40810811 * self.height):int(0.99189189 * self.height), int(0.03594771 * self.width):int(0.96405229 * self.width)] = 1
+
+        grad_theta = self.sobelx(htheta)
+        non_linear_mask = torch.abs(grad_theta) < 0.1
+        outrange_mask = depthmap < 30
+        optimize_mask = optimize_mask * outrange_mask.float() * non_linear_mask.float()
+
+        bk_htheta = self.backconvert_htheta(debias_hthtea)
         dirx_h = torch.cos(bk_htheta)
         diry_h = torch.sin(bk_htheta)
         dir3d_h = self.hM[:,:,0,:].unsqueeze(0).expand([self.batch_size, -1, -1, -1]) * dirx_h.squeeze(1).unsqueeze(3).expand([-1, -1, -1, 3]) + \
@@ -4377,16 +4402,11 @@ class LocalThetaDesp(nn.Module):
         # computed_grad = derivx[0,0,rndh,rndw]
         # print(num_grad / computed_grad)
 
-        if mask is not None:
-            closs = torch.sum(torch.abs(derivx - num_grad) * mask) / (torch.sum(mask) + 1)
-        else:
-            closs = torch.mean(torch.abs(derivx - num_grad))
-
+        closs = torch.sum(torch.abs(derivx - num_grad) * optimize_mask) / (torch.sum(optimize_mask) + 1)
         if not isoutput_grads:
             return closs
         else:
-            return closs, derivx, num_grad
-
+            return closs, derivx, num_grad, optimize_mask
 
 
     def surfnorm_from_localgeom(self, htheta, vtheta):
@@ -4406,3 +4426,124 @@ class LocalThetaDesp(nn.Module):
 
         dir3d = torch.cross(dir3d_h, dir3d_v, dim=3)
         return dir3d
+
+    def recover_depth_from_theta(self, depthmap, hthtea, vtheta, ind=0, horizontalind = 20):
+        ratioh, ratiohl, ratiov, ratiovl = self.get_ratio(hthtea, vtheta)
+        ratiohl_np = ratiohl[ind,0,:,:].detach().cpu().numpy()
+        tocopy = depthmap[ind, 0, :, :].detach().cpu().numpy()
+        startvlas_h = tocopy.copy()
+        startvlas_h[:,horizontalind+1:self.width] = 0
+        startvlas_h[:, 0:horizontalind] = 0
+        startvlas_h = np.add.accumulate(startvlas_h, axis=1)
+        startvlas_h[:,0:horizontalind] = tocopy[:,0:horizontalind]
+
+        accumed_ratiohl = ratiohl_np.copy()
+        accumed_ratiohl[:,0:horizontalind] = 0
+        accumed_ratiohl = np.add.accumulate(accumed_ratiohl, axis=1)
+        accumed_ratiohl[:,horizontalind+1:self.width] = accumed_ratiohl[:,horizontalind:self.width-1]
+        accumed_ratiohl[:,horizontalind] = 0
+        recovered_depth = startvlas_h * np.exp(accumed_ratiohl)
+        return recovered_depth
+
+    def debias(self, depthmap, htheta, vtheta, depthlidar=None, rgb=None, svname=None, eng=None):
+        pts3d = depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
+        hcord = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ pts3d
+
+        htheta_d, vtheta_d = self.get_theta(depthmap)
+        debias_hthtea = self.h_pool(htheta_d) + (htheta - self.h_pool(htheta))
+        debias_vthtea = self.h_pool(vtheta_d) + (vtheta - self.h_pool(vtheta))
+        # tensor2disp(htheta_d-1, vmax=4, ind=0).show()
+        # tensor2disp(h_pool(htheta_d) - 1, vmax=4, ind=0).show()
+        # tensor2disp(debias_hthtea - 1, vmax=4, ind=0).show()
+        # debias_hthtea = self.op_gaussblur(htheta_d) + (htheta - self.op_gaussblur(htheta))
+        # debias_vthtea = self.op_gaussblur(vtheta_d) + (vtheta - self.op_gaussblur(vtheta))
+
+        debias_ratioh, debias_ratiohl, debias_ratiov, debias_ratiovl = self.get_ratio(debias_hthtea, debias_vthtea)
+        debias_ratiohl_np = debias_ratiohl[0,0,:,:].detach().cpu().numpy()
+        depthmap_np = depthmap[0,0,:,:].detach().cpu().numpy()
+
+        # Generate Mask and do Garg crop
+        optimize_mask = np.zeros_like(depthmap_np)
+        optimize_mask[int(0.40810811 * self.height):int(0.99189189 * self.height), int(0.03594771 * self.width):int(0.96405229 * self.width)] = 1
+
+        grad_theta = self.sobelx(htheta)
+        non_linear_mask = torch.abs(grad_theta) < 0.1
+        outrange_mask = depthmap < 30
+
+        optimize_mask = optimize_mask * (outrange_mask * non_linear_mask)[0,0,:,:].cpu().numpy()
+
+        recovered_depth_debias_mask = np.zeros_like(depthmap_np)
+        recover_depth_from_theta(debias_ratiohl_np, depthmap_np, recovered_depth_debias_mask, optimize_mask + 10, self.height, self.width)
+
+        recovered_depth = self.recover_depth_from_theta(depthmap, htheta, vtheta, ind=0, horizontalind=0)
+        recovered_pts3d = torch.from_numpy(recovered_depth).unsqueeze(0).unsqueeze(0).squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]).cuda() * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
+        recovered_hcord = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ recovered_pts3d
+
+        lidar_pts3d = torch.from_numpy(depthlidar).unsqueeze(0).unsqueeze(0).cuda().squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
+        lidar_hcord = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ lidar_pts3d
+
+        rowind = np.random.randint(250, 320)
+
+        recovered_pts3d_delta = torch.from_numpy(recovered_depth_debias_mask).unsqueeze(0).unsqueeze(0).squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]).cuda() * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
+        recovered_hcord_delta = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ recovered_pts3d_delta
+
+        fig_gradtheta = tensor2disp(torch.abs(grad_theta), vmax=0.2, ind=0)
+        fig1 = tensor2disp(1-torch.from_numpy(optimize_mask).unsqueeze(0).unsqueeze(0), vmax=0.2, ind=0)
+        fig2 = tensor2rgb(rgb, ind=0)
+        figcombined = (np.array(fig1).astype(np.float32) * 0.5 + np.array(fig2).astype(np.float32) * 0.5).astype(np.uint8)
+
+        fig1=tensor2disp(htheta - 1, vmax=4, ind=0)
+        fig2=tensor2disp(htheta_d-1, vmax=4, ind=0)
+        fig3=tensor2disp(self.op_gaussblur(htheta_d) - 1, vmax=4, ind=0)
+        fig4=tensor2disp(debias_hthtea - 1, vmax=4, ind=0)
+
+        figleft = np.concatenate([np.array(fig2), np.array(fig3), np.array(fig4)], axis=0)
+        figright = np.concatenate([np.array(fig_gradtheta), np.array(figcombined), np.array(fig1)], axis=0)
+        figsv = np.concatenate([np.array(figleft), np.array(figright)], axis=1)
+        pil.fromarray(figsv).save(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_debias_theta', svname + '_1.png'))
+
+
+        plt.figure()
+        plt.imshow(tensor2disp(torch.from_numpy(optimize_mask).unsqueeze(0).unsqueeze(0), ind=0, vmax=1))
+        plt.plot([-10, self.width+10], [rowind, rowind], ':')
+        plt.savefig(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_debias_theta', svname + '_2.png'))
+        plt.close('all')
+
+        xx = hcord[0,rowind,:,0,0].detach().cpu().numpy()
+        yy = hcord[0,rowind,:,1,0].detach().cpu().numpy()
+        xx = matlab.double(xx.tolist())
+        yy = matlab.double(yy.tolist())
+
+        xx_recover = recovered_hcord[0,rowind,:,0,0].detach().cpu().numpy()
+        yy_recover = recovered_hcord[0,rowind,:,1,0].detach().cpu().numpy()
+        xx_recover = matlab.double(xx_recover.tolist())
+        yy_recover = matlab.double(yy_recover.tolist())
+
+        xx_recover_delta = recovered_hcord_delta[0,rowind,:,0,0].detach().cpu().numpy()
+        yy_recover_delta = recovered_hcord_delta[0,rowind,:,1,0].detach().cpu().numpy()
+        xx_recover_delta = matlab.double(xx_recover_delta.tolist())
+        yy_recover_delta = matlab.double(yy_recover_delta.tolist())
+
+        selector_lidar = depthlidar[rowind,:] > 0
+        xx_lidar = lidar_hcord[0,rowind,:,0,0].detach().cpu().numpy()[selector_lidar]
+        yy_lidar = lidar_hcord[0,rowind,:,1,0].detach().cpu().numpy()[selector_lidar]
+        xx_lidar = matlab.double(xx_lidar.tolist())
+        yy_lidar = matlab.double(yy_lidar.tolist())
+
+
+        eng.eval('figure(\'visible\',\'off\')', nargout=0)
+        eng.plot(xx, yy, 'r', nargout=0)
+        eng.eval('hold on', nargout=0)
+        eng.plot(xx_recover, yy_recover, 'g', nargout=0)
+        eng.eval('hold on', nargout=0)
+        eng.plot(xx_recover_delta, yy_recover_delta, 'c', nargout=0)
+        eng.eval('hold on', nargout=0)
+        eng.scatter(xx_lidar, yy_lidar, 40, 'b.', nargout=0)
+        eng.eval('hold on', nargout=0)
+        eng.scatter(matlab.double([0]), matlab.double([0]), 80, 'c.', nargout=0)
+        eng.eval('axis equal', nargout=0)
+        eng.eval('grid off', nargout=0)
+        file_save_add = os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_debias_theta', svname + '_3.png')
+        file_save_add = '\'' + file_save_add + '\''
+        eng.eval('saveas(gcf,' + file_save_add + ')', nargout=0)
+        eng.eval('close all', nargout=0)

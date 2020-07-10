@@ -15,6 +15,7 @@ import networks
 import glob
 import torch.optim as optim
 
+
 cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV 3.3.1)
 
 
@@ -24,7 +25,6 @@ splits_dir = os.path.join(os.path.dirname(__file__), "..", "splits")
 # baseline of 0.1 units. The KITTI rig has a baseline of 54cm. Therefore,
 # to convert our stereo predictions to real-world scale we multiply our depths by 5.4.
 STEREO_SCALE_FACTOR = 5.4
-
 
 def compute_errors(gt, pred):
     """Computation of error metrics between predicted and ground truth depths
@@ -85,7 +85,7 @@ def evaluate(opt):
         dataset = datasets.KITTIRAWDataset(opt.data_path, filenames,
                                            encoder_dict['height'], encoder_dict['width'],
                                            [0], 4, is_train=False, theta_gt_path=opt.theta_gt_path)
-        dataloader = DataLoader(dataset, opt.batch_size, shuffle=False, num_workers=opt.num_workers,
+        dataloader = DataLoader(dataset, 1, shuffle=False, num_workers=opt.num_workers,
                                 pin_memory=True, drop_last=False)
 
         encoder = networks.ResnetEncoder(opt.num_layers, False)
@@ -100,8 +100,8 @@ def evaluate(opt):
         depth_decoder.cuda()
         depth_decoder.eval()
 
-        # gt_path = os.path.join(splits_dir, opt.eval_split, "gt_depths.npz")
-        # gt_depths = np.load(gt_path, fix_imports=True, encoding='latin1', allow_pickle=True)["data"]
+        gt_path = os.path.join(splits_dir, opt.eval_split, "gt_depths.npz")
+        gt_depths = np.load(gt_path, fix_imports=True, encoding='latin1', allow_pickle=True)["data"]
 
         print("-> Computing predictions with size {}x{}".format(
             encoder_dict['width'], encoder_dict['height']))
@@ -123,8 +123,24 @@ def evaluate(opt):
         invcamK = torch.from_numpy(invcamK).float().cuda().unsqueeze(0)
         surfnorm_depth_computer = ComputeSurfaceNormal(height = predh, width = predw, batch_size = opt.batch_size).cuda()
 
+        window_sz = 11
+        nsig = 1
+        op_gaussblur_kernel = gkern(kernlen=window_sz, nsig=nsig)
+        op_gaussblur = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=window_sz, padding=int((window_sz-1)/2))
+        op_gaussblur_kernel = nn.Parameter(torch.from_numpy(op_gaussblur_kernel).unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
+        op_gaussblur.weight = op_gaussblur_kernel
+        op_gaussblur = op_gaussblur.cuda()
 
+        import matlab
+        import matlab.engine
+        eng = matlab.engine.start_matlab()
+
+        count = 0
+        localgeomDict = dict()
         for data in dataloader:
+            # if count < 235:
+            #     count = count + 1
+            #     continue
             input_color = data[("color", 0, 0)].cuda()
 
             output = depth_decoder(encoder(input_color))
@@ -134,14 +150,53 @@ def evaluate(opt):
             _, depth = disp_to_depth(output[("disp", 0)][:,2:3,:,:], opt.min_depth, opt.max_depth)
             depth = depth * STEREO_SCALE_FACTOR
 
-            surfnorm_theta = localGeomDesp.surfnorm_from_localgeom(htheta=htheta, vtheta=vtheta)
-            dir3d = torch.clamp(((surfnorm_theta + 1) / 2), min=0, max=1)
-            dir3d = dir3d.permute([0,3,1,2]).contiguous()
-            fig_surfnorm_theta = tensor2rgb(dir3d, ind=0)
+            # surfnorm_theta = localGeomDesp.surfnorm_from_localgeom(htheta=htheta, vtheta=vtheta)
+            # dir3d = torch.clamp(((surfnorm_theta + 1) / 2), min=0, max=1)
+            # dir3d = dir3d.permute([0,3,1,2]).contiguous()
+            # fig_surfnorm_theta = tensor2rgb(dir3d, ind=0)
+            #
+            # surfnorm_depth = surfnorm_depth_computer.forward(depth, invcamK)
+            # dir3d = torch.clamp(((surfnorm_depth + 1) / 2), min=0, max=1).contiguous()
+            # fig_surfnorm_depth = tensor2rgb(dir3d, ind=0)
+            #
+            # closs, derivx, num_grad = localGeomDesp.depth_localgeom_consistency(depth, htheta, vtheta, isoutput_grads=True)
+            # htheta_d, vtheta_d = localGeomDesp.get_theta(depth)
 
-            surfnorm_depth = surfnorm_depth_computer.forward(depth, invcamK)
-            dir3d = torch.clamp(((-surfnorm_depth + 1) / 2), min=0, max=1).contiguous()
-            fig_surfnorm_depth = tensor2rgb(dir3d, ind=0)
+            gt_depth = gt_depths[count]
+            gtheight, gtwidth = gt_depth.shape
+            acckey = str(gtheight) + '_' + str(gtwidth)
+            if acckey not in localgeomDict:
+                gtscale_intrinsic = np.array([
+                    [0.58 * gtwidth, 0, 0.5 * gtwidth],
+                    [0, 1.92 * gtheight, 0.5 * gtheight],
+                    [0, 0, 1]], dtype=np.float32)
+                gtsize_localGeomDesp = LocalThetaDesp(height=gtheight, width=gtwidth, batch_size=1, intrinsic=gtscale_intrinsic).cuda()
+                localgeomDict[acckey] = gtsize_localGeomDesp
+            depth_gtsize = F.interpolate(depth, [gtheight, gtwidth], mode='bilinear', align_corners=True)
+            htheta_gtsize = F.interpolate(htheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
+            vtheta_gtsize = F.interpolate(vtheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
+            input_color_gtsize = F.interpolate(input_color, [gtheight, gtwidth], mode='bilinear', align_corners=True)
+            localgeomDict[acckey].debias(depth_gtsize, htheta_gtsize, vtheta_gtsize, gt_depth, input_color_gtsize, str(count).zfill(5), eng)
+
+            # tensor2disp(htheta_d - 1, vmax=4, ind=0).show()
+            # tensor2disp(htheta - 1, vmax=4, ind=0).show()
+            #
+            # htheta_bluured = op_gaussblur(htheta)
+            # htheta_d_bluured = op_gaussblur(htheta_d)
+            # htheta_d_bluured2, _ = localGeomDesp.get_theta(op_gaussblur(depth))
+            #
+            # tensor2disp(htheta_bluured - 1, vmax=4, ind=0).show()
+            # tensor2disp(htheta_d_bluured - 1, vmax=4, ind=0).show()
+            # tensor2disp(htheta_d_bluured2 - 1, vmax=4, ind=0).show()
+
+            count = count + 1
+            print("%d finished" % count)
+
+
+
+
+
+
 
 if __name__ == "__main__":
     options = MonodepthOptions()

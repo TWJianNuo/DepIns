@@ -196,7 +196,6 @@ def evaluate(opt):
         # tensor2disp(1 / torch.from_numpy(pred_depth).unsqueeze(0).unsqueeze(0), ind = 0, percentile=95).show()
         if opt.eval_split == "eigen":
             mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
-
             crop = np.array([0.40810811 * gt_height, 0.99189189 * gt_height,
                              0.03594771 * gt_width,  0.96405229 * gt_width]).astype(np.int32)
             crop_mask = np.zeros(mask.shape)

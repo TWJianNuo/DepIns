@@ -322,11 +322,12 @@ class Trainer:
 
         for i in range(len(self.opt.scales)):
             scaledDepth = F.interpolate(outputs[('depth', 0, i)] * self.STEREO_SCALE_FACTOR, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            curconstrain, derivx, num_grad = self.localthetadespKitti_scaled.depth_localgeom_consistency(scaledDepth, htheta_pred_detached, vtheta_pred_detached, mask=self.thetalossmap, isoutput_grads=True)
+            curconstrain, derivx, num_grad, optimize_mask = self.localthetadespKitti_scaled.depth_localgeom_consistency(scaledDepth, htheta_pred_detached, vtheta_pred_detached, isoutput_grads=True)
             l1constrain = l1constrain + curconstrain
             if i == 0:
                 outputs['derivx'] = derivx
                 outputs['num_grad'] = num_grad
+                outputs['optimize_mask'] = optimize_mask
         l1constrain = l1constrain / len(self.opt.scales)
         losses['l1constrain'] = l1constrain
         return losses
@@ -555,7 +556,8 @@ class Trainer:
 
         fig_thetagrad = tensor2disp(torch.abs(outputs['derivx']), vmax=0.1, ind=0)
         fig_depthgrad = tensor2disp(torch.abs(outputs['num_grad']), vmax=0.1, ind=0)
-        fig_grad = np.concatenate([np.array(figrgb), np.array(fig_thetagrad), np.array(fig_depthgrad)], axis=0)
+        fig_mask = tensor2disp(outputs['optimize_mask'], vmax=1, ind=0)
+        fig_grad = np.concatenate([np.array(figrgb), np.array(fig_thetagrad), np.array(fig_depthgrad), np.array(fig_mask)], axis=0)
         self.writers['train'].add_image('fig_grad', (torch.from_numpy(fig_grad).float() / 255).permute([2, 0, 1]), self.step)
 
         figrgb_stereo = tensor2rgb(inputs[('color', 's', 0)], ind=vind)

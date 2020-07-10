@@ -17,7 +17,9 @@ import torch
 import torch.nn.functional as F
 from kitti_utils import name2label, trainId2label
 from collections import Counter
-
+from numba import njit, prange
+import numba
+import scipy.stats as st
 def readlines(filename):
     """Read all the lines in a text file and return as a list
     """
@@ -342,3 +344,23 @@ def norm_tensor(depth, pSIL_insMask_shrinked):
         pSIL_insMask_shrinked, dim=[1, 2, 3])
 
     return (depth - mu_ex) / scale_ex
+
+def gkern(kernlen=21, nsig=3):
+    """Returns a 2D Gaussian kernel array."""
+    interval = (2*nsig+1.)/(kernlen)
+    x = np.linspace(-nsig-interval/2., nsig+interval/2., kernlen+1)
+    kern1d = np.diff(st.norm.cdf(x))
+    kernel_raw = np.sqrt(np.outer(kern1d, kern1d))
+    kernel = kernel_raw/kernel_raw.sum()
+    return kernel
+
+@numba.jit(nopython=True, parallel=False)
+def recover_depth_from_theta(debias_ratiohl, depthmap, recovered_depth, optimize_mask, height, width):
+    for i in range(height):
+        recovered_depth[i, 0] = depthmap[i, 0]
+    for i in range(height):
+        for j in range(1,width):
+            if optimize_mask[i, j] > 0:
+                recovered_depth[i, j] = recovered_depth[i,j-1] * np.exp(debias_ratiohl[i,j-1])
+            else:
+                recovered_depth[i, j] = depthmap[i,j]
