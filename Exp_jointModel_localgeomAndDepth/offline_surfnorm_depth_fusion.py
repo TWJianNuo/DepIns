@@ -131,16 +131,21 @@ def evaluate(opt):
         op_gaussblur.weight = op_gaussblur_kernel
         op_gaussblur = op_gaussblur.cuda()
 
-        import matlab
-        import matlab.engine
-        eng = matlab.engine.start_matlab()
+        # import matlab
+        # import matlab.engine
+        # eng = matlab.engine.start_matlab()
 
         count = 0
         localgeomDict = dict()
+
+        bfopt_errs = list()
+        afopt_errs = list()
         for data in dataloader:
-            # if count < 235:
+
+            # if count < 40:
             #     count = count + 1
             #     continue
+
             input_color = data[("color", 0, 0)].cuda()
 
             output = depth_decoder(encoder(input_color))
@@ -176,24 +181,34 @@ def evaluate(opt):
             htheta_gtsize = F.interpolate(htheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
             vtheta_gtsize = F.interpolate(vtheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
             input_color_gtsize = F.interpolate(input_color, [gtheight, gtwidth], mode='bilinear', align_corners=True)
-            localgeomDict[acckey].debias(depth_gtsize, htheta_gtsize, vtheta_gtsize, gt_depth, input_color_gtsize, str(count).zfill(5), eng)
+            optimizedDepth_torch = localgeomDict[acckey].jointopt_lsqr_torch(depth_gtsize, htheta_gtsize, vtheta_gtsize, gt_depth, input_color_gtsize, str(count).zfill(5))
 
-            # tensor2disp(htheta_d - 1, vmax=4, ind=0).show()
-            # tensor2disp(htheta - 1, vmax=4, ind=0).show()
-            #
-            # htheta_bluured = op_gaussblur(htheta)
-            # htheta_d_bluured = op_gaussblur(htheta_d)
-            # htheta_d_bluured2, _ = localGeomDesp.get_theta(op_gaussblur(depth))
-            #
-            # tensor2disp(htheta_bluured - 1, vmax=4, ind=0).show()
-            # tensor2disp(htheta_d_bluured - 1, vmax=4, ind=0).show()
-            # tensor2disp(htheta_d_bluured2 - 1, vmax=4, ind=0).show()
+            if opt.eval_split == "eigen":
+                mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
+                crop = np.array([0.40810811 * gtheight, 0.99189189 * gtheight,
+                                 0.03594771 * gtwidth, 0.96405229 * gtwidth]).astype(np.int32)
+                crop_mask = np.zeros(mask.shape)
+                crop_mask[crop[0]:crop[1], crop[2]:crop[3]] = 1
+                mask = np.logical_and(mask, crop_mask)
+            else:
+                mask = gt_depth > 0
+
+            gt_depth = gt_depth[mask]
+            depth_bfopt = depth_gtsize[0,0,:,:].detach().cpu().numpy()[mask]
+            depth_afopt = optimizedDepth_torch[0,0,:,:].detach().cpu().numpy()[mask]
+
+            depth_bfopt[depth_bfopt < MIN_DEPTH] = MIN_DEPTH
+            depth_bfopt[depth_bfopt > MAX_DEPTH] = MAX_DEPTH
+            depth_afopt[depth_afopt < MIN_DEPTH] = MIN_DEPTH
+            depth_afopt[depth_afopt > MAX_DEPTH] = MAX_DEPTH
+
+            bfopt_errs.append(compute_errors(gt_depth, depth_bfopt))
+            afopt_errs.append(compute_errors(gt_depth, depth_afopt))
 
             count = count + 1
-            print("%d finished" % count)
-
-
-
+            print(count)
+        print(np.mean(bfopt_errs, 0))
+        print(np.mean(afopt_errs, 0))
 
 
 

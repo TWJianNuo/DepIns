@@ -2579,7 +2579,7 @@ class LocalThetaDesp(nn.Module):
         # self.op_gaussblur = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=window_sz, padding=int((window_sz-1)/2))
         # self.op_gaussblur.weight = op_gaussblur_kernel
 
-        w = 21
+        w = 41
         self.h_pool = nn.AvgPool2d(w, 1, padding=int((w-1)/2))
     def translate_path(self, phopath):
         phoind = list()
@@ -4446,21 +4446,19 @@ class LocalThetaDesp(nn.Module):
         return recovered_depth
 
     def debias(self, depthmap, htheta, vtheta, depthlidar=None, rgb=None, svname=None, eng=None):
-        pts3d = depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
-        hcord = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ pts3d
-
         htheta_d, vtheta_d = self.get_theta(depthmap)
         debias_hthtea = self.h_pool(htheta_d) + (htheta - self.h_pool(htheta))
         debias_vthtea = self.h_pool(vtheta_d) + (vtheta - self.h_pool(vtheta))
-        # tensor2disp(htheta_d-1, vmax=4, ind=0).show()
-        # tensor2disp(h_pool(htheta_d) - 1, vmax=4, ind=0).show()
-        # tensor2disp(debias_hthtea - 1, vmax=4, ind=0).show()
-        # debias_hthtea = self.op_gaussblur(htheta_d) + (htheta - self.op_gaussblur(htheta))
-        # debias_vthtea = self.op_gaussblur(vtheta_d) + (vtheta - self.op_gaussblur(vtheta))
-
+        '''
+        # Visualize Debias Hyper Parameters
+        import matlab
+        import matlab.engine
         debias_ratioh, debias_ratiohl, debias_ratiov, debias_ratiovl = self.get_ratio(debias_hthtea, debias_vthtea)
         debias_ratiohl_np = debias_ratiohl[0,0,:,:].detach().cpu().numpy()
         depthmap_np = depthmap[0,0,:,:].detach().cpu().numpy()
+
+        pts3d = depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1,-1,-1,3,-1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size,-1,-1,-1,-1]))
+        hcord = self.hM.unsqueeze(0).expand([self.batch_size, -1, -1, -1, -1]) @ pts3d
 
         # Generate Mask and do Garg crop
         optimize_mask = np.zeros_like(depthmap_np)
@@ -4494,7 +4492,7 @@ class LocalThetaDesp(nn.Module):
 
         fig1=tensor2disp(htheta - 1, vmax=4, ind=0)
         fig2=tensor2disp(htheta_d-1, vmax=4, ind=0)
-        fig3=tensor2disp(self.op_gaussblur(htheta_d) - 1, vmax=4, ind=0)
+        fig3=tensor2disp(self.h_pool(htheta_d) - 1, vmax=4, ind=0)
         fig4=tensor2disp(debias_hthtea - 1, vmax=4, ind=0)
 
         figleft = np.concatenate([np.array(fig2), np.array(fig3), np.array(fig4)], axis=0)
@@ -4547,3 +4545,278 @@ class LocalThetaDesp(nn.Module):
         file_save_add = '\'' + file_save_add + '\''
         eng.eval('saveas(gcf,' + file_save_add + ')', nargout=0)
         eng.eval('close all', nargout=0)
+        '''
+        return debias_hthtea, debias_vthtea
+
+    def jointopt_lsqr_scipy(self, depthmap, htheta, vtheta, depthlidar=None, rgb=None, svname=None):
+        import numpy as np
+        import scipy.sparse as sparse
+
+        lambdafw = 0.1 # weights between fidality term and constrain term
+
+        sparsxx, sparsyy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        sparsind = (sparsyy * self.width + sparsxx)
+
+        depthmap_np = depthmap[0, 0, :, :].detach().cpu().numpy()
+
+        fidaldata = depthmap_np.flatten() * lambdafw
+        fidalindy = sparsind.flatten()
+        fidalindx = sparsind.flatten()
+        fidalw = np.ones([self.width * self.height]) * lambdafw
+
+        htheta_d, vtheta_d = self.get_theta(depthmap)
+        debias_hthtea = self.h_pool(htheta_d) + (htheta - self.h_pool(htheta))
+        debias_vthtea = self.h_pool(vtheta_d) + (vtheta - self.h_pool(vtheta))
+        # tensor2disp(debias_hthtea - 1, vmax=4, ind=0).show()
+
+        ratioh, ratiohl, ratiov, ratiovl = self.get_ratio(debias_hthtea, debias_vthtea)
+        # ratioh, ratiohl, ratiov, ratiovl = self.get_ratio(htheta_d, vtheta_d)
+
+        # Selected Trustworhty Local Geometry
+        optimize_mask = np.zeros_like(depthmap_np)
+        optimize_mask[int(0.40810811 * self.height):int(0.99189189 * self.height), int(0.03594771 * self.width):int(0.96405229 * self.width)] = 1
+
+        grad_theta = self.sobelx(htheta)
+        non_linear_mask = torch.abs(grad_theta) < 0.01
+        outrange_mask = depthmap < 20
+        # tensor2disp((outrange_mask * non_linear_mask), vmax=1, ind=0).show()
+
+        optimize_mask = optimize_mask * (outrange_mask * non_linear_mask)[0,0,:,:].detach().cpu().numpy()
+        optimize_mask = optimize_mask == 1
+        consw1 = ratioh[0,0,:,:].detach().cpu().numpy()[optimize_mask]
+        consindy1 = np.array(list(range(self.width * self.height, self.width * self.height + int(np.sum(optimize_mask)))))
+        consindx1 = sparsyy[optimize_mask] * self.width + sparsxx[optimize_mask]
+        consw2 = -np.ones([np.sum(optimize_mask).astype(int)])
+        consindy2 = np.array(list(range(self.width * self.height, self.width * self.height + int(np.sum(optimize_mask)))))
+        consindx2 = sparsyy[optimize_mask] * self.width + sparsxx[optimize_mask] + 1
+        consw = np.concatenate([consw1, consw2], axis=0) * (1-lambdafw)
+        consindy = np.concatenate([consindy1, consindy2], axis=0)
+        consindx = np.concatenate([consindx1, consindx2], axis=0)
+        consdata = np.zeros([np.sum(optimize_mask).astype(int)])
+
+        sparsMindy = np.concatenate([fidalindy, consindy], axis=0)
+        sparsMindx = np.concatenate([fidalindx, consindx], axis=0)
+        sparsMw = np.concatenate([fidalw, consw], axis=0)
+        sparsMData = np.concatenate([fidaldata, consdata], axis=0)
+
+        M = sparse.csc_matrix((sparsMw, (sparsMindy, sparsMindx)), shape=(self.width * self.height + int(np.sum(optimize_mask)), self.width * self.height))
+        optimizedDepth, lstop, ltn, r1norm, r2norm, anorm, acond, arnorm, xnorm, var = sparse.linalg.lsqr(M, sparsMData)
+        optimizedDepth = np.resize(optimizedDepth, [self.height, self.width])
+        # ckdiff = np.abs(depthmap_np - optimizedDepth)
+
+        # Pytorch Implementation
+        sparsMindyTorch = torch.from_numpy(sparsMindy).long()
+        sparsMindxTorch = torch.from_numpy(sparsMindx).long()
+        sparsMind = torch.stack([sparsMindyTorch, sparsMindxTorch], dim=0)
+        sparsMwTorch = torch.from_numpy(sparsMw).float()
+        sparsMDataTorch = torch.from_numpy(sparsMData).float()
+        MTorch = torch.sparse.FloatTensor(sparsMind, sparsMwTorch, torch.Size([self.width * self.height + int(np.sum(optimize_mask)), self.width * self.height]))
+        testRe = torch.sparse.mm(MTorch, torch.randn(465750, 2))
+
+        optimizedDepth_torch = torch.from_numpy(optimizedDepth).unsqueeze(0).unsqueeze(0).cuda().float()
+        outlier_selector = (torch.abs(optimizedDepth_torch/depthmap - 1) > 0.01).float()
+        optimizedDepth_torch_outlierexcluded = depthmap * outlier_selector + optimizedDepth_torch * (1 - outlier_selector)
+
+
+        # depthlidar_torch = torch.from_numpy(depthlidar).unsqueeze(0).unsqueeze(0).cuda()
+        # errbs = torch.sum(torch.abs(depthlidar_torch - depthmap) * (depthlidar_torch > 0).float())
+        # erropted = torch.sum(torch.abs(depthlidar_torch - optimizedDepth_torch_outlierexcluded) * (depthlidar_torch > 0).float())
+        #
+        # htheta_opted, vtheta_opted = self.get_theta(optimizedDepth_torch_outlierexcluded)
+        #
+        # tensor2disp(1/depthmap, ind=0, vmax=0.2).show()
+        # tensor2disp(1/optimizedDepth_torch_outlierexcluded, ind=0, vmax=0.2).show()
+        #
+        # tensor2disp(recover_selector, vmax=1, ind=0).show()
+        #
+        # tensor2disp(htheta_d - 1, ind=0, vmax=4).show()
+        # tensor2disp(htheta_opted - 1, ind=0, vmax=4).show()
+        # tensor2disp(debias_hthtea - 1, ind=0, vmax=4).show()
+
+        '''
+        # Check correctness of M
+        ck_depthm = depthmap_np.flatten()
+        ckind = np.random.randint(0, self.width * self.height + int(np.sum(optimize_mask)) - 1)
+        np.abs(np.sum(M.getrow(ckind)[0,:] * ck_depthm) - sparsMData[ckind])
+        '''
+        return optimizedDepth_torch_outlierexcluded
+
+
+    def jointopt_lsqr_torch(self, depthmap, htheta, vtheta, depthlidar=None, rgb=None, svname=None):
+        import numpy as np
+        import scipy.sparse as sparse
+
+        lambdafw = 0.1  # weights between fidality term and constrain term
+
+        sparsxx, sparsyy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        sparsind = (sparsyy * self.width + sparsxx)
+
+        depthmap_np = depthmap[0, 0, :, :].detach().cpu().numpy()
+
+        fidaldata = depthmap_np.flatten() * lambdafw
+        fidalindy = sparsind.flatten()
+        fidalindx = sparsind.flatten()
+        fidalw = np.ones([self.width * self.height]) * lambdafw
+
+        htheta_d, vtheta_d = self.get_theta(depthmap)
+        debias_hthtea = self.h_pool(htheta_d) + (htheta - self.h_pool(htheta))
+        debias_vthtea = self.h_pool(vtheta_d) + (vtheta - self.h_pool(vtheta))
+        # tensor2disp(debias_hthtea - 1, vmax=4, ind=0).show()
+
+        ratioh, ratiohl, ratiov, ratiovl = self.get_ratio(debias_hthtea, debias_vthtea)
+        # ratioh, ratiohl, ratiov, ratiovl = self.get_ratio(htheta_d, vtheta_d)
+
+        # Selected Trustworhty Local Geometry
+        optimize_mask = np.zeros_like(depthmap_np)
+        optimize_mask[int(0.40810811 * self.height):int(0.99189189 * self.height),
+        int(0.03594771 * self.width):int(0.96405229 * self.width)] = 1
+
+        grad_theta = self.sobelx(htheta)
+        non_linear_mask = torch.abs(grad_theta) < 0.01
+        outrange_mask = depthmap < 20
+        # tensor2disp((outrange_mask * non_linear_mask), vmax=1, ind=0).show()
+
+        optimize_mask = optimize_mask * (outrange_mask * non_linear_mask)[0, 0, :, :].detach().cpu().numpy()
+        optimize_mask = optimize_mask == 1
+        consw1 = ratioh[0, 0, :, :].detach().cpu().numpy()[optimize_mask]
+        consindy1 = np.array(list(range(self.width * self.height, self.width * self.height + int(np.sum(optimize_mask)))))
+        consindx1 = sparsyy[optimize_mask] * self.width + sparsxx[optimize_mask]
+        consw2 = -np.ones([np.sum(optimize_mask).astype(int)])
+        consindy2 = np.array(list(range(self.width * self.height, self.width * self.height + int(np.sum(optimize_mask)))))
+        consindx2 = sparsyy[optimize_mask] * self.width + sparsxx[optimize_mask] + 1
+        consw = np.concatenate([consw1, consw2], axis=0) * (1 - lambdafw)
+        consindy = np.concatenate([consindy1, consindy2], axis=0)
+        consindx = np.concatenate([consindx1, consindx2], axis=0)
+        consdata = np.zeros([np.sum(optimize_mask).astype(int)])
+
+        sparsMindy = np.concatenate([fidalindy, consindy], axis=0)
+        sparsMindx = np.concatenate([fidalindx, consindx], axis=0)
+        sparsMw = np.concatenate([fidalw, consw], axis=0)
+        sparsMData = np.concatenate([fidaldata, consdata], axis=0)
+
+        M = sparse.csc_matrix((sparsMw, (sparsMindy, sparsMindx)),
+                              shape=(self.width * self.height + int(np.sum(optimize_mask)), self.width * self.height))
+        optimizedDepth, lstop, ltn, r1norm, r2norm, anorm, acond, arnorm, xnorm, var = sparse.linalg.lsqr(M, sparsMData)
+        optimizedDepth = np.resize(optimizedDepth, [self.height, self.width])
+        # ckdiff = np.abs(depthmap_np - optimizedDepth)
+
+        # Pytorch Implementation
+        sparsMindyTorch = torch.from_numpy(sparsMindy).long()
+        sparsMindxTorch = torch.from_numpy(sparsMindx).long()
+        sparsMind = torch.stack([sparsMindyTorch, sparsMindxTorch], dim=0)
+        sparsMwTorch = torch.from_numpy(sparsMw).float()
+        sparsMDataTorch = torch.from_numpy(sparsMData).float()
+        MTorch = torch.sparse.FloatTensor(sparsMind, sparsMwTorch, torch.Size([self.width * self.height + int(np.sum(optimize_mask)), self.width * self.height]))
+        testRe = torch.sparse.mm(MTorch, torch.randn(465750, 2))
+
+        optimizedDepth_torch = torch.from_numpy(optimizedDepth).unsqueeze(0).unsqueeze(0).cuda().float()
+        outlier_selector = (torch.abs(optimizedDepth_torch / depthmap - 1) > 0.01).float()
+        optimizedDepth_torch_outlierexcluded = depthmap * outlier_selector + optimizedDepth_torch * (1 - outlier_selector)
+
+
+        # Check Correctness of CGLS Alg
+        th = 100
+        tw = 200
+        tW = np.random.random([th, tw])
+        tx = np.random.random([tw, 1])
+        ta = tW @ tx
+        err = list()
+
+        x0 = np.zeros_like(tx)
+        d0 = np.copy(ta)
+        r0 = tW.T @ ta
+        p0 = tW.T @ ta
+        t0 = tW @ p0
+
+        for i in range(20):
+            err.append(np.sum((tW @ x0 - ta)**2))
+            alpha = np.sum(r0*r0) / np.sum(t0*t0)
+            x0 = x0 + alpha * p0
+            d0 = d0 - alpha * t0
+            r1 = tW.T @ d0
+            beta = np.sum(r1*r1) / np.sum(r0*r0)
+            p0 = r1 + beta * p0
+            t0 = tW @ p0
+            r0 = r1
+
+        # Torch Implementation of CGLS
+        import torch.optim as optim
+
+        sparsxx, sparsyy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        sparsind = (sparsyy * self.width + sparsxx)
+
+        fidalindy = torch.from_numpy(sparsind.flatten()).long()
+        fidalindx = torch.from_numpy(sparsind.flatten()).long()
+
+        v = torch.rand([self.height, self.width], requires_grad=True)
+
+        ada_opter = optim.SparseAdam([v], lr=1e-2)
+
+        i = torch.stack([fidalindy, fidalindx], dim=0)
+        vSparse = torch.sparse.FloatTensor(i, v.flatten(), torch.Size([self.height * self.width, self.height * self.width])).coalesce()
+        x = torch.randn(self.height * self.width, 1)
+        y = torch.sparse.mm(vSparse, x)
+        y.sum().backward()
+
+        loss = torch.sparse.sum(vSparse)
+        ada_opter.zero_grad()
+        loss.backward()
+        ada_opter.step()
+
+        # ta = tW @ tx
+
+
+
+        x0 = torch.zeros_like(tx)
+        d0 = ta.clone()
+        r0 = torch.sparse.mm(tWS.transpose(dim0=0, dim1=1), ta)
+        p0 = torch.sparse.mm(tWS.transpose(dim0=0, dim1=1), ta)
+        t0 = torch.sparse.mm(tWS, p0)
+
+
+        err = list()
+        lossrec = list()
+
+        i = torch.LongTensor([[2, 4]])
+        v = torch.FloatTensor([[1, 3], [5, 7]])
+        v.requires_grad=True
+        ada_opter = optim.Adam([v], lr=1e-2)
+        s = torch.sparse.FloatTensor(i, v).coalesce()
+        loss = torch.sparse.sum(s)
+        ada_opter.zero_grad()
+        loss.backward()
+        ada_opter.step()
+
+        a = torch.randn(2, 3).to_sparse()
+        b = torch.randn(3, 2, requires_grad=True)
+        y = torch.sparse.mm(a, b)
+        ada_opter = optim.Adam([b], lr=1e-2)
+        ada_opter.zero_grad()
+        y.sum().backward()
+        ada_opter.step()
+
+
+        for j in range(10):
+            x0 = x0.detach().clone()
+            d0 = d0.detach().clone()
+            r0 = r0.detach().clone()
+            p0 = p0.detach().clone()
+            t0 = t0.detach().clone()
+            for i in range(20):
+                err.append(torch.sum((torch.sparse.mm(tWP, x0) - ta)**2))
+                alpha = torch.sum(r0*r0) / torch.sum(t0*t0)
+                x0 = x0 + alpha * p0
+                d0 = d0 - alpha * t0
+                r1 = torch.sparse.mm(tWP.transpose(dim0=0, dim1=1), d0)
+                beta = torch.sum(r1*r1) / torch.sum(r0*r0)
+                p0 = r1 + beta * p0
+                t0 = torch.sparse.mm(tWP, p0)
+                r0 = r1
+            loss = torch.sum((torch.sparse.mm(tWP, x0) - ta)**2)
+            ada_opter.zero_grad()
+            loss.backward()
+            ada_opter.step()
+            lossrec.append(loss.detach())
+
+
+

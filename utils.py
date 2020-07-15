@@ -364,3 +364,7 @@ def recover_depth_from_theta(debias_ratiohl, depthmap, recovered_depth, optimize
                 recovered_depth[i, j] = recovered_depth[i,j-1] * np.exp(debias_ratiohl[i,j-1])
             else:
                 recovered_depth[i, j] = depthmap[i,j]
+
+def conjugate_gradient():
+    # For sparse Conjugate Gradient
+    a = 1
