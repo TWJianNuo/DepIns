@@ -1,26 +1,30 @@
 from __future__ import absolute_import, division, print_function
+
 import os,sys,inspect
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0,parentdir)
+
 from options import MonodepthOptions
 import warnings
 
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
+# Resolve Tensorbard Confliction across pytorch version
 import torch
+import warnings
 version_num = torch.__version__
 version_num = ''.join(i for i in version_num if i.isdigit())
 version_num = int(version_num.ljust(10, '0'))
-if version_num > 1100000000:
-    from torch.utils.tensorboard import SummaryWriter
-else:
-    from tensorboardX import SummaryWriter
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    if version_num > 1100000000:
+        from torch.utils.tensorboard import SummaryWriter
+    else:
+        from tensorboardX import SummaryWriter
 
-from layers import *
-
-import datasets
+from Exp_splitFeatureEarlier import MonoDatasetRndCrop
 import networks
 
 import time
@@ -29,11 +33,6 @@ import json
 warnings.filterwarnings("ignore")
 options = MonodepthOptions()
 opts = options.parse()
-
-# torch.manual_seed(0)
-# torch.backends.cudnn.deterministic = False
-# torch.backends.cudnn.benchmark = False
-
 
 from collections import OrderedDict
 from layers import *
@@ -202,8 +201,7 @@ class Trainer:
             self.ssim.to(self.device)
 
         self.set_layers()
-        self.depth_metric_names = [
-            "de/abs_rel", "de/sq_rel", "de/rms", "de/log_rms", "da/a1", "da/a2", "da/a3"]
+        self.depth_metric_names = ["de/abs_rel", "de/sq_rel", "de/rms", "de/log_rms", "da/a1", "da/a2", "da/a3"]
 
         print("Using split:\n  ", self.opt.split)
         print("There are {:d} training items and {:d} validation items\n".format(
@@ -227,9 +225,6 @@ class Trainer:
         self.shrinkConv = nn.Conv2d(1, 1, 3, bias=False, padding=1)
         self.shrinkConv.weight = nn.Parameter(weights, requires_grad=False)
         self.shrinkConv = self.shrinkConv.cuda()
-
-        # self.bp3d = BackProj3D(height=self.prsil_ch, width=self.prsil_cw, batch_size=self.opt.batch_size).cuda()
-        self.bp3d = BackProj3D(height=self.prsil_h, width=self.prsil_w, batch_size=self.opt.batch_size).cuda()
 
 
         self.unitFK = 0.58
@@ -311,15 +306,14 @@ class Trainer:
         self.gt_depths = np.load(gt_path, fix_imports=True, encoding='latin1', allow_pickle=True)["data"]
 
 
-        train_dataset = datasets.KITTIRAWDataset(
+        train_dataset = MonoDatasetRndCrop(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, is_train=not self.opt.no_aug, load_seman = False, load_hints = self.opt.load_hints, hints_path = self.opt.hints_path, PreSIL_root = self.opt.PreSIL_path,
-            kitti_gt_path = self.opt.kitti_gt_path
+            is_train=not self.opt.no_aug, kitti_gt_path = self.opt.kitti_gt_path
         )
 
-        val_dataset = datasets.KITTIRAWDataset(
+        val_dataset = MonoDatasetRndCrop(
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
-            self.opt.frame_ids, 4, is_train=False, load_seman = False,
+            is_train=False
         )
 
         self.train_loader = DataLoader(

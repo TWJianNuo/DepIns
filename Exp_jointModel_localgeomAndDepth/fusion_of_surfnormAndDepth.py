@@ -1,19 +1,21 @@
 from __future__ import absolute_import, division, print_function
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir)
 
-import os
-import cv2
-import numpy as np
-
-import torch
 from torch.utils.data import DataLoader
-
 from layers import *
 from utils import readlines
 from options import MonodepthOptions
 import datasets
 import networks
+
 import glob
 import torch.optim as optim
+import cv2
+import numpy as np
+import torch
 
 
 cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV 3.3.1)
@@ -64,9 +66,8 @@ def evaluate(opt):
     MIN_DEPTH = 1e-3
     MAX_DEPTH = 80
 
-    assert sum((opt.eval_mono, opt.eval_stereo)) == 1, \
-        "Please choose mono or stereo evaluation by setting either --eval_mono or --eval_stereo"
-    save_vls_theta = False
+    assert sum((opt.eval_mono, opt.eval_stereo)) == 1, "Please choose mono or stereo evaluation by setting either --eval_mono or --eval_stereo"
+
     if opt.ext_disp_to_eval is None:
 
         opt.load_weights_folder = os.path.expanduser(opt.load_weights_folder)
@@ -84,7 +85,7 @@ def evaluate(opt):
 
         dataset = datasets.KITTIRAWDataset(opt.data_path, filenames,
                                            encoder_dict['height'], encoder_dict['width'],
-                                           [0], 4, is_train=False, theta_gt_path=opt.theta_gt_path)
+                                           [0], 4, is_train=False, theta_gt_path=opt.theta_gt_path, load_seman=True)
         dataloader = DataLoader(dataset, 1, shuffle=False, num_workers=opt.num_workers,
                                 pin_memory=True, drop_last=False)
 
@@ -108,64 +109,40 @@ def evaluate(opt):
 
         predw = encoder_dict['width']
         predh = encoder_dict['height']
-        intrinsicKitti = np.array([
-            [0.58 * predw, 0, 0.5 * predw],
-            [0, 1.92 * predh, 0.5 * predh],
-            [0, 0, 1]], dtype=np.float32)
-        localGeomDesp = LocalThetaDesp(height=predh, width=predw, batch_size=1, intrinsic=intrinsicKitti).cuda()
         thetalossmap = torch.zeros([1, 1, predh, predw]).expand([opt.batch_size, -1, -1, -1]).cuda()
         thetalossmap[:,:,110::,:] = 1
 
 
-        invcamK = np.eye(4)
-        invcamK[0:3,0:3] = intrinsicKitti
-        invcamK = np.linalg.inv(invcamK)
-        invcamK = torch.from_numpy(invcamK).float().cuda().unsqueeze(0)
-        surfnorm_depth_computer = ComputeSurfaceNormal(height = predh, width = predw, batch_size = opt.batch_size).cuda()
+        import matlab
+        import matlab.engine
+        eng = matlab.engine.start_matlab()
 
-        window_sz = 11
-        nsig = 1
-        op_gaussblur_kernel = gkern(kernlen=window_sz, nsig=nsig)
-        op_gaussblur = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=window_sz, padding=int((window_sz-1)/2))
-        op_gaussblur_kernel = nn.Parameter(torch.from_numpy(op_gaussblur_kernel).unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
-        op_gaussblur.weight = op_gaussblur_kernel
-        op_gaussblur = op_gaussblur.cuda()
-
-        # import matlab
-        # import matlab.engine
-        # eng = matlab.engine.start_matlab()
-
-        count = 0
         localgeomDict = dict()
+
 
         bfopt_errs = list()
         afopt_errs = list()
-        for data in dataloader:
+        for count in range(0,len(filenames)):
+            # count = 46
+            count = 178
+            comps = filenames[count].split(' ')
+            semidense_path = os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Data/kitti/semidense_gt', comps[0], 'image_02', comps[1].zfill(10)+'.png')
+            if (not os.path.isfile(semidense_path)):
+                continue
+            semidense_depth = pil.open(semidense_path)
+            semidense_depth = np.array(semidense_depth).astype(np.float32) / 256
 
-            # if count < 40:
-            #     count = count + 1
-            #     continue
-
-            input_color = data[("color", 0, 0)].cuda()
+            data = dataset.__getitem__(count)
+            input_color = data[("color", 0, 0)].unsqueeze(0).cuda()
 
             output = depth_decoder(encoder(input_color))
 
-            htheta = data['htheta'].cuda()
-            vtheta = data['vtheta'].cuda()
+            htheta = data['htheta'].unsqueeze(0).cuda()
+            vtheta = data['vtheta'].unsqueeze(0).cuda()
             _, depth = disp_to_depth(output[("disp", 0)][:,2:3,:,:], opt.min_depth, opt.max_depth)
             depth = depth * STEREO_SCALE_FACTOR
 
-            # surfnorm_theta = localGeomDesp.surfnorm_from_localgeom(htheta=htheta, vtheta=vtheta)
-            # dir3d = torch.clamp(((surfnorm_theta + 1) / 2), min=0, max=1)
-            # dir3d = dir3d.permute([0,3,1,2]).contiguous()
-            # fig_surfnorm_theta = tensor2rgb(dir3d, ind=0)
-            #
-            # surfnorm_depth = surfnorm_depth_computer.forward(depth, invcamK)
-            # dir3d = torch.clamp(((surfnorm_depth + 1) / 2), min=0, max=1).contiguous()
-            # fig_surfnorm_depth = tensor2rgb(dir3d, ind=0)
-            #
-            # closs, derivx, num_grad = localGeomDesp.depth_localgeom_consistency(depth, htheta, vtheta, isoutput_grads=True)
-            # htheta_d, vtheta_d = localGeomDesp.get_theta(depth)
+            semantics = torch.from_numpy(data['semanLabel']).unsqueeze(0).float()
 
             gt_depth = gt_depths[count]
             gtheight, gtwidth = gt_depth.shape
@@ -181,7 +158,10 @@ def evaluate(opt):
             htheta_gtsize = F.interpolate(htheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
             vtheta_gtsize = F.interpolate(vtheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
             input_color_gtsize = F.interpolate(input_color, [gtheight, gtwidth], mode='bilinear', align_corners=True)
-            optimizedDepth_torch = localgeomDict[acckey].jointopt_lsqr_torch(depth_gtsize, htheta_gtsize, vtheta_gtsize, gt_depth, input_color_gtsize, str(count).zfill(5))
+            semantics_gtsize = F.interpolate(semantics, [gtheight, gtwidth], mode='nearest')
+
+            optimizedDepth_torch = localgeomDict[acckey].vls_jointopt_angleConstrain_superpixels(depth_gtsize, htheta_gtsize, vtheta_gtsize, gt_depth, input_color_gtsize, semantics=semantics_gtsize, svname = str(count).zfill(5), eng=eng)
+            # optimizedDepth_torch = localgeomDict[acckey].vls_jointopt_angleConstrain_superpixels(depth_gtsize, htheta_gtsize, vtheta_gtsize, semidense_depth, input_color_gtsize, str(count).zfill(5), eng=eng)
 
             if opt.eval_split == "eigen":
                 mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
@@ -205,8 +185,8 @@ def evaluate(opt):
             bfopt_errs.append(compute_errors(gt_depth, depth_bfopt))
             afopt_errs.append(compute_errors(gt_depth, depth_afopt))
 
-            count = count + 1
-            print(count)
+            print("%d finished." % count)
+
         print(np.mean(bfopt_errs, 0))
         print(np.mean(afopt_errs, 0))
 
@@ -216,17 +196,5 @@ def evaluate(opt):
 if __name__ == "__main__":
     options = MonodepthOptions()
     args = options.parse()
-    if args.load_weights_folders is not None:
-        folders_to_eval = glob.glob(os.path.join(args.load_weights_folders, '*/'))
-        to_order = list()
-        for i in range(len(folders_to_eval)):
-            to_order.append(int(folders_to_eval[i].split('/')[-2].split('_')[1]))
-        to_order = np.array(to_order)
-        to_order_index = np.argsort(to_order)
-        for i in to_order_index:
-            print(folders_to_eval[i])
-            args.load_weights_folder = folders_to_eval[i]
-            evaluate(args)
-    else:
-        evaluate(args)
+    evaluate(args)
 
