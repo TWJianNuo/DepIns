@@ -124,7 +124,7 @@ def evaluate(opt):
         afopt_errs = list()
         for count in range(0,len(filenames)):
             # count = 46
-            count = 178
+            # count = 178
             comps = filenames[count].split(' ')
             semidense_path = os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Data/kitti/semidense_gt', comps[0], 'image_02', comps[1].zfill(10)+'.png')
             if (not os.path.isfile(semidense_path)):
