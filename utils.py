@@ -522,6 +522,9 @@ def init_a_halfilled_meshed_triangle(triangles, xloc, yloc, height, width, initi
                     tmp_rec[m, n] = initind
                     insideptscount = insideptscount + 1
 
+    fidalptcount = 0
+    fidalpttoset = np.random.randint(insideptscount + 1)
+
     if insideptscount > 1:
         for m in range(miny, maxy + 1):
             for n in range(minx, maxx + 1):
@@ -533,8 +536,12 @@ def init_a_halfilled_meshed_triangle(triangles, xloc, yloc, height, width, initi
                             horConsMask_np[m, n] = True
                         if tmp_rec[m+1, n] == initind:
                             verConsMask_np[m, n] = True
-                        if randmtx[m, n] > 0.5:
+                        if fidalptcount == fidalpttoset:
                             fidalMask_np[m, n] = True
+                        # if tmp_rec[m+1, n] != initind or tmp_rec[m-1, n] != initind or tmp_rec[m, n+1] != initind or tmp_rec[m, n-1] != initind:
+                        #     fidalMask_np[m, n] = True
+                        # fidalMask_np[m, n] = True
+                        fidalptcount = fidalptcount + 1
 
 
     # plt.figure()
@@ -542,24 +549,15 @@ def init_a_halfilled_meshed_triangle(triangles, xloc, yloc, height, width, initi
     # plt.scatter(np.array(insidepts)[:,0], np.array(insidepts)[:,1])
 
 @numba.jit(nopython=True, parallel=False)
-def init_arb_mask(height, width, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np):
-
-    # insideptscount = 0
-    # for m in range(0, height):
-    #     for n in range(0, width):
-    #         if optimize_mask_np[m, n]:
-    #             insideptscount = insideptscount + 1
-    # fidalpttoset = np.random.randint(insideptscount + 1)
-    #
-    # fidalptcount = 0
+def init_arb_mask(height, width, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, datavalmask):
     for m in range(0, height):
         for n in range(0, width):
             if optimize_mask_np[m, n]:
-                if optimize_mask_np[m, n+1]:
-                    horConsMask_np[m, n] = True
-                if optimize_mask_np[m+1, n]:
-                    verConsMask_np[m, n] = True
-                # if fidalptcount == fidalpttoset:
-                #     fidalMask_np[m, n] = True
-                # fidalptcount = fidalptcount + 1
-                fidalMask_np[m, n] = True
+                if n + 1 < width:
+                    if optimize_mask_np[m, n+1]:
+                        horConsMask_np[m, n] = True
+                if m + 1 < height:
+                    if optimize_mask_np[m+1, n]:
+                        verConsMask_np[m, n] = True
+                if datavalmask[m, n]:
+                    fidalMask_np[m, n] = True

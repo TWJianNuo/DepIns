@@ -24,7 +24,7 @@ with warnings.catch_warnings():
     else:
         from tensorboardX import SummaryWriter
 
-from Exp_splitFeatureEarlier import MonoDatasetRndCrop
+from Exp_InplaceShapeLossAndLSQRRNNDepthLoss import MonoDatasetRndCrop
 import networks
 
 import time
@@ -61,7 +61,6 @@ def compute_errors(gt, pred):
 class DepthDecoder_earlysplit(nn.Module):
     def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_skips=True, split_level=-1):
         super(DepthDecoder_earlysplit, self).__init__()
-
         self.num_output_channels = num_output_channels
         self.use_skips = use_skips
         self.upsample_mode = 'nearest'
@@ -211,50 +210,14 @@ class Trainer:
             self.load_model()
         self.save_opts()
 
-        self.prsil_cw = 32 * 10
-        self.prsil_ch = 32 * 8
-        self.prsil_w = 1024
-        self.prsil_h = 448
 
-        # Define Shrink Conv
-        weights = torch.tensor([[1., 1., 1.],
-                                [1., 1., 1.],
-                                [1., 1., 1.]])
-        weights = weights.view(1, 1, 3, 3)
-        self.shrinkbar = 8
-        self.shrinkConv = nn.Conv2d(1, 1, 3, bias=False, padding=1)
-        self.shrinkConv.weight = nn.Parameter(weights, requires_grad=False)
-        self.shrinkConv = self.shrinkConv.cuda()
-
-
-        self.unitFK = 0.58
-        self.kittiw = 1242
-        self.kittih = 375
-        intrinsicKitti = np.array([
+        self.kittiw = 1220
+        self.kittih = 365
+        Kkitti = np.array([
             [0.58 * self.kittiw, 0, 0.5 * self.kittiw],
             [0, 1.92 * self.kittih, 0.5 * self.kittih],
             [0, 0, 1]], dtype=np.float32)
-        self.localthetadespKitti = LocalThetaDesp(height=self.kittih, width=self.kittiw,batch_size=self.opt.batch_size, intrinsic=intrinsicKitti).cuda()
-
-
-        intrinsicKitti_scaled = np.array([
-            [0.58 * self.opt.width, 0, 0.5 * self.opt.width],
-            [0, 1.92 * self.opt.height, 0.5 * self.opt.height],
-            [0, 0, 1]], dtype=np.float32)
-        self.localthetadespKitti_scaled = LocalThetaDesp(height=self.opt.height, width=self.opt.width,batch_size=self.opt.batch_size, intrinsic=intrinsicKitti_scaled).cuda()
-
-        self.thetalossmap = torch.zeros([1, 1, self.opt.height, self.opt.width]).expand([self.opt.batch_size, -1, -1, -1]).cuda()
-        self.thetalossmap[:,:,110::,:] = 1
-
-
-        self.prsil_w = 1024
-        self.prsil_h = 448
-        intrinsic = np.array([
-            [512., 0., 512.],
-            [0., 512., 160.],
-            [0., 0., 1.]]
-        )
-        self.presil_localthetadesp = LocalThetaDesp(height=self.prsil_h, width=self.prsil_w, batch_size=self.opt.batch_size, intrinsic=intrinsic).cuda()
+        self.localthetadespKitti = LocalThetaDesp(height=self.kittih, width=self.kittiw,batch_size=self.opt.batch_size, intrinsic=Kkitti).cuda()
 
         self.MIN_DEPTH = 1e-3
         self.MAX_DEPTH = 80
@@ -278,20 +241,6 @@ class Trainer:
 
             self.project_3d[scale] = Project3D(self.opt.batch_size, h, w)
             self.project_3d[scale].to(self.device)
-
-        if self.opt.bnMorphLoss:
-            from bnmorph.bnmorph import BNMorph
-            self.tool = grad_computation_tools(batch_size=self.opt.batch_size, height=self.opt.height,
-                                               width=self.opt.width).cuda()
-
-            self.bnmorph = BNMorph(height=self.opt.height, width=self.opt.width, senseRange=20).cuda()
-            self.foregroundType = [5, 6, 7, 11, 12, 13, 14, 15, 16, 17,
-                                   18]  # pole, traffic light, traffic sign, person, rider, car, truck, bus, train, motorcycle, bicycle
-            self.textureMeasure = TextureIndicatorM().cuda()
-
-        if self.opt.Dloss:
-            from eppl_render.eppl_render import EpplRender
-            self.epplrender = EpplRender(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size, sampleNum=self.opt.eppsm).cuda()
 
     def set_dataset(self):
         """properly handle multiple dataset situation
@@ -348,7 +297,7 @@ class Trainer:
         self.start_time = time.time()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
-
+            self.save_model("weight_{}".format(self.epoch))
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -377,8 +326,8 @@ class Trainer:
             if self.step % 100 == 0:
                 self.log("train", inputs, outputs, losses, writeImage=False)
 
-            if self.step % 2000 == 0 and self.step > 1999:
-                self.val()
+            # if self.step % 2000 == 0 and self.step > 1999:
+            #     self.val()
 
             self.step += 1
 
@@ -386,7 +335,7 @@ class Trainer:
         """Pass a minibatch through the network and generate images and losses
         """
         for key, ipt in inputs.items():
-            if not (key == 'entry_tag' or key == 'syn_tag'):
+            if not key == 'tag':
                 inputs[key] = ipt.to(self.device)
 
         outputs = dict()
@@ -395,20 +344,23 @@ class Trainer:
         outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
 
         # Depth Branch
-        self.generate_images_pred(inputs, outputs)
-        losses.update(self.depth_compute_losses(inputs, outputs))
+        # self.generate_images_pred(inputs, outputs)
+        # losses.update(self.depth_compute_losses(inputs, outputs))
 
         # Theta Branch
         losses.update(self.theta_compute_losses(inputs, outputs))
 
         # Constrain Branch
-        losses.update(self.constrain_compute_losses(inputs, outputs))
+        # losses.update(self.constrain_compute_losses(inputs, outputs))
+
+        # losses['totLoss'] = losses['ltheta'] * self.opt.lthetaScale + \
+        #                     losses['sclLoss'] * self.opt.sclLossScale + \
+        #                     losses['l1loss'] * self.opt.l1lossScale + \
+        #                     losses['pholoss'] * self.opt.pholossScale + \
+        #                     losses['l1constrain'] * self.opt.l1constrainScale
 
         losses['totLoss'] = losses['ltheta'] * self.opt.lthetaScale + \
-                            losses['sclLoss'] * self.opt.sclLossScale + \
-                            losses['l1loss'] * self.opt.l1lossScale + \
-                            losses['pholoss'] * self.opt.pholossScale + \
-                            losses['l1constrain'] * self.opt.l1constrainScale
+                            losses['sclLoss'] * self.opt.sclLossScale
         return outputs, losses
 
     def constrain_compute_losses(self, inputs, outputs):
@@ -438,7 +390,7 @@ class Trainer:
             htheta_pred = pred_theta[:, 0:1, :, :]
             vtheta_pred = pred_theta[:, 1:2, :, :]
 
-            hloss, vloss, scl = self.localthetadespKitti.cleaned_path_loss(depthmap=inputs['depth_gt'], htheta=htheta_pred, vtheta=vtheta_pred)
+            hloss, vloss, scl = self.localthetadespKitti.cleaned_path_loss(depthmap=inputs['depthgt'], htheta=htheta_pred, vtheta=vtheta_pred)
             if i == 0:
                 outputs['htheta_pred'] = outputs[('disp', i)][:, 0:1, :, :] * float(np.pi) * 2
                 outputs['vtheta_pred'] = outputs[('disp', i)][:, 1:2, :, :] * float(np.pi) * 2
@@ -657,16 +609,16 @@ class Trainer:
         self.writers['train'].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
 
 
-        figrgb_stereo = tensor2rgb(inputs[('color', 's', 0)], ind=vind)
-        figrgb2 = tensor2rgb(inputs[('color', 0, 0)], ind=vind)
-        mask = 1 - outputs['selfOccMask'][vind, 0, :, :].detach().cpu().numpy()
-        mask = np.expand_dims(mask, axis=2)
-        mask = np.repeat(mask, axis=2, repeats=3)
-        figrgb2 = pil.fromarray((np.array(figrgb2).astype(np.float) * mask).astype(np.uint8))
-        occmask = tensor2disp(outputs['selfOccMask'], vmax = 1, ind=vind)
-        color_recon = tensor2rgb(outputs[('color', 's', 0)], ind=vind)
-        combined2 = np.concatenate([figrgb2, figrgb_stereo, color_recon, occmask])
-        self.writers['train'].add_image('rgb', (torch.from_numpy(combined2).float() / 255).permute([2, 0, 1]), self.step)
+        # figrgb_stereo = tensor2rgb(inputs[('color', 's', 0)], ind=vind)
+        # figrgb2 = tensor2rgb(inputs[('color', 0, 0)], ind=vind)
+        # mask = 1 - outputs['selfOccMask'][vind, 0, :, :].detach().cpu().numpy()
+        # mask = np.expand_dims(mask, axis=2)
+        # mask = np.repeat(mask, axis=2, repeats=3)
+        # figrgb2 = pil.fromarray((np.array(figrgb2).astype(np.float) * mask).astype(np.uint8))
+        # occmask = tensor2disp(outputs['selfOccMask'], vmax = 1, ind=vind)
+        # color_recon = tensor2rgb(outputs[('color', 's', 0)], ind=vind)
+        # combined2 = np.concatenate([figrgb2, figrgb_stereo, color_recon, occmask])
+        # self.writers['train'].add_image('rgb', (torch.from_numpy(combined2).float() / 255).permute([2, 0, 1]), self.step)
         # pil.fromarray(combined2).show()
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file

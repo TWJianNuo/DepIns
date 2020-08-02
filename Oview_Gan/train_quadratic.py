@@ -48,11 +48,6 @@ class Trainer:
         self.num_scales = len(self.opt.scales)
         self.num_input_frames = len(self.opt.frame_ids)
 
-        self.ptspair = [
-            [[-1, 0, 0], [1, 0, 0]],
-            [[0, -1, 0], [0, 1, 0]]
-        ]
-
         assert self.opt.frame_ids[0] == 0, "frame_ids must start with 0"
         if self.opt.use_stereo:
             self.opt.frame_ids.append("s")
@@ -93,35 +88,6 @@ class Trainer:
             self.load_model()
         self.save_opts()
 
-        self.prsil_cw = 32 * 10
-        self.prsil_ch = 32 * 8
-        self.prsil_w = 1024
-        self.prsil_h = 448
-
-        # Define Shrink Conv
-        weights = torch.tensor([[1., 1., 1.],
-                                [1., 1., 1.],
-                                [1., 1., 1.]])
-        weights = weights.view(1, 1, 3, 3)
-        self.shrinkbar = 8
-        self.shrinkConv = nn.Conv2d(1, 1, 3, bias=False, padding=1)
-        self.shrinkConv.weight = nn.Parameter(weights, requires_grad=False)
-        self.shrinkConv = self.shrinkConv.cuda()
-
-        # self.bp3d = BackProj3D(height=self.prsil_ch, width=self.prsil_cw, batch_size=self.opt.batch_size).cuda()
-        self.bp3d = BackProj3D(height=self.prsil_h, width=self.prsil_w, batch_size=self.opt.batch_size).cuda()
-
-        self.locaGeoDesp = localGeomDesp(height=self.prsil_h, width=self.prsil_w, batch_size=self.opt.batch_size, ptspair = self.ptspair).cuda()
-
-        w = 4
-        weight = np.zeros([len(self.ptspair) * 2, 1, int(w * 2 + 1), int(w * 2 + 1)])
-        for i in range(len(self.ptspair)):
-            for j in range(2):
-                weight[i * 2 + j, 0, self.ptspair[i][j][1] + w, self.ptspair[i][j][0] + w] = 1
-                weight[i * 2 + j, 0, w, w] = -1
-        self.compareConv = torch.nn.Conv2d(1, len(self.ptspair) * 2, int(w * 2 + 1), stride=1, padding=w, bias=False)
-        self.compareConv.weight = torch.nn.Parameter(torch.from_numpy(weight.astype(np.float32)), requires_grad=False)
-        self.compareConv = self.compareConv.cuda()
     def set_layers(self):
         """properly handle layer initialization under multiple dataset situation
         """

@@ -23,6 +23,13 @@ splits_dir = os.path.join(os.path.dirname(__file__), "..", "splits")
 
 STEREO_SCALE_FACTOR = 5.4
 
+def get_indwith_isntancelabel(mapping):
+    wins_ind = list()
+    for idx, m in enumerate(mapping):
+        if len(m) > 1:
+            wins_ind.append(idx)
+    return wins_ind
+
 def evaluate(opt):
     """Evaluates a pretrained model using a specified test set
     """
@@ -33,17 +40,19 @@ def evaluate(opt):
 
     print("-> Loading weights from {}".format(opt.load_weights_folder))
 
-    filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
+    filenames = readlines('/home/shengjie/Documents/Project_SemanticDepth/splits/kitti_seman_mapped2depth//train_files.txt')
+
+    mapping = readlines(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/splits', 'training_mapping.txt'))
+    wins_ind = get_indwith_isntancelabel(mapping)
+
+    gt_lidar_root = '/home/shengjie/Documents/Data/Kitti/filtered_lidar'
+
     encoder_path = os.path.join(opt.load_weights_folder, "encoder.pth")
     decoder_path = os.path.join(opt.load_weights_folder, "depth.pth")
 
     encoder_dict = torch.load(encoder_path)
 
-    dataset = datasets.KITTIRAWDataset(opt.data_path, filenames,
-                                       encoder_dict['height'], encoder_dict['width'],
-                                       [0], 4, is_train=False, theta_gt_path=opt.theta_gt_path, load_seman=True)
-    dataloader = DataLoader(dataset, 1, shuffle=False, num_workers=opt.num_workers,
-                            pin_memory=True, drop_last=False)
+    dataset = datasets.KITTIRAWDataset(opt.data_path, filenames, encoder_dict['height'], encoder_dict['width'], [0], 4, is_train=False, theta_gt_path=opt.theta_gt_path, load_seman=True)
 
     encoder = networks.ResnetEncoder(opt.num_layers, False)
     depth_decoder = networks.DepthDecoder(encoder.num_ch_enc, num_output_channels=3)
@@ -57,64 +66,60 @@ def evaluate(opt):
     depth_decoder.cuda()
     depth_decoder.eval()
 
-    gt_path = os.path.join(splits_dir, opt.eval_split, "gt_depths.npz")
-    gt_depths = np.load(gt_path, fix_imports=True, encoding='latin1', allow_pickle=True)["data"]
-
     print("-> Computing predictions with size {}x{}".format(
         encoder_dict['width'], encoder_dict['height']))
 
     predw = encoder_dict['width']
     predh = encoder_dict['height']
-    thetalossmap = torch.zeros([1, 1, predh, predw]).expand([opt.batch_size, -1, -1, -1]).cuda()
-    thetalossmap[:,:,110::,:] = 1
 
 
     import matlab.engine
     eng = matlab.engine.start_matlab()
 
-    localgeomDict = dict()
+    count = np.random.randint(0,len(filenames))
 
+    comps = filenames[count].split(' ')
 
-    for count in range(0,len(filenames)):
-        count = 28
-        comps = filenames[count].split(' ')
-        semidense_path = os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Data/kitti/semidense_gt', comps[0], 'image_02', comps[1].zfill(10)+'.png')
-        if (not os.path.isfile(semidense_path)):
-            continue
-        semidense_depth = pil.open(semidense_path)
-        semidense_depth = np.array(semidense_depth).astype(np.float32) / 256
+    semidense_path = os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Data/kitti/semidense_gt', comps[0], 'image_02', comps[1].zfill(10)+'.png')
+    semidense_depth = pil.open(semidense_path)
+    semidense_depth = np.array(semidense_depth).astype(np.float32) / 256
+    semidense_depth_torch = torch.from_numpy(semidense_depth).unsqueeze(0).unsqueeze(0).cuda()
 
-        data = dataset.__getitem__(count)
-        input_color = data[("color", 0, 0)].unsqueeze(0).cuda()
+    gt_depth_path = os.path.join(gt_lidar_root, comps[0], 'image_02', comps[1].zfill(10) + '.png')
+    gt_depth = pil.open(gt_depth_path)
+    gt_depth = np.array(gt_depth).astype(np.float32) / 256
+    gtheight, gtwidth = gt_depth.shape
 
-        output = depth_decoder(encoder(input_color))
+    instance_semantic_gt = pil.open(os.path.join('/home/shengjie/Documents/Data/Kitti/kitti_semantics/training/instance', str(wins_ind[count]).zfill(6) + '_10.png'))
+    instance_semantic_gt = np.array(instance_semantic_gt).astype(np.uint16)
+    instance_gt = instance_semantic_gt % 256
 
-        htheta = data['htheta'].unsqueeze(0).cuda()
-        vtheta = data['vtheta'].unsqueeze(0).cuda()
-        _, depth = disp_to_depth(output[("disp", 0)][:,2:3,:,:], opt.min_depth, opt.max_depth)
-        depth = depth * STEREO_SCALE_FACTOR
+    gtscale_intrinsic = np.array([
+        [0.58 * gtwidth, 0, 0.5 * gtwidth],
+        [0, 1.92 * gtheight, 0.5 * gtheight],
+        [0, 0, 1]], dtype=np.float32)
+    descriptor = LocalThetaDesp(height=gtheight, width=gtwidth, batch_size=1, intrinsic=gtscale_intrinsic).cuda()
 
-        semantics = torch.from_numpy(data['semanLabel']).unsqueeze(0).float()
+    data = dataset.__getitem__(count)
+    input_color = data[("color", 0, 0)].unsqueeze(0).cuda()
 
-        gt_depth = gt_depths[count]
-        gtheight, gtwidth = gt_depth.shape
+    output = depth_decoder(encoder(input_color))
 
-        acckey = str(gtheight) + '_' + str(gtwidth)
-        if acckey not in localgeomDict:
-            gtscale_intrinsic = np.array([
-                [0.58 * gtwidth, 0, 0.5 * gtwidth],
-                [0, 1.92 * gtheight, 0.5 * gtheight],
-                [0, 0, 1]], dtype=np.float32)
-            gtsize_localGeomDesp = LocalThetaDesp(height=gtheight, width=gtwidth, batch_size=1, intrinsic=gtscale_intrinsic).cuda()
-            localgeomDict[acckey] = gtsize_localGeomDesp
+    htheta = data['htheta'].unsqueeze(0).cuda()
+    vtheta = data['vtheta'].unsqueeze(0).cuda()
+    _, preddepth = disp_to_depth(output[("disp", 0)][:,2:3,:,:], opt.min_depth, opt.max_depth)
+    preddepth = preddepth * STEREO_SCALE_FACTOR
 
-        depth_gtsize = F.interpolate(depth, [gtheight, gtwidth], mode='bilinear', align_corners=True)
-        htheta_gtsize = F.interpolate(htheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
-        vtheta_gtsize = F.interpolate(vtheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
-        input_color_gtsize = F.interpolate(input_color, [gtheight, gtwidth], mode='bilinear', align_corners=True)
-        semantics_gtsize = F.interpolate(semantics, [gtheight, gtwidth], mode='nearest')
+    semantics = torch.from_numpy(data['semanLabel']).unsqueeze(0).float()
 
-        optimizedDepth_torch = localgeomDict[acckey].vls_geompred(depth_gtsize, htheta_gtsize, vtheta_gtsize, input_color_gtsize, gt_depth, eng=eng)
+    preddepth_gtsize = F.interpolate(preddepth, [gtheight, gtwidth], mode='bilinear', align_corners=True)
+    htheta_gtsize = F.interpolate(htheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
+    vtheta_gtsize = F.interpolate(vtheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
+    input_color_gtsize = F.interpolate(input_color, [gtheight, gtwidth], mode='bilinear', align_corners=True)
+    semantics_gtsize = F.interpolate(semantics, [gtheight, gtwidth], mode='nearest')
+
+    # optimizedDepth_torch = descriptor.vls_geompred(preddepth_gtsize, htheta_gtsize, vtheta_gtsize, input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt)
+    optimizedDepth_torch = descriptor.vls_geompred(semidense_depth_torch, htheta_gtsize, vtheta_gtsize, input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt)
 
 
 if __name__ == "__main__":
