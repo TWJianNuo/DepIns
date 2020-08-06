@@ -2489,80 +2489,12 @@ class LocalThetaDesp(nn.Module):
 
         self.C1 = 0.01 ** 2
         self.C2 = 0.03 ** 2
-        # scl_ind = (selfconhInd(torch.ones([self.batch_size, 1, self.height, self.width])) == 2).float() * (selfconvInd(torch.ones([self.batch_size, 1, self.height, self.width])) == 2).float()
-        # self.scl_ind = nn.Parameter(scl_ind, requires_grad = False)
-        # tensor2disp(scl_ind == 0, ind = 0, vmax = 1).show()
 
-        # indh = torch.Tensor(
-        #     [
-        #         [[1, 1, 0, 0, 0]],
-        #         [[1, 0, 1, 0, 0]],
-        #         [[1, 0, 0, 1, 0]],
-        #         [[1, 0, 0, 0, 1]]
-        #     ]
-        # )
-        # indv = torch.Tensor(
-        #     [
-        #         [[1, 1, 0, 0, 0]],
-        #         [[1, 0, 1, 0, 0]],
-        #         [[1, 0, 0, 1, 0]],
-        #         [[1, 0, 0, 0, 1]]
-        #     ]
-        # )
-        # indm = torch.Tensor(
-        #     [
-        #         [[1, 0, 0, 0, 0],
-        #          [0, 1, 0, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #         [[1, 0, 0, 0, 0],
-        #          [0, 0, 1, 0, 0],
-        #          [0, 0, 0, 0, 0]],
-        #         [[1, 0, 0, 0, 0],
-        #          [0, 0, 0, 1, 0],
-        #          [0, 0, 0, 0, 0]],
-        #         [[1, 0, 0, 0, 0],
-        #          [0, 0, 0, 0, 1],
-        #          [0, 0, 0, 0, 0]],
-        #     ]
-        # )
-        # # self.denseih = torch.nn.Conv2d(in_channels=1, out_channels=denseih.shape[0], kernel_size = [5,5], padding=[2,2], bias=False)
-        # # self.denseih.weight = torch.nn.Parameter(denseih.unsqueeze(1).float(), requires_grad=False)
+        # self.construct_nbym_photometricmatch_kernels(patchw = patchw, patchh = patchh)
 
-        # denseh = torch.Tensor(
-        #     [
-        #         [[1, 1, 1, 1, 1]]
-        #     ]
-        # )
-        # self.denseh = torch.nn.Conv2d(in_channels=1, out_channels=denseh.shape[0], kernel_size = [1,5], padding=[0,2], bias=False)
-        # self.denseh.weight = torch.nn.Parameter(denseh.unsqueeze(1).float(), requires_grad=False)
-        # self.denseh = self.denseh.cuda()
-        #
-        # densev = torch.Tensor(
-        #     [
-        #         [[1, 1, 1, 1, 1, 1, 1]]
-        #     ]
-        # ).transpose(1,2)
-        # self.densev = torch.nn.Conv2d(in_channels=1, out_channels=densev.shape[0], kernel_size = [7,1], padding=[3,0], bias=False)
-        # self.densev.weight = torch.nn.Parameter(densev.unsqueeze(1).float(), requires_grad=False)
-        # self.densev = self.densev.cuda()
-        #
-        #
-        # dense = torch.Tensor(
-        #     [
-        #         [[1, 1, 1],
-        #          [1, 1, 1],
-        #          [1, 1, 1]]
-        #     ]
-        # )
-        # self.dense = torch.nn.Conv2d(in_channels=1, out_channels=dense.shape[0], kernel_size = [3,3], padding=[1,1], bias=False)
-        # self.dense.weight = torch.nn.Parameter(dense.unsqueeze(1).float(), requires_grad=False)
-        # self.dense = self.dense.cuda()
 
-        # optimize_width = 3
-        # self.get_optimization_kernel(optimize_width)
-        self.construct_nbym_photometricmatch_kernels(patchw = patchw, patchh = patchh)
-        # self.texture_weight = TextureIndicatorM()
-
+        from inplaceShapeLoss import InplaceShapeLoss
+        self.inplaceSL = InplaceShapeLoss.apply
 
         sobelx = np.array([[-1, 0, 1],
                            [-2, 0, 2],
@@ -2572,17 +2504,9 @@ class LocalThetaDesp(nn.Module):
         self.sobelx.weight = nn.Parameter(torch.from_numpy(sobelx).float().unsqueeze(0).unsqueeze(0), requires_grad = False)
         self.sobelx = self.sobelx.cuda()
 
-        self.eng = None
-
-        # window_sz = 13
-        # nsig = 0.1
-        # op_gaussblur_kernel = gkern(kernlen=window_sz, nsig=nsig)
-        # op_gaussblur_kernel = nn.Parameter(torch.from_numpy(op_gaussblur_kernel).unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
-        # self.op_gaussblur = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=window_sz, padding=int((window_sz-1)/2))
-        # self.op_gaussblur.weight = op_gaussblur_kernel
-
         w = 39
         self.h_pool = nn.AvgPool2d(w, 1, padding=int((w-1)/2))
+
     def translate_path(self, phopath):
         phoind = list()
         phosel = list()
@@ -2655,64 +2579,6 @@ class LocalThetaDesp(nn.Module):
         phowv = torch.stack(phowv, dim = 0)
         phosel = torch.stack(phosel, dim = 0)
         return phoind, phowh, phowv, phosel, phopixelMv
-
-    #
-    # def get_photometricLoss(self, depthmap, htheta, vtheta, rgb, rgbs):
-    #
-    #     depthmapl = torch.log(torch.clamp(depthmap, min = 1e-3))
-    #     inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)
-    #     inboundh = inboundh.float()
-    #     outboundh = 1 - inboundh
-    #
-    #     bk_htheta = self.backconvert_htheta(htheta)
-    #     npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:,:,:,1,0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_h[:,:,:,0,0].unsqueeze(1)
-    #     npts3d_pdiff_downh = torch.cos(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 0, 0].unsqueeze(1)
-    #     ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min = 1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downh), min = 1e-4))
-    #
-    #
-    #     lossh = self.lossh(ratiohl)
-    #     gth = self.gth(depthmapl)
-    #     indh = (self.idh((depthmap > 0).float()) == 2).float() * (self.lossh(outboundh) == 0).float()
-    #     hloss = (torch.sum(torch.abs(gth - lossh) * inboundh * indh) + torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh * indh) / 20) / (torch.sum(indh) + 1)
-    #
-    #     inboundv = (vtheta < self.upperboundv) * (vtheta > self.lowerboundv)
-    #     inboundv = inboundv.float()
-    #     outboundv = 1 - inboundv
-    #
-    #     bk_vtheta = self.backconvert_vtheta(vtheta)
-    #     npts3d_pdiff_upv = torch.cos(bk_vtheta) * self.npts3d_p_v[:,:,:,1,0].unsqueeze(1) - torch.sin(bk_vtheta) * self.npts3d_p_v[:,:,:,0,0].unsqueeze(1)
-    #     npts3d_pdiff_downv = torch.cos(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 0, 0].unsqueeze(1)
-    #     ratiovl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_upv), min = 1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downv), min = 1e-4))
-    #
-    #
-    #     lossv = self.lossv(ratiovl)
-    #     gtv = self.gtv(depthmapl)
-    #     indv = (self.idv((depthmap > 0).float()) == 2).float() * (self.lossv(outboundv) == 0).float()
-    #     vloss = (torch.sum(torch.abs(gtv - lossv) * indv * inboundv) + torch.sum(torch.abs(self.middeltargetv - vtheta) * indv * outboundv) / 20) / (torch.sum(indv) + 1)
-    #
-    #     scl_pixelwise = self.selfconh(ratiohl) + self.selfconv(ratiovl)
-    #     scl_mask = (self.selfconvInd(inboundv) == 2).float() * (self.selfconhInd(inboundh) == 2).float()
-    #     scl = torch.sum(torch.abs(scl_pixelwise) * scl_mask) / (torch.sum(scl_mask) + 1)
-    #
-    #     predDepthl = self.phowh(ratiohl) + self.phowv(ratiovl)
-    #     gtDepthl = self.phoind(depthmapl)
-    #     predDepth = torch.exp(predDepthl + depthmapl)
-    #     depthGt = self.phosel(depthmap)
-    #     import random
-    #     tx = random.randint(0, self.width)
-    #     ty = random.randint(0, self.height)
-    #     # print(predDepthl[0,:,ty,tx])
-    #     # print(gtDepthl[0, :, ty, tx])
-    #
-    #     print(predDepth[0,:,ty,tx])
-    #     print(depthGt[0, :, ty, tx])
-    #
-    #     # print(ratiohl[0, 0, ty, tx])
-    #     # print(torch.log(depthmap[0, 0, ty, tx + 1] / depthmap[0, 0, ty, tx]))
-    #     #
-    #     # print(gtDepthl[0, 0, ty, tx])
-    #     # print(depthmapl[0, 0, ty - 1, tx - 1] - depthmapl[0, 0, ty - 1, tx] - depthmapl[0, 0, ty, tx])
-
 
     def get_loss_ratio(self, depthmap, ratiohl, ratiovl):
         depthmap_shifth = torch.clamp(self.copylConv(depthmap), min = 1e-3)
@@ -5657,26 +5523,29 @@ class LocalThetaDesp(nn.Module):
         # import time
         # np.random.seed(int(time.time()))
         # initind = np.random.randint(0, valface.shape[0] + 1)
-        initind = 929
-        optimize_mask_np = np.zeros([self.height, self.width], dtype=np.bool)
+        # initind = 929
+        # optimize_mask_np = np.zeros([self.height, self.width], dtype=np.bool)
+        optimize_mask_np = np.ones([self.height, self.width], dtype=np.bool)
         fidalMask_np = np.zeros([self.height, self.width], dtype=np.bool)
         horConsMask_np = np.zeros([self.height, self.width], dtype=np.bool)
         verConsMask_np = np.zeros([self.height, self.width], dtype=np.bool)
         tmp_rec = np.zeros([self.height, self.width], dtype=np.int)
+        datavalmask = depthmap[0,0,:,:].detach().cpu().numpy() > 0
         randmtx = np.random.random([self.height, self.width])
-        init_a_halfilled_meshed_triangle(valface, xloc, yloc, self.height, self.width, initind, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, tmp_rec, randmtx)
+        init_arb_mask(self.height, self.width, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, datavalmask)
+        # init_a_halfilled_meshed_triangle(valface, xloc, yloc, self.height, self.width, initind, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, tmp_rec, randmtx)
         # init_a_meshed_triangle(valface, xloc, yloc, self.height, self.width, initind, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, tmp_rec)
         # tensor2disp(torch.from_numpy(optimize_mask_np).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
         # tensor2disp(torch.from_numpy(horConsMask_np).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
         # tensor2disp(torch.from_numpy(verConsMask_np).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
-        tensor2disp(torch.from_numpy(fidalMask_np).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
+        # tensor2disp(torch.from_numpy(fidalMask_np).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
 
-        import matplotlib.tri as tri
-        triang = tri.Triangulation(xloc, yloc, valface[initind:initind+1, :])
-        fig1, ax1 = plt.subplots()
-        ax1.imshow(rgb_fig)
-        ax1.set_aspect('equal')
-        ax1.triplot(triang, 'b-', lw=1)
+        # import matplotlib.tri as tri
+        # triang = tri.Triangulation(xloc, yloc, valface[initind:initind+1, :])
+        # fig1, ax1 = plt.subplots()
+        # ax1.imshow(rgb_fig)
+        # ax1.set_aspect('equal')
+        # ax1.triplot(triang, 'b-', lw=1)
 
         # xmin = 830
         # ymin = 266
@@ -5723,8 +5592,8 @@ class LocalThetaDesp(nn.Module):
         depth_noisy.requires_grad = True
         # tensor2disp(htheta_noisy-1, vmax=4, ind=0).show()
 
-        optimizer = torch.optim.Adam([htheta_noisy] + [vtheta_noisy], lr=1e-3)
-        # optimizer = torch.optim.Adam([depth_noisy], lr=1e-3)
+        optimizer = torch.optim.Adam([htheta_noisy] + [vtheta_noisy], lr=1e-4)
+        # optimizer = torch.optim.Adam([depth_noisy], lr=1e-2)
         errrec = list()
         errhthete_rec = list()
         errvtheta_rec = list()
@@ -6060,6 +5929,48 @@ class LocalThetaDesp(nn.Module):
 
         return 0
 
+    def inplacePath_loss(self, depthmap, htheta, vtheta):
+        srw = 3
+        srh = 3
+        depthmapl = torch.log(torch.clamp(depthmap, min = 1e-3))
+
+        inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)
+        inboundh = inboundh.float()
+        outboundh = 1 - inboundh
+
+        inboundv = (vtheta < self.upperboundv) * (vtheta > self.lowerboundv)
+        inboundv = inboundv.float()
+        outboundv = 1 - inboundv
+
+
+        bk_htheta = self.backconvert_htheta(htheta)
+        npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:,:,:,1,0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_h[:,:,:,0,0].unsqueeze(1)
+        npts3d_pdiff_downh = torch.cos(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_shifted_h[:, :, :, 0, 0].unsqueeze(1)
+        ratiohl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_uph), min = 1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downh), min = 1e-4))
+
+        bk_vtheta = self.backconvert_vtheta(vtheta)
+        npts3d_pdiff_upv = torch.cos(bk_vtheta) * self.npts3d_p_v[:,:,:,1,0].unsqueeze(1) - torch.sin(bk_vtheta) * self.npts3d_p_v[:,:,:,0,0].unsqueeze(1)
+        npts3d_pdiff_downv = torch.cos(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 0, 0].unsqueeze(1)
+        ratiovl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_upv), min = 1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downv), min = 1e-4))
+
+        lossrec = self.inplaceSL(depthmapl, ratiohl, ratiovl, depthmap > 0, srw, srh)
+        valindict = (lossrec > 0).float()
+
+        # tensor2disp(valindict, vmax=1, ind=0).show()
+        # tensor2disp(depthmap > 0, vmax=1, ind=0).show()
+
+        outbl = torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh) / self.height / self.width + \
+                torch.sum(torch.abs(self.middeltargetv - vtheta) * outboundv) / self.height / self.width
+
+        inbl = torch.sum(lossrec) / (torch.sum(valindict) + 1)
+
+        synthesloss = outbl / 10 + inbl
+
+        scl_pixelwise = self.selfconh(ratiohl) + self.selfconv(ratiovl)
+        scl_mask = (self.selfconvInd(inboundv) == 2).float() * (self.selfconhInd(inboundh) == 2).float()
+        scl = torch.sum(torch.abs(scl_pixelwise) * scl_mask) / (torch.sum(scl_mask) + 1)
+
+        return synthesloss, scl
 
 
 '''

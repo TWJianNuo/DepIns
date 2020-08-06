@@ -65,21 +65,3 @@ if __name__ == "__main__":
 
     localGeomDesp.jointConstrainLoss(depth_torch, htheta, vtheta, rgb_torch, eng=eng)
 
-    depth_torch_shfted = torch.zeros_like(depth_torch)
-    depth_torch_shfted = torch.cat([depth_torch[:,:, :, 512::], depth_torch[:,:, :, 0:512]], dim=3).contiguous()
-    htheta_shifted, vtheta_shifted = localGeomDesp.get_theta(depth_torch_shfted)
-
-
-    fig1 = tensor2disp(1 / depth_torch, vmax=0.5, ind=0)
-    fig2 = tensor2disp(1 / depth_torch_shfted, vmax=0.5, ind=0)
-
-    fig3 = tensor2disp(htheta - 1, vmax=4, ind=0)
-    fig4 = tensor2disp(htheta_shifted - 1, vmax=4, ind=0)
-
-    figleft = np.concatenate([np.array(fig1), np.array(fig2)], axis=1)
-    figright = np.concatenate([np.array(fig3), np.array(fig4)], axis=1)
-
-    figcombined = np.concatenate([figleft, figright], axis=0)
-    pil.fromarray(figcombined).save('/home/shengjie/Desktop/tmpvls/vls.png')
-
-
