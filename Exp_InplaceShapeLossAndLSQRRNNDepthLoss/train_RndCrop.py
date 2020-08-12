@@ -341,26 +341,10 @@ class Trainer:
         outputs = dict()
         losses = dict()
 
-        for m in range(20000):
-            outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
-
-            # Theta Branch
-            ltheta, sclLoss = self.theta_compute_losses(inputs, outputs)
-
-            loss = ltheta + sclLoss
-
-            self.model_optimizer.zero_grad()
-            loss.backward()
-            self.model_optimizer.step()
-
-            print("Iteration: %d, Loss: %f" % (m, loss.detach().cpu().numpy()))
-
-        tensor2disp(outputs['htheta_pred'] - 1, vmax=4, ind=0).show()
-        tensor2disp(outputs['vtheta_pred'] - 1, vmax=4, ind=0).show()
-        tensor2rgb(inputs[('color', 0, -1)], ind=0).show()
+        outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
 
         # Theta Branch
-        # losses.update(self.theta_compute_losses(inputs, outputs))
+        losses.update(self.theta_compute_losses(inputs, outputs))
 
         # Depth Branch
         # self.generate_images_pred(inputs, outputs)
@@ -395,7 +379,7 @@ class Trainer:
         return losses
 
     def theta_compute_losses(self, inputs, outputs):
-        # losses = dict()
+        losses = dict()
         ltheta = 0
         sclLoss = 0
         for i in range(len(self.opt.scales)):
@@ -417,9 +401,10 @@ class Trainer:
         ltheta = ltheta / 4
         sclLoss = sclLoss / 4
 
-        # losses['ltheta'] = ltheta
-        # losses['sclLoss'] = sclLoss
-        return ltheta, sclLoss
+        losses['ltheta'] = ltheta
+        losses['sclLoss'] = sclLoss
+
+        return losses
 
     def val(self):
         """Validate the model on a single minibatch

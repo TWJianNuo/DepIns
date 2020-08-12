@@ -5931,7 +5931,9 @@ class LocalThetaDesp(nn.Module):
 
     def inplacePath_loss(self, depthmap, htheta, vtheta):
         srw = 5
-        srh = 5
+        srh = 15
+        srwh = 5
+
         depthmapl = torch.log(torch.clamp(depthmap, min = 1e-3))
 
         inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)
@@ -5956,16 +5958,27 @@ class LocalThetaDesp(nn.Module):
         lossrech = self.inplaceSL(depthmapl, ratiohl, ratiovl, depthmap > 0, srw, 0)
         lossrechi = (lossrech > 0).float() * inboundh
 
+        # tensor2disp(lossrech > 0, ind=0, vmax=1).show()
+        # tensor2disp(depthmap > 0, ind=0, vmax=1).show()
+
         lossrecv = self.inplaceSL(depthmapl, ratiohl, ratiovl, depthmap > 0, 0, srh)
         lossrecvi = (lossrecv > 0).float() * inboundv
 
-        # tensor2disp(valindict, vmax=1, ind=0).show()
-        # tensor2disp(depthmap > 0, vmax=1, ind=0).show()
+        # tensor2disp(lossrecv > 0, ind=0, vmax=1).show()
+        # tensor2disp(depthmap > 0, ind=0, vmax=1).show()
+
+        lossrecvh = self.inplaceSL(depthmapl, ratiohl, ratiovl, depthmap > 0, srwh, srwh)
+        lossrecvhi = (lossrecvh > 0).float() * inboundv * inboundh
+
+        # tensor2disp(lossrecvh > 0, ind=0, vmax=1).show()
+        # tensor2disp(depthmap > 0, ind=0, vmax=1).show()
 
         outbl = torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh) / self.height / self.width + \
                 torch.sum(torch.abs(self.middeltargetv - vtheta) * outboundv) / self.height / self.width
 
-        inbl = (torch.sum(lossrech * lossrechi) / (torch.sum(lossrechi) + 1) + torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1) / 10) / 2
+        inbl = (torch.sum(lossrech * lossrechi) / (torch.sum(lossrechi) + 1) +
+                torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1) / 10 +
+                torch.sum(lossrecvh * lossrecvhi) / (torch.sum(lossrecvhi) + 1) / 10) / 3
         # inbl = torch.sum(lossrech * lossrechi) / (torch.sum(lossrechi) + 1)
         # inbl = torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1)
 
