@@ -341,14 +341,30 @@ class Trainer:
         outputs = dict()
         losses = dict()
 
-        outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
+        for m in range(20000):
+            outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
+
+            # Theta Branch
+            ltheta, sclLoss = self.theta_compute_losses(inputs, outputs)
+
+            loss = ltheta + sclLoss
+
+            self.model_optimizer.zero_grad()
+            loss.backward()
+            self.model_optimizer.step()
+
+            print("Iteration: %d, Loss: %f" % (m, loss.detach().cpu().numpy()))
+
+        tensor2disp(outputs['htheta_pred'] - 1, vmax=4, ind=0).show()
+        tensor2disp(outputs['vtheta_pred'] - 1, vmax=4, ind=0).show()
+        tensor2rgb(inputs[('color', 0, -1)], ind=0).show()
+
+        # Theta Branch
+        # losses.update(self.theta_compute_losses(inputs, outputs))
 
         # Depth Branch
         # self.generate_images_pred(inputs, outputs)
         # losses.update(self.depth_compute_losses(inputs, outputs))
-
-        # Theta Branch
-        losses.update(self.theta_compute_losses(inputs, outputs))
 
         # Constrain Branch
         # losses.update(self.constrain_compute_losses(inputs, outputs))
@@ -374,15 +390,12 @@ class Trainer:
         for i in range(len(self.opt.scales)):
             scaledDepth = F.interpolate(outputs[('depth', 0, i)] * self.STEREO_SCALE_FACTOR, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
             l1constrain = l1constrain + self.localthetadespKitti_scaled.depth_localgeom_consistency(scaledDepth, htheta_pred_detached, vtheta_pred_detached, mask=self.thetalossmap)
-            # l1constrain = l1constrain + torch.sum((torch.abs(hthetai - htheta_pred_detached) + torch.abs(vthetai - vtheta_pred_detached)) * self.thetalossmap) / torch.sum(self.thetalossmap)
         l1constrain = l1constrain / len(self.opt.scales)
         losses['l1constrain'] = l1constrain
         return losses
 
     def theta_compute_losses(self, inputs, outputs):
-
-
-        losses = dict()
+        # losses = dict()
         ltheta = 0
         sclLoss = 0
         for i in range(len(self.opt.scales)):
@@ -392,21 +405,21 @@ class Trainer:
             htheta_pred = pred_theta[:, 0:1, :, :]
             vtheta_pred = pred_theta[:, 1:2, :, :]
 
-            synthesloss, scl = self.localthetadespKitti.inplacePath_loss(depthmap=inputs['depthgt'], htheta=htheta_pred, vtheta=vtheta_pred)
+            inbl, outbl, scl = self.localthetadespKitti.inplacePath_loss(depthmap=inputs['depthgt'], htheta=htheta_pred, vtheta=vtheta_pred)
 
             if i == 0:
                 outputs['htheta_pred'] = outputs[('disp', i)][:, 0:1, :, :] * float(np.pi) * 2
                 outputs['vtheta_pred'] = outputs[('disp', i)][:, 1:2, :, :] * float(np.pi) * 2
 
-            ltheta = ltheta + synthesloss
+            ltheta = ltheta + inbl + outbl / 10
             sclLoss = sclLoss + scl
 
         ltheta = ltheta / 4
         sclLoss = sclLoss / 4
 
-        losses['ltheta'] = ltheta
-        losses['sclLoss'] = sclLoss
-        return losses
+        # losses['ltheta'] = ltheta
+        # losses['sclLoss'] = sclLoss
+        return ltheta, sclLoss
 
     def val(self):
         """Validate the model on a single minibatch
@@ -512,8 +525,6 @@ class Trainer:
         outputs['selfOccMask'] = self.selfOccluMask(outputs[('real_scale_disp', source_scale)], inputs['stereo_T'][:, 0, 3])
 
 
-        # tensor2disp(outputs['ssimMask'], ind = 0, vmax = 1).show()
-        # tensor2rgb(target, ind = 0).show()
         pholoss = 0
         l1loss = 0
         selector_depth = (inputs['depth_gt'] > 0).float()

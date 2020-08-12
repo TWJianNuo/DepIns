@@ -5930,8 +5930,8 @@ class LocalThetaDesp(nn.Module):
         return 0
 
     def inplacePath_loss(self, depthmap, htheta, vtheta):
-        srw = 3
-        srh = 3
+        srw = 5
+        srh = 5
         depthmapl = torch.log(torch.clamp(depthmap, min = 1e-3))
 
         inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)
@@ -5953,8 +5953,11 @@ class LocalThetaDesp(nn.Module):
         npts3d_pdiff_downv = torch.cos(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 1, 0].unsqueeze(1) - torch.sin(bk_vtheta) * self.npts3d_p_shifted_v[:, :, :, 0, 0].unsqueeze(1)
         ratiovl = torch.log(torch.clamp(torch.abs(npts3d_pdiff_upv), min = 1e-4)) - torch.log(torch.clamp(torch.abs(npts3d_pdiff_downv), min = 1e-4))
 
-        lossrec = self.inplaceSL(depthmapl, ratiohl, ratiovl, depthmap > 0, srw, srh)
-        valindict = (lossrec > 0).float()
+        lossrech = self.inplaceSL(depthmapl, ratiohl, ratiovl, depthmap > 0, srw, 0)
+        lossrechi = (lossrech > 0).float() * inboundh
+
+        lossrecv = self.inplaceSL(depthmapl, ratiohl, ratiovl, depthmap > 0, 0, srh)
+        lossrecvi = (lossrecv > 0).float() * inboundv
 
         # tensor2disp(valindict, vmax=1, ind=0).show()
         # tensor2disp(depthmap > 0, vmax=1, ind=0).show()
@@ -5962,15 +5965,17 @@ class LocalThetaDesp(nn.Module):
         outbl = torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh) / self.height / self.width + \
                 torch.sum(torch.abs(self.middeltargetv - vtheta) * outboundv) / self.height / self.width
 
-        inbl = torch.sum(lossrec) / (torch.sum(valindict) + 1)
+        inbl = (torch.sum(lossrech * lossrechi) / (torch.sum(lossrechi) + 1) + torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1) / 10) / 2
+        # inbl = torch.sum(lossrech * lossrechi) / (torch.sum(lossrechi) + 1)
+        # inbl = torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1)
 
-        synthesloss = outbl / 10 + inbl
+        # synthesloss = outbl / 10 + inbl
 
         scl_pixelwise = self.selfconh(ratiohl) + self.selfconv(ratiovl)
         scl_mask = (self.selfconvInd(inboundv) == 2).float() * (self.selfconhInd(inboundh) == 2).float()
         scl = torch.sum(torch.abs(scl_pixelwise) * scl_mask) / (torch.sum(scl_mask) + 1)
 
-        return synthesloss, scl
+        return inbl, outbl, scl
 
 
 '''

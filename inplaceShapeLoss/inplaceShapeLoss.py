@@ -46,7 +46,7 @@ class InplaceShapeLoss(torch.autograd.Function):
         torch.sum(3 / countsrec[ckc, 0, ckh, ckw:ckw+2])
 
         # Compute Numerical Gradient, horizontal
-        dev = 1e-2
+        dev = 5
 
         lossrec1 = torch.zeros_like(logdepth)
         countsrec = torch.zeros_like(logdepth)
@@ -167,18 +167,23 @@ if __name__ == "__main__":
     vtheta_act_noisy = torch.zeros_like(vtheta, requires_grad=True)
 
     inplaceSL = InplaceShapeLoss.apply
-    optimizer = torch.optim.Adam([htheta_act_noisy, vtheta_act_noisy], lr=1e-1)
-    for k in range(2000):
+    optimizer = torch.optim.Adam([htheta_act_noisy, vtheta_act_noisy], lr=1e-2)
+    for k in range(1500):
         htheta_noisy = torch.sigmoid(htheta_act_noisy) * 2 * np.pi
         vtheta_noisy = torch.sigmoid(vtheta_act_noisy) * 2 * np.pi
-        _, ratiohl_noisy, _, ratiovl_noisy = localGeomDesp.get_ratio(htheta_noisy, vtheta_noisy)
-        lossrec = inplaceSL(torch.log(depth_torchs), ratiohl_noisy, ratiovl_noisy, depth_torchs > 0, 1, 1)
-        loss = torch.mean(lossrec)
+
+        inbl, outbl, scl = localGeomDesp.inplacePath_loss(depth_torchs, htheta_noisy, vtheta_noisy)
+        loss = inbl + outbl / 10 + scl
+
+        # _, ratiohl_noisy, _, ratiovl_noisy = localGeomDesp.get_ratio(htheta_noisy, vtheta_noisy)
+        # lossrec = inplaceSL(torch.log(depth_torchs), ratiohl_noisy, ratiovl_noisy, depth_torchs > 0, 1, 1)
+        # loss = torch.mean(lossrec)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        print("It:%d, loss:%f" %(k, loss.detach().cpu().numpy()))
+        print("It:%d, inbound loss:%f, outbound loss: %f" %(k, inbl.detach().cpu().numpy(), outbl.detach().cpu().numpy()))
 
-    tensor2disp(htheta_noisy-1, vmax=4, ind=0).show()
+    tensor2disp(htheta_noisy - 1, vmax=4, ind=0).show()
+    tensor2disp(vtheta_noisy - 1, vmax=4, ind=0).show()
 

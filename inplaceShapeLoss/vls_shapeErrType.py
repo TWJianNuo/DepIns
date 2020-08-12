@@ -44,6 +44,8 @@ def evaluate(opt):
 
     print("-> Computing predictions with size {}x{}".format(encoder_dict['width'], encoder_dict['height']))
 
+    totloss = 0
+
     with torch.no_grad():
         for count in range(len(filenames)):
             data = dataset.__getitem__(count)
@@ -77,39 +79,51 @@ def evaluate(opt):
             hthetai = F.interpolate(htheta, [ch, cw], mode='bilinear', align_corners=True)
             vthetai = F.interpolate(vtheta, [ch, cw], mode='bilinear', align_corners=True)
             preddepthi = F.interpolate(preddepth, [ch, cw], mode='bilinear', align_corners=True)
+
+            # hthetai, vthetai = localgeomDict[acckey].get_theta(preddepthi)
+
             ratioh, ratiohl, ratiov, ratiovl = localgeomDict[acckey].get_ratio(htheta=hthetai, vtheta=vthetai)
+
+            # ratiohl = torch.zeros_like(ratiohl)
+            # ratiovl = torch.zeros_like(ratiovl)
+
+
             logdepthd = torch.log(depthgt)
             valindic = depthgt > 0
             lossrec = torch.zeros_like(logdepthd)
-            inplaceShapeLoss_cuda.inplaceShapeLoss_integration(logdepthd, ratiohl, ratiovl, valindic.int(), lossrec, 1, 1)
+            countsrec = torch.zeros_like(logdepthd)
+            rndseeds = torch.rand_like(logdepthd)
+            inplaceShapeLoss_cuda.inplaceShapeLoss_forward(logdepthd, ratiohl, ratiovl, valindic.int(), lossrec, countsrec, rndseeds, 30, 30)
 
-            cm = plt.get_cmap('bwr')
-            xx, yy = np.meshgrid(range(cw), range(ch), indexing='xy')
-            lossrecnp = lossrec[0, 0, :, :].cpu().numpy()
-            valmask = np.abs(lossrecnp) > 0
-            z = lossrecnp[valmask]
+            totloss = totloss + torch.sum(lossrec[lossrec > 0]) / torch.sum(lossrec > 0)
 
-            selector_pos = z > 0
-            selector_neg = z < 0
-
-            bar = 0.005
-
-            if np.sum(selector_pos) > 1:
-                pos_bar = bar
-                z[selector_pos] = z[selector_pos] / pos_bar / 2
-
-            if np.sum(selector_neg) > 1:
-                neg_bar = -bar
-                z[selector_neg] = -z[selector_neg] / neg_bar / 2
-
-            znormed = z + 0.5
-            colorMap = cm(znormed)[:, 0:3]
-
-            plt.figure(figsize=(12, 9), dpi=120, facecolor='w', edgecolor='k')
-            plt.imshow(tensor2rgb(rgbi, ind=0))
-            plt.scatter(xx[valmask], yy[valmask], c=colorMap, s=8)
-            plt.savefig(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_shapeErrType', str(count) + '.png'))
-            plt.close()
+            # cm = plt.get_cmap('bwr')
+            # xx, yy = np.meshgrid(range(cw), range(ch), indexing='xy')
+            # lossrecnp = lossrec[0, 0, :, :].cpu().numpy()
+            # valmask = np.abs(lossrecnp) > 0
+            # z = lossrecnp[valmask]
+            #
+            # selector_pos = z > 0
+            # selector_neg = z < 0
+            #
+            # bar = 0.005
+            #
+            # if np.sum(selector_pos) > 1:
+            #     pos_bar = bar
+            #     z[selector_pos] = z[selector_pos] / pos_bar / 2
+            #
+            # if np.sum(selector_neg) > 1:
+            #     neg_bar = -bar
+            #     z[selector_neg] = -z[selector_neg] / neg_bar / 2
+            #
+            # znormed = z + 0.5
+            # colorMap = cm(znormed)[:, 0:3]
+            #
+            # plt.figure(figsize=(12, 9), dpi=120, facecolor='w', edgecolor='k')
+            # plt.imshow(tensor2rgb(rgbi, ind=0))
+            # plt.scatter(xx[valmask], yy[valmask], c=colorMap, s=8)
+            # plt.savefig(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_shapeErrType', str(count) + '.png'))
+            # plt.close()
 
             # hthetad, vthetad = localgeomDict[acckey].get_theta(depthmap=preddepthi)
             # ratiohd, ratiohld, ratiovd, ratiovld = localgeomDict[acckey].get_ratio(htheta=hthetad, vtheta=vthetad)
@@ -118,7 +132,8 @@ def evaluate(opt):
             # lossrec = torch.zeros_like(logdepthd)
             # inplaceShapeLoss_cuda.inplaceShapeLoss_integration(logdepthd, ratiohld, ratiovld, valindic.int(), lossrec, 1, 1)
 
-
+    totloss = totloss / len(filenames)
+    print(totloss)
 
 if __name__ == "__main__":
     options = MonodepthOptions()
