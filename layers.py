@@ -5929,7 +5929,7 @@ class LocalThetaDesp(nn.Module):
 
         return 0
 
-    def inplacePath_loss(self, depthmap, htheta, vtheta):
+    def inplacePath_loss(self, depthmap, htheta, vtheta, balancew = 10):
         srw = 5
         srh = 15
         srwh = 5
@@ -5977,8 +5977,8 @@ class LocalThetaDesp(nn.Module):
                 torch.sum(torch.abs(self.middeltargetv - vtheta) * outboundv) / self.height / self.width
 
         inbl = (torch.sum(lossrech * lossrechi) / (torch.sum(lossrechi) + 1) +
-                torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1) / 10 +
-                torch.sum(lossrecvh * lossrecvhi) / (torch.sum(lossrecvhi) + 1) / 10) / 3
+                torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1) / balancew +
+                torch.sum(lossrecvh * lossrecvhi) / (torch.sum(lossrecvhi) + 1) / balancew) / 3
         # inbl = torch.sum(lossrech * lossrechi) / (torch.sum(lossrechi) + 1)
         # inbl = torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1)
 

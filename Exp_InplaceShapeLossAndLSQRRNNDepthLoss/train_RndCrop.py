@@ -389,7 +389,7 @@ class Trainer:
             htheta_pred = pred_theta[:, 0:1, :, :]
             vtheta_pred = pred_theta[:, 1:2, :, :]
 
-            inbl, outbl, scl = self.localthetadespKitti.inplacePath_loss(depthmap=inputs['depthgt'], htheta=htheta_pred, vtheta=vtheta_pred)
+            inbl, outbl, scl = self.localthetadespKitti.inplacePath_loss(depthmap=inputs['depthgt'], htheta=htheta_pred, vtheta=vtheta_pred, balancew = self.opt.balancew)
 
             if i == 0:
                 outputs['htheta_pred'] = outputs[('disp', i)][:, 0:1, :, :] * float(np.pi) * 2

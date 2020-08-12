@@ -169,6 +169,11 @@ class MonodepthOptions:
         self.parser.add_argument("--weightD",
                                  type=float)
 
+        self.parser.add_argument("--balancew",
+                                 type=float,
+                                 default=10)
+
+
         # OPTIMIZATION options
         self.parser.add_argument("--batch_size",
                                  type=int,
