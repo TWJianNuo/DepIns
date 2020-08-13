@@ -1,8 +1,10 @@
 from __future__ import absolute_import, division, print_function
+
 import os,sys,inspect
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0,parentdir)
+
 from options import MonodepthOptions
 import warnings
 
@@ -26,13 +28,12 @@ import networks
 import time
 import json
 
+
 warnings.filterwarnings("ignore")
 options = MonodepthOptions()
 opts = options.parse()
 
-# torch.manual_seed(0)
-# torch.backends.cudnn.deterministic = False
-# torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.benchmark = True
 
 def compute_errors(gt, pred):
     """Computation of error metrics between predicted and ground truth depths
@@ -96,9 +97,9 @@ class Trainer:
         self.writers = {}
         for mode in ["train", "val"]:
             self.writers[mode] = SummaryWriter(os.path.join(self.log_path, mode))
-        if not self.opt.no_ssim:
-            self.ssim = SSIM()
-            self.ssim.to(self.device)
+
+        self.ssim = SSIM()
+        self.ssim.to(self.device)
 
         self.set_layers()
         self.depth_metric_names = [
@@ -111,25 +112,6 @@ class Trainer:
         if self.opt.load_weights_folder is not None:
             self.load_model()
         self.save_opts()
-
-        self.prsil_cw = 32 * 10
-        self.prsil_ch = 32 * 8
-        self.prsil_w = 1024
-        self.prsil_h = 448
-
-        # Define Shrink Conv
-        weights = torch.tensor([[1., 1., 1.],
-                                [1., 1., 1.],
-                                [1., 1., 1.]])
-        weights = weights.view(1, 1, 3, 3)
-        self.shrinkbar = 8
-        self.shrinkConv = nn.Conv2d(1, 1, 3, bias=False, padding=1)
-        self.shrinkConv.weight = nn.Parameter(weights, requires_grad=False)
-        self.shrinkConv = self.shrinkConv.cuda()
-
-        # self.bp3d = BackProj3D(height=self.prsil_ch, width=self.prsil_cw, batch_size=self.opt.batch_size).cuda()
-        self.bp3d = BackProj3D(height=self.prsil_h, width=self.prsil_w, batch_size=self.opt.batch_size).cuda()
-
 
         self.unitFK = 0.58
         self.kittiw = 1242
@@ -149,17 +131,6 @@ class Trainer:
 
         self.thetalossmap = torch.zeros([1, 1, self.opt.height, self.opt.width]).expand([self.opt.batch_size, -1, -1, -1]).cuda()
         self.thetalossmap[:,:,110::,:] = 1
-
-
-        self.prsil_w = 1024
-        self.prsil_h = 448
-        intrinsic = np.array([
-            [512., 0., 512.],
-            [0., 512., 160.],
-            [0., 0., 1.]]
-        )
-        self.presil_localthetadesp = LocalThetaDesp(height=self.prsil_h, width=self.prsil_w, batch_size=self.opt.batch_size, intrinsic=intrinsic).cuda()
-
 
         self.MIN_DEPTH = 1e-3
         self.MAX_DEPTH = 80
@@ -183,20 +154,6 @@ class Trainer:
 
             self.project_3d[scale] = Project3D(self.opt.batch_size, h, w)
             self.project_3d[scale].to(self.device)
-
-        if self.opt.bnMorphLoss:
-            from bnmorph.bnmorph import BNMorph
-            self.tool = grad_computation_tools(batch_size=self.opt.batch_size, height=self.opt.height,
-                                               width=self.opt.width).cuda()
-
-            self.bnmorph = BNMorph(height=self.opt.height, width=self.opt.width, senseRange=20).cuda()
-            self.foregroundType = [5, 6, 7, 11, 12, 13, 14, 15, 16, 17,
-                                   18]  # pole, traffic light, traffic sign, person, rider, car, truck, bus, train, motorcycle, bicycle
-            self.textureMeasure = TextureIndicatorM().cuda()
-
-        if self.opt.Dloss:
-            from eppl_render.eppl_render import EpplRender
-            self.epplrender = EpplRender(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size, sampleNum=self.opt.eppsm).cuda()
 
     def set_dataset(self):
         """properly handle multiple dataset situation
@@ -286,7 +243,6 @@ class Trainer:
                 self.val()
 
             self.step += 1
-            # print(self.step)
 
     def process_batch(self, inputs, isval = False):
         """Pass a minibatch through the network and generate images and losses
@@ -310,6 +266,7 @@ class Trainer:
         losses['totLoss'] = losses['l1loss'] * self.opt.l1lossScale + \
                             losses['pholoss'] * self.opt.pholossScale + \
                             losses['l1constrain'] * self.opt.l1constrainScale
+
         return outputs, losses
 
     def constrain_compute_losses(self, inputs, outputs):
@@ -320,12 +277,14 @@ class Trainer:
 
         for i in range(len(self.opt.scales)):
             scaledDepth = F.interpolate(outputs[('depth', 0, i)] * self.STEREO_SCALE_FACTOR, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            curconstrain, derivx, num_grad, optimize_mask = self.localthetadespKitti_scaled.depth_localgeom_consistency(scaledDepth, htheta_pred_detached, vtheta_pred_detached, isoutput_grads=True)
+            curconstrain, derivx, num_grad, rgb_gradw = self.localthetadespKitti_scaled.depth_localgeom_consistency(scaledDepth, htheta_pred_detached, vtheta_pred_detached, rgb=inputs[('color', 0, 0)], isdebias=self.opt.isdebias)
             l1constrain = l1constrain + curconstrain
+
             if i == 0:
                 outputs['derivx'] = derivx
                 outputs['num_grad'] = num_grad
-                outputs['optimize_mask'] = optimize_mask
+                outputs['gradweights'] = rgb_gradw
+
         l1constrain = l1constrain / len(self.opt.scales)
         losses['l1constrain'] = l1constrain
         return losses
@@ -353,6 +312,7 @@ class Trainer:
         losses['ltheta'] = ltheta
         losses['sclLoss'] = sclLoss
         return losses
+
     def val(self):
         """Validate the model on a single minibatch
         """
@@ -456,9 +416,6 @@ class Trainer:
         target = inputs[("color", 0, source_scale)]
         outputs['selfOccMask'] = self.selfOccluMask(outputs[('real_scale_disp', source_scale)], inputs['stereo_T'][:, 0, 3])
 
-
-        # tensor2disp(outputs['ssimMask'], ind = 0, vmax = 1).show()
-        # tensor2rgb(target, ind = 0).show()
         pholoss = 0
         l1loss = 0
         selector_depth = (inputs['depth_gt'] > 0).float()
@@ -542,7 +499,6 @@ class Trainer:
         figrgb = tensor2rgb(inputs[('color', 0, 0)], ind=vind)
 
         figdisp = tensor2disp(outputs[('disp', 0)][:,2:3,:,:], vmax=0.1, ind=0)
-        # tensor2disp(outputs[('disp', 0)], vmax=1, ind=0).show()
         _, predDepth = disp_to_depth(outputs[('disp', 0)][:,2:3,:,:], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
         predDepth = predDepth * self.STEREO_SCALE_FACTOR
         predDepth = F.interpolate(predDepth, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
@@ -552,9 +508,9 @@ class Trainer:
         figcombined = np.concatenate([np.array(figrgb), np.array(figdisp), np.array(fighpred_fromD), np.array(figvpred_fromD)], axis=0)
         self.writers['train'].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
 
-        fig_thetagrad = tensor2disp(torch.abs(outputs['derivx']), vmax=0.1, ind=0)
-        fig_depthgrad = tensor2disp(torch.abs(outputs['num_grad']), vmax=0.1, ind=0)
-        fig_mask = tensor2disp(outputs['optimize_mask'], vmax=1, ind=0)
+        fig_thetagrad = tensor2grad(outputs['derivx'], percentile=80, viewind=0)
+        fig_depthgrad = tensor2grad(outputs['num_grad'], percentile=80, viewind=0)
+        fig_mask = tensor2disp(outputs['gradweights'], vmax=1, ind=0)
         fig_grad = np.concatenate([np.array(figrgb), np.array(fig_thetagrad), np.array(fig_depthgrad), np.array(fig_mask)], axis=0)
         self.writers['train'].add_image('fig_grad', (torch.from_numpy(fig_grad).float() / 255).permute([2, 0, 1]), self.step)
 
@@ -568,7 +524,7 @@ class Trainer:
         color_recon = tensor2rgb(outputs[('color', 's', 0)], ind=vind)
         combined2 = np.concatenate([figrgb2, figrgb_stereo, color_recon, occmask])
         self.writers['train'].add_image('rgb', (torch.from_numpy(combined2).float() / 255).permute([2, 0, 1]), self.step)
-        # pil.fromarray(combined2).show()
+
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
         """

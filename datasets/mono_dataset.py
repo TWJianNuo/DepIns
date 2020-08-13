@@ -160,15 +160,17 @@ class MonoDataset(data.Dataset):
             frame = inputs[k]
             if "color" in k:
                 n, im, i = k
-                for i in range(self.num_scales):
-                    inputs[(n, im, i)] = self.resize[i](inputs[(n, im, i - 1)])
+                inputs[(n, im, 0)] = self.resize[0](inputs[(n, im, -1)])
+                # for i in range(self.num_scales):
+                #     inputs[(n, im, i)] = self.resize[i](inputs[(n, im, i - 1)])
 
         for k in list(inputs):
             f = inputs[k]
             if "color" in k:
                 n, im, i = k
-                inputs[(n, im, i)] = self.to_tensor(f)
-                inputs[(n + "_aug", im, i)] = self.to_tensor(color_aug(f))
+                if i >= 0:
+                    inputs[(n, im, i)] = self.to_tensor(f)
+                    inputs[(n + "_aug", im, i)] = self.to_tensor(color_aug(f))
 
     def __len__(self):
         return len(self.filenames)
@@ -245,65 +247,28 @@ class MonoDataset(data.Dataset):
 
         self.preprocess(inputs, color_aug)
 
-        # Read Detection Label
-        imorgSize = inputs[("color", 0, -1)].shape[1:3]
-        if self.load_detect:
-            inputs["detect_label"] = self.get_detection(folder, frame_index, side, do_flip, imorgSize)
+        for i in self.frame_idxs:
+            del inputs[("color", i, -1)]
+            # inputs[("color_aug", i, -1)] = F.interpolate(inputs[("color_aug", i, -1)].unsqueeze(0), [self.full_res_shape[1], self.full_res_shape[0]], mode = 'bilinear', align_corners=True).squeeze(0)
+            # inputs[("color", i, -1)] = F.interpolate(inputs[("color", i, -1)].unsqueeze(0), [self.full_res_shape[1], self.full_res_shape[0]], mode = 'bilinear', align_corners=True).squeeze(0)
 
-            # detect_label = inputs["detect_label"][inputs["detect_label"][:,0] > 0]
-            # if(len(detect_label) > 0):
-            #     # Create figure and axes
-            #     fig, ax = plt.subplots(1)
-            #
-            #     # Display the image
-            #     im = tensor2rgb(inputs[("color", 0, 0)].unsqueeze(0), ind=0)
-            #     ax.imshow(im)
-            #
-            #     for k in range(len(inputs["detect_label"])):
-            #         # Read Label
-            #         sx = inputs["detect_label"][k][0]
-            #         sy = inputs["detect_label"][k][1]
-            #         rw = inputs["detect_label"][k][2] - sx
-            #         rh = inputs["detect_label"][k][3] - sy
-            #
-            #         # Create a Rectangle patch
-            #         rect = patches.Rectangle((sx, sy), rw, rh, linewidth=1, edgecolor='r', facecolor='none')
-            #
-            #         # Add the patch to the Axes
-            #         ax.add_patch(rect)
-            #     fig.savefig(os.path.join('/home/shengjie/Documents/Depins/tmp', str(index).zfill(10) + '.png'))  # save the figure to file
-            #     plt.close(fig)
+        # Read Detection Label
+        if self.load_detect:
+            inputs["detect_label"] = self.get_detection(folder, frame_index, side, do_flip, inputs[("color", 0, -1)].shape[1:3])
 
         # Read The Entry tag
         comps = self.filenames[index].split(' ')
-        inputs['entry_tag'] = str(comps[0] + ' ' + comps[1].zfill(10) + ' ' + comps[2])
+        inputs['entry_tag'] = str(comps[0] + ' ' + comps[1].zfill(10) + ' ' + comps[2] + ' ' + str(index))
         if do_flip:
             inputs['entry_tag'] = inputs['entry_tag'] + ' fly'
         else:
             inputs['entry_tag'] = inputs['entry_tag'] + ' fln'
 
-        for i in self.frame_idxs:
-            inputs[("color", i, -1)] = F.interpolate(inputs[("color", i, -1)].unsqueeze(0), [self.full_res_shape[1], self.full_res_shape[0]], mode = 'bilinear', align_corners=True).squeeze(0)
-            inputs[("color_aug", i, -1)] = F.interpolate(inputs[("color_aug", i, -1)].unsqueeze(0), [self.full_res_shape[1], self.full_res_shape[0]], mode = 'bilinear', align_corners=True).squeeze(0)
-            # del inputs[("color", i, -1)]
-            # del inputs[("color_aug", i, -1)]
-
         if self.load_depth:
             if self.kitti_gt_path is None:
                 depth_gt = self.get_depth(folder, frame_index, side, do_flip)
             else:
-                try:
-                    depth_gt = self.get_depth_fromfile(folder, frame_index, side, do_flip)
-                except:
-                    gtpath = os.path.join(folder, str(frame_index).zfill(10), side)
-                    print("problem entry: %s" % gtpath)
-                    import sys
-                    sys.exit(0)
-            # depth_gt = self.get_depth(folder, frame_index, side, do_flip)
-            # depth_gt_me = self.get_depth_fromfile(folder, frame_index, side, do_flip)
-            # tensor2disp(torch.from_numpy(depth_gt).float().unsqueeze(0).unsqueeze(0), vmax = 30, ind = 0).show()
-            # tensor2disp(torch.from_numpy(depth_gt_me).float().unsqueeze(0).unsqueeze(0), vmax=30, ind=0).show()
-            # tensor2disp(torch.abs(torch.from_numpy(depth_gt_me) - torch.from_numpy(depth_gt).float()).unsqueeze(0).unsqueeze(0), vmax=1, ind = 0).show()
+                depth_gt = self.get_depth_fromfile(folder, frame_index, side, do_flip)
             inputs["depth_gt"] = np.expand_dims(depth_gt, 0)
             inputs["depth_gt"] = torch.from_numpy(inputs["depth_gt"].astype(np.float32))
 
@@ -333,10 +298,8 @@ class MonoDataset(data.Dataset):
             depth_hint, depth_hint_mask = self.get_hints(folder, frame_index, side, do_flip)
             inputs["depth_hint"] = depth_hint
             inputs["depth_hint_mask"] = depth_hint_mask
-        inputs['indicesRec'] = index
 
         if self.PreSIL_root is not None:
-            # pSIL_rgb, pSIL_depth, pSIL_insMask, preSilIn, preSilEx, presil_projLidar = self.get_PreSIL()
             pSIL_rgb, pSIL_depth, pSIL_insMask, preSilIn, preSilEx = self.get_PreSIL()
             inputs["pSIL_rgb"] = pSIL_rgb
             inputs["pSIL_depth"] = pSIL_depth
@@ -346,10 +309,14 @@ class MonoDataset(data.Dataset):
             # inputs["presil_projLidar"] = presil_projLidar
 
         if self.theta_gt_path is not None:
-            inputs.update(self.get_theta_fromfile(folder, frame_index, side, do_flip))
+            try:
+                inputs.update(self.get_theta_fromfile(folder, frame_index, side, do_flip))
+            except:
+                print("folder: %s, frame_index: %s, side: %s, do_flip: %d" % (folder, frame_index, side, do_flip))
 
         if self.surfnorm_gt_path is not None:
             inputs.update(self.get_surfnorm_fromfile(folder, frame_index, side, do_flip))
+
         return inputs
 
     def get_color(self, folder, frame_index, side, do_flip):

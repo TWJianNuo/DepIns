@@ -112,6 +112,27 @@ def export_gt_depths_kitti():
     dataloader = DataLoader(dataset, 16, shuffle=False, num_workers=opt.num_workers, pin_memory=True, drop_last=False)
     with torch.no_grad():
         for data in dataloader:
+
+            allexist = True
+            for i in range(data[('color', 0, 0)].shape[0]):
+                folder, frame_id, direction, _, _ = data['entry_tag'][i].split()
+                direction = direction[0]
+                frame_id = int(frame_id)
+
+                cklist = list()
+                cklist.append(os.path.join(opt.save_dir, folder, 'htheta_flipped', mapping[direction], str(frame_id).zfill(10) + '.png'))
+                cklist.append(os.path.join(opt.save_dir, folder, 'vtheta_flipped', mapping[direction], str(frame_id).zfill(10) + '.png'))
+                cklist.append(os.path.join(opt.save_dir, folder, 'htheta', mapping[direction], str(frame_id).zfill(10) + '.png'))
+                cklist.append(os.path.join(opt.save_dir, folder, 'vtheta', mapping[direction], str(frame_id).zfill(10) + '.png'))
+
+                for cke in cklist:
+                    if not os.path.isfile(cke):
+                        allexist = False
+
+            if allexist:
+                continue
+
+
             outputs = dict()
             outputs_flipped = dict()
             input_color = data[("color", 0, 0)].cuda()
@@ -122,8 +143,11 @@ def export_gt_depths_kitti():
             outputs_flipped.update(depth_decoder(encoder(input_color_flipped)))
 
             for i in range(outputs[('disp', 0)].shape[0]):
-                folder, frame_id, direction, _ = data['entry_tag'][i].split()
+                folder, frame_id, direction, _, _ = data['entry_tag'][i].split()
+                direction = direction[0]
                 frame_id = int(frame_id)
+
+                print("Exporting: Folder: %s, direction: %s, frame_id: %d" % (folder, direction, frame_id))
 
                 output_folder_h = os.path.join(opt.save_dir, folder, 'htheta', mapping[direction])
                 output_folder_v = os.path.join(opt.save_dir, folder, 'vtheta', mapping[direction])

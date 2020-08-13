@@ -392,8 +392,6 @@ class KITTIRAWDataset(KITTIDataset):
         sidemap = {'l' : 2, 'r' : 3}
 
         calib_dir = os.path.join(self.data_path, folder.split("/")[0])
-        velo_filename = os.path.join(self.data_path, folder, "velodyne_points", "data",
-                                     "{:010d}.bin".format(int(frame_index)))
         cam2cam = read_calib_file(os.path.join(calib_dir, 'calib_cam_to_cam.txt'))
         velo2cam = read_calib_file(os.path.join(calib_dir, 'calib_velo_to_cam.txt'))
         velo2cam = np.hstack((velo2cam['R'].reshape(3, 3), velo2cam['T'][..., np.newaxis]))
@@ -417,13 +415,14 @@ class KITTIRAWDataset(KITTIDataset):
         camK = realIn @ realEx
         invcamK = np.linalg.inv(camK)
 
-        velo = self.get_velo(velo_filename)
-
         outputs['camK'] = camK.astype(np.float32)
         outputs['invcamK'] = invcamK.astype(np.float32)
         outputs['realIn'] = realIn.astype(np.float32)
         outputs['realEx'] = realEx.astype(np.float32)
-        outputs['velo'] = velo
+
+        # velo_filename = os.path.join(self.data_path, folder, "velodyne_points", "data", "{:010d}.bin".format(int(frame_index)))
+        # velo = self.get_velo(velo_filename)
+        # outputs['velo'] = velo
 
         return outputs
 

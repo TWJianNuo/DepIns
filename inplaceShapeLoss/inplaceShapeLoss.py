@@ -168,11 +168,11 @@ if __name__ == "__main__":
 
     inplaceSL = InplaceShapeLoss.apply
     optimizer = torch.optim.Adam([htheta_act_noisy, vtheta_act_noisy], lr=1e-2)
-    for k in range(1500):
+    for k in range(30000):
         htheta_noisy = torch.sigmoid(htheta_act_noisy) * 2 * np.pi
         vtheta_noisy = torch.sigmoid(vtheta_act_noisy) * 2 * np.pi
 
-        inbl, outbl, scl = localGeomDesp.inplacePath_loss(depth_torchs, htheta_noisy, vtheta_noisy)
+        inbl, outbl, scl = localGeomDesp.inplacePath_loss(depth_torchs, htheta_noisy, vtheta_noisy, isExcludehw = True)
         loss = inbl + outbl / 10 + scl
 
         # _, ratiohl_noisy, _, ratiovl_noisy = localGeomDesp.get_ratio(htheta_noisy, vtheta_noisy)
@@ -184,6 +184,6 @@ if __name__ == "__main__":
 
         print("It:%d, inbound loss:%f, outbound loss: %f" %(k, inbl.detach().cpu().numpy(), outbl.detach().cpu().numpy()))
 
-    tensor2disp(htheta_noisy - 1, vmax=4, ind=0).show()
-    tensor2disp(vtheta_noisy - 1, vmax=4, ind=0).show()
+    tensor2disp(htheta_noisy - 1, vmax=4, ind=1).show()
+    tensor2disp(vtheta_noisy - 1, vmax=4, ind=1).show()
 

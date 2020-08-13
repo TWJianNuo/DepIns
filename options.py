@@ -174,6 +174,9 @@ class MonodepthOptions:
                                  default=10)
         self.parser.add_argument("--isExcludehw",
                                  action="store_true")
+        self.parser.add_argument("--isdebias",
+                                 action="store_true")
+
 
 
         # OPTIMIZATION options

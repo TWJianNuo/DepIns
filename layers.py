@@ -2504,6 +2504,23 @@ class LocalThetaDesp(nn.Module):
         self.sobelx.weight = nn.Parameter(torch.from_numpy(sobelx).float().unsqueeze(0).unsqueeze(0), requires_grad = False)
         self.sobelx = self.sobelx.cuda()
 
+        rgbgradkx = np.array([[-1, 0, 1],
+                              [-2, 0, 2],
+                              [-1, 0, 1]])
+        rgbgradkx = rgbgradkx / 4 / 2
+        self.rgbgradkx = nn.Conv2d(in_channels=3,out_channels=1,kernel_size=3,stride=1,padding=1,bias=False)
+        self.rgbgradkx.weight = nn.Parameter(torch.from_numpy(rgbgradkx).float().unsqueeze(0).unsqueeze(0).expand([-1, 3, -1, -1]), requires_grad = False)
+        self.rgbgradkx = self.rgbgradkx.cuda()
+
+        rgbgradky = np.array([[-1, -2, -1],
+                              [0, 0, 0],
+                              [1, 2, 1]])
+        rgbgradky = rgbgradky / 4 / 2
+        self.rgbgradky = nn.Conv2d(in_channels=3,out_channels=1,kernel_size=3,stride=1,padding=1,bias=False)
+        self.rgbgradky.weight = nn.Parameter(torch.from_numpy(rgbgradky).float().unsqueeze(0).unsqueeze(0).expand([-1, 3, -1, -1]), requires_grad = False)
+        self.rgbgradky = self.rgbgradky.cuda()
+
+
         w = 39
         self.h_pool = nn.AvgPool2d(w, 1, padding=int((w-1)/2))
 
@@ -4216,18 +4233,15 @@ class LocalThetaDesp(nn.Module):
 
         return 0
 
-    def depth_localgeom_consistency(self, depthmap, htheta, vtheta, isoutput_grads=False):
-        htheta_d, vtheta_d = self.get_theta(depthmap.detach())
-        debias_hthtea = self.h_pool(htheta_d) + (htheta - self.h_pool(htheta))
-        debias_vthtea = self.h_pool(vtheta_d) + (vtheta - self.h_pool(vtheta))
+    def depth_localgeom_consistency(self, depthmap, htheta, vtheta, rgb, isdebias=False):
+        if isdebias:
+            htheta_d, vtheta_d = self.get_theta(depthmap.detach())
+            debias_hthtea = self.h_pool(htheta_d) + (htheta - self.h_pool(htheta))
+        else:
+            debias_hthtea = htheta
 
         optimize_mask = torch.zeros_like(depthmap)
         optimize_mask[:,:,int(0.40810811 * self.height):int(0.99189189 * self.height), int(0.03594771 * self.width):int(0.96405229 * self.width)] = 1
-
-        grad_theta = self.sobelx(htheta)
-        non_linear_mask = torch.abs(grad_theta) < 0.1
-        outrange_mask = depthmap < 30
-        optimize_mask = optimize_mask * outrange_mask.float() * non_linear_mask.float()
 
         bk_htheta = self.backconvert_htheta(debias_hthtea)
         dirx_h = torch.cos(bk_htheta)
@@ -4243,6 +4257,12 @@ class LocalThetaDesp(nn.Module):
 
         derivx = - depthmap / (u0 - nx_nz_rat * fx - bx)
         num_grad = self.sobelx(depthmap)
+
+        rgb_grad = torch.mean(torch.abs(self.rgbgradkx(rgb)) + torch.abs(self.rgbgradky(rgb)), dim=1, keepdim=True)
+        rgb_gradw = torch.exp(-rgb_grad * 2)
+        # tensor2disp(rgb_grad, ind=0, vmax=0.3).show()
+        # tensor2disp(rgb_gradw, ind=0, vmax=1).show()
+        # tensor2rgb(rgb, ind=0).show()
 
 
         # tensor2grad(derivx, percentile=80, viewind=0).show()
@@ -4270,11 +4290,9 @@ class LocalThetaDesp(nn.Module):
         # computed_grad = derivx[0,0,rndh,rndw]
         # print(num_grad / computed_grad)
 
-        closs = torch.sum(torch.abs(derivx - num_grad) * optimize_mask) / (torch.sum(optimize_mask) + 1)
-        if not isoutput_grads:
-            return closs
-        else:
-            return closs, derivx, num_grad, optimize_mask
+        closs = torch.sum(torch.abs(derivx - num_grad) * optimize_mask * rgb_gradw) / (torch.sum(optimize_mask) + 1)
+
+        return closs, derivx, num_grad, rgb_gradw
 
 
     def surfnorm_from_localgeom(self, htheta, vtheta):
