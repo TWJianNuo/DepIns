@@ -5929,7 +5929,7 @@ class LocalThetaDesp(nn.Module):
 
         return 0
 
-    def inplacePath_loss(self, depthmap, htheta, vtheta, balancew = 10):
+    def inplacePath_loss(self, depthmap, htheta, vtheta, balancew = 10, isExcludehw = False):
         srw = 5
         srh = 15
         srwh = 5
@@ -5976,13 +5976,16 @@ class LocalThetaDesp(nn.Module):
         outbl = torch.sum(torch.abs(self.middeltargeth - htheta) * outboundh) / self.height / self.width + \
                 torch.sum(torch.abs(self.middeltargetv - vtheta) * outboundv) / self.height / self.width
 
-        inbl = (torch.sum(lossrech * lossrechi) / (torch.sum(lossrechi) + 1) +
-                torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1) / balancew +
-                torch.sum(lossrecvh * lossrecvhi) / (torch.sum(lossrecvhi) + 1) / balancew) / 3
         # inbl = torch.sum(lossrech * lossrechi) / (torch.sum(lossrechi) + 1)
         # inbl = torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1)
 
-        # synthesloss = outbl / 10 + inbl
+        if not isExcludehw:
+            inbl = (torch.sum(lossrech * lossrechi) / (torch.sum(lossrechi) + 1) +
+                    torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1) / balancew +
+                    torch.sum(lossrecvh * lossrecvhi) / (torch.sum(lossrecvhi) + 1) / balancew) / 3
+        else:
+            inbl = (torch.sum(lossrech * lossrechi) / (torch.sum(lossrechi) + 1) +
+                    torch.sum(lossrecv * lossrecvi) / (torch.sum(lossrecvi) + 1) / balancew) / 2
 
         scl_pixelwise = self.selfconh(ratiohl) + self.selfconv(ratiovl)
         scl_mask = (self.selfconvInd(inboundv) == 2).float() * (self.selfconhInd(inboundh) == 2).float()

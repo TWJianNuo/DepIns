@@ -172,6 +172,8 @@ class MonodepthOptions:
         self.parser.add_argument("--balancew",
                                  type=float,
                                  default=10)
+        self.parser.add_argument("--isExcludehw",
+                                 action="store_true")
 
 
         # OPTIMIZATION options

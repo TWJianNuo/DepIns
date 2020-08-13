@@ -330,7 +330,7 @@ class Trainer:
             htheta_pred = F.interpolate(htheta_pred, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
             vtheta_pred = F.interpolate(vtheta_pred, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
 
-            inbl, outbl, scl = self.localthetadespKitti.inplacePath_loss(depthmap=inputs['depthgt'], htheta=htheta_pred, vtheta=vtheta_pred, balancew = self.opt.balancew)
+            inbl, outbl, scl = self.localthetadespKitti.inplacePath_loss(depthmap=inputs['depthgt'], htheta=htheta_pred, vtheta=vtheta_pred, balancew = self.opt.balancew, isExcludehw = self.opt.isExcludehw)
 
             if i == 0:
                 outputs['htheta_pred'] = outputs[('htheta', i)] * float(np.pi) * 2
