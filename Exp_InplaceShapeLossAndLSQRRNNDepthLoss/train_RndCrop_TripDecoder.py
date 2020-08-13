@@ -42,13 +42,12 @@ class DepthDecoder_earlysplit(nn.Module):
         super(DepthDecoder_earlysplit, self).__init__()
         self.num_output_channels = num_output_channels
         self.use_skips = use_skips
-        self.upsample_mode = 'nearest'
         self.scales = scales
 
         self.num_ch_enc = num_ch_enc
         self.num_ch_dec = np.array([16, 32, 64, 128, 256])
 
-        self.output_cat = ['theta', 'depth']
+        self.output_cat = ['htheta', 'vtheta']
         # decoder
         self.convs = OrderedDict()
         for i in range(4, -1, -1):
@@ -66,8 +65,8 @@ class DepthDecoder_earlysplit(nn.Module):
                 self.convs[("upconv", i, 1, cat)] = ConvBlock(num_ch_in, num_ch_out)
 
         for s in self.scales:
-            self.convs[("dispconv", s, 'theta')] = Conv3x3(self.num_ch_dec[s], 2)
-            self.convs[("dispconv", s, 'depth')] = Conv3x3(self.num_ch_dec[s], 1)
+            for c in self.output_cat:
+                self.convs[("conv", s, c)] = Conv3x3(self.num_ch_dec[s], 1)
 
         self.decoder = nn.ModuleList(list(self.convs.values()))
         self.sigmoid = nn.Sigmoid()
@@ -76,32 +75,18 @@ class DepthDecoder_earlysplit(nn.Module):
         self.outputs = {}
 
         # decoder
-        x = input_features[-1]
-        x_theta = None
-        x_depth = None
-        for i in range(4, -1, -1):
-            if x_theta is None:
-                x_theta = x
-            x_theta = self.convs[("upconv", i, 0, 'theta')](x_theta)
-            x_theta = [upsample(x_theta)]
-            if self.use_skips and i > 0:
-                x_theta += [input_features[i - 1]]
-            x_theta = torch.cat(x_theta, 1)
-            x_theta = self.convs[("upconv", i, 1, 'theta')](x_theta)
+        for c in self.output_cat:
+            x = input_features[-1]
+            for i in range(4, -1, -1):
+                x = self.convs[("upconv", i, 0, c)](x)
+                x = [upsample(x)]
+                if self.use_skips and i > 0:
+                    x += [input_features[i - 1]]
+                x = torch.cat(x, 1)
+                x = self.convs[("upconv", i, 1, c)](x)
 
-            if x_depth is None:
-                x_depth = x
-            x_depth = self.convs[("upconv", i, 0, 'depth')](x_depth)
-            x_depth = [upsample(x_depth)]
-            if self.use_skips and i > 0:
-                x_depth += [input_features[i - 1]]
-            x_depth = torch.cat(x_depth, 1)
-            x_depth = self.convs[("upconv", i, 1, 'depth')](x_depth)
-
-            if i in self.scales:
-                theta_pred = self.sigmoid(self.convs[("dispconv", i, 'theta')](x_theta))
-                depth_pred = self.sigmoid(self.convs[("dispconv", i, 'depth')](x_depth))
-                self.outputs[("disp", i)] = torch.cat([theta_pred, depth_pred], dim=1)
+                if i in self.scales:
+                    self.outputs[(c, i)] = self.sigmoid(self.convs[("conv", i, c)](x))
         return self.outputs
 
 
@@ -131,10 +116,10 @@ class Trainer:
             self.opt.num_layers, self.opt.weights_init == "pretrained")
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
-        self.models["depth"] = DepthDecoder_earlysplit(self.models["encoder"].num_ch_enc, self.opt.scales)
-        self.models["depth"].to(self.device)
+        self.models["decoder"] = DepthDecoder_earlysplit(self.models["encoder"].num_ch_enc, self.opt.scales)
+        self.models["decoder"].to(self.device)
 
-        self.parameters_to_train += list(self.models["depth"].parameters())
+        self.parameters_to_train += list(self.models["decoder"].parameters())
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(
             self.model_optimizer, self.opt.scheduler_step_size, 0.1)
@@ -294,7 +279,8 @@ class Trainer:
         outputs = dict()
         losses = dict()
 
-        outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
+
+        outputs.update(self.models['decoder'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
 
         # Theta Branch
         losses.update(self.theta_compute_losses(inputs, outputs))
@@ -336,17 +322,17 @@ class Trainer:
         ltheta = 0
         sclLoss = 0
         for i in range(len(self.opt.scales)):
-            pred_theta = outputs[('disp', i)][:,0:2,:,:]
-            pred_theta = F.interpolate(pred_theta, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            pred_theta = pred_theta * float(np.pi) * 2
-            htheta_pred = pred_theta[:, 0:1, :, :]
-            vtheta_pred = pred_theta[:, 1:2, :, :]
+            htheta_pred = outputs[('htheta', i)] * float(np.pi) * 2
+            vtheta_pred = outputs[('vtheta', i)] * float(np.pi) * 2
+
+            htheta_pred = F.interpolate(htheta_pred, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+            vtheta_pred = F.interpolate(vtheta_pred, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
 
             inbl, outbl, scl = self.localthetadespKitti.inplacePath_loss(depthmap=inputs['depthgt'], htheta=htheta_pred, vtheta=vtheta_pred, balancew = self.opt.balancew)
 
             if i == 0:
-                outputs['htheta_pred'] = outputs[('disp', i)][:, 0:1, :, :] * float(np.pi) * 2
-                outputs['vtheta_pred'] = outputs[('disp', i)][:, 1:2, :, :] * float(np.pi) * 2
+                outputs['htheta_pred'] = outputs[('htheta', i)] * float(np.pi) * 2
+                outputs['vtheta_pred'] = outputs[('vtheta', i)] * float(np.pi) * 2
 
             ltheta = ltheta + inbl + outbl / 10
             sclLoss = sclLoss + scl
@@ -549,31 +535,8 @@ class Trainer:
         fighpred = tensor2disp(outputs['htheta_pred'] - 1, vmax = 4, ind=vind)
         figvpred = tensor2disp(outputs['vtheta_pred'] - 1, vmax = 4, ind=vind)
 
-        figdisp = tensor2disp(outputs[('disp', 0)][:,2:3,:,:], vmax=0.1, ind=0)
-        # tensor2disp(outputs[('disp', 0)], vmax=1, ind=0).show()
-        _, predDepth = disp_to_depth(outputs[('disp', 0)][:,2:3,:,:], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
-        predDepth = predDepth * self.STEREO_SCALE_FACTOR
-        predDepth = F.interpolate(predDepth, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-        predD2htheta, predD2vtheta = self.localthetadespKitti.get_theta(predDepth)
-        fighpred_fromD = tensor2disp(predD2htheta - 1, vmax=4, ind=vind).resize(figdisp.size, pil.BILINEAR)
-        figvpred_fromD = tensor2disp(predD2vtheta - 1, vmax=4, ind=vind).resize(figdisp.size, pil.BILINEAR)
-        figcombined1 = np.concatenate([np.array(figrgb), np.array(fighpred), np.array(figvpred)], axis=0)
-        figcombined2 = np.concatenate([np.array(figdisp), np.array(fighpred_fromD), np.array(figvpred_fromD)], axis=0)
-        figcombined = np.concatenate([figcombined1, figcombined2], axis=1)
+        figcombined = np.concatenate([np.array(figrgb), np.array(fighpred), np.array(figvpred)], axis=0)
         self.writers['train'].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
-
-
-        # figrgb_stereo = tensor2rgb(inputs[('color', 's', 0)], ind=vind)
-        # figrgb2 = tensor2rgb(inputs[('color', 0, 0)], ind=vind)
-        # mask = 1 - outputs['selfOccMask'][vind, 0, :, :].detach().cpu().numpy()
-        # mask = np.expand_dims(mask, axis=2)
-        # mask = np.repeat(mask, axis=2, repeats=3)
-        # figrgb2 = pil.fromarray((np.array(figrgb2).astype(np.float) * mask).astype(np.uint8))
-        # occmask = tensor2disp(outputs['selfOccMask'], vmax = 1, ind=vind)
-        # color_recon = tensor2rgb(outputs[('color', 's', 0)], ind=vind)
-        # combined2 = np.concatenate([figrgb2, figrgb_stereo, color_recon, occmask])
-        # self.writers['train'].add_image('rgb', (torch.from_numpy(combined2).float() / 255).permute([2, 0, 1]), self.step)
-        # pil.fromarray(combined2).show()
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
         """
