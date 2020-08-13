@@ -6,7 +6,6 @@ parentdir = os.path.dirname(currentdir)
 sys.path.insert(0,parentdir)
 
 from options import MonodepthOptions
-import warnings
 
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -36,6 +35,9 @@ opts = options.parse()
 
 from collections import OrderedDict
 from layers import *
+
+import inplaceShapeLoss_cuda
+
 
 class DepthDecoder_earlysplit(nn.Module):
     def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_skips=True):
@@ -200,7 +202,7 @@ class Trainer:
 
         val_dataset = MonoDatasetRndCrop(
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
-            is_train=False
+            is_train=False, kitti_gt_path = self.opt.kitti_gt_path
         )
 
         self.train_loader = DataLoader(
@@ -208,7 +210,7 @@ class Trainer:
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_loader = DataLoader(
             val_dataset, self.opt.batch_size, shuffle=False,
-            num_workers=self.opt.num_workers, pin_memory=True, drop_last=False)
+            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
 
         self.train_num = train_dataset.__len__()
         self.val_num = val_dataset.__len__()
@@ -264,8 +266,8 @@ class Trainer:
             if self.step % 100 == 0:
                 self.log("train", inputs, outputs, losses, writeImage=False)
 
-            # if self.step % 2000 == 0 and self.step > 1999:
-            #     self.val()
+            if self.step % 2000 == 0 and self.step > 1999:
+                self.val()
 
             self.step += 1
 
@@ -351,58 +353,42 @@ class Trainer:
         count = 0
         self.set_eval()
         errors = list()
+
+        self.kittiw = 1220
+        self.kittih = 365
+
         with torch.no_grad():
             for batch_idx, inputs in enumerate(self.val_loader):
                 input_color = inputs[("color", 0, 0)].cuda()
-                outputs = self.models['depth'](self.models['encoder'](input_color))
-                _, pred_depth = disp_to_depth(outputs[("disp", 0)][:,2:3,:,:], self.opt.min_depth, self.opt.max_depth)
-                pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
-                for i in range(input_color.shape[0]):
-                    gt_depth = self.gt_depths[count]
-                    gt_height, gt_width = gt_depth.shape
-                    cur_pred_depth = pred_depth[i:i+1,:,:,:]
-                    cur_pred_depth = F.interpolate(cur_pred_depth, [gt_height,gt_width], mode='bilinear', align_corners=True)
-                    cur_pred_depth = cur_pred_depth[0,0,:,:].cpu().numpy()
+                depthgt = inputs['depthgt'].cuda()
+                outputs = self.models['decoder'](self.models['encoder'](input_color))
+                htheta = outputs[('htheta', 0)] * 2 * np.pi
+                vtheta = outputs[('vtheta', 0)] * 2 * np.pi
 
-                    mask = np.logical_and(gt_depth > self.MIN_DEPTH, gt_depth < self.MAX_DEPTH)
-                    crop = np.array([0.40810811 * gt_height, 0.99189189 * gt_height,
-                                     0.03594771 * gt_width, 0.96405229 * gt_width]).astype(np.int32)
-                    crop_mask = np.zeros(mask.shape)
-                    crop_mask[crop[0]:crop[1], crop[2]:crop[3]] = 1
-                    mask = np.logical_and(mask, crop_mask)
+                htheta = F.interpolate(htheta, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
+                vtheta = F.interpolate(vtheta, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
 
-                    cur_pred_depth = cur_pred_depth[mask]
-                    gt_depth = gt_depth[mask]
+                ratioh, ratiohl, ratiov, ratiovl = self.localthetadespKitti.get_ratio(htheta=htheta, vtheta=vtheta)
 
-                    cur_pred_depth[cur_pred_depth < self.MIN_DEPTH] = self.MIN_DEPTH
-                    cur_pred_depth[cur_pred_depth > self.MAX_DEPTH] = self.MAX_DEPTH
+                logdepthd = torch.log(depthgt)
+                valindic = depthgt > 0
 
-                    errors.append(compute_errors(gt_depth, cur_pred_depth))
-                    # tensor2disp(outputs[("disp", 0)][:,2:3,:,:], ind=0, vmax=0.1).show()
-                    count = count + 1
-            del inputs, outputs
-        mean_errors = np.array(errors).mean(0)
+                lossrec = torch.zeros_like(logdepthd)
+                inplaceShapeLoss_cuda.inplaceShapeLoss_integration(logdepthd, ratiohl, ratiovl, valindic.int(), lossrec, 30, 30)
 
-        if mean_errors[0] < self.minabsrel:
-            self.minabsrel_perform = mean_errors
-            self.minabsrel = mean_errors[0]
-            self.save_model("best_absrel_models")
-        if mean_errors[4] > self.maxa1:
-            self.maxa1_perform = mean_errors
-            self.maxa1 = mean_errors[4]
-            self.save_model("best_a1_models")
+                err = torch.sum(torch.abs(lossrec)) / torch.sum(lossrec > 0)
+                errors.append(err.cpu().numpy())
+                count = count + 1
+                del inputs, outputs
+        mean_err = np.array(errors).mean(0)
 
-        print("\nCurrent Performance:")
-        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
-        print(("&{: 8.3f}  " * 7).format(*mean_errors.tolist()) + "\\\\")
+        if mean_err < self.minabsrel:
+            self.minabsrel = mean_err
+            self.save_model("best_aggregated_model")
 
-        print("\nBest Absolute Relative Performance:")
-        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
-        print(("&{: 8.3f}  " * 7).format(*self.minabsrel_perform.tolist()) + "\\\\")
+        print("\nCurrent Performance: %f" % mean_err)
 
-        print("\nBest A1 Relative Performance:")
-        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
-        print(("&{: 8.3f}  " * 7).format(*self.maxa1_perform.tolist()) + "\\\\")
+        print("\nBest Performance: %f" % self.minabsrel)
 
         self.set_train()
 

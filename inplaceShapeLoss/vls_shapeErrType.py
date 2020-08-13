@@ -87,7 +87,6 @@ def evaluate(opt):
             # ratiohl = torch.zeros_like(ratiohl)
             # ratiovl = torch.zeros_like(ratiovl)
 
-
             logdepthd = torch.log(depthgt)
             valindic = depthgt > 0
             lossrec = torch.zeros_like(logdepthd)
