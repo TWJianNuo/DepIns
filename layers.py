@@ -4254,8 +4254,15 @@ class LocalThetaDesp(nn.Module):
         bx = self.intrinsic[0,2]
         fx = self.intrinsic[0,0]
         nx_nz_rat = (dir3d_h[:,:,:,0] / dir3d_h[:,:,:,2]).unsqueeze(1)
+        denominator = (u0 - nx_nz_rat * fx - bx)
 
-        derivx = - depthmap / (u0 - nx_nz_rat * fx - bx)
+        absminth = 1e-4
+        ckselector = torch.abs(denominator) < absminth
+        if torch.sum(ckselector) > 0:
+            denominator[ckselector] = absminth * torch.sign(denominator[ckselector] + torch.rand_like(denominator[ckselector]) * 1e-7)
+            print("Bad Gradient Supervision Detected.")
+
+        derivx = - depthmap / denominator
         num_grad = self.sobelx(depthmap)
 
         rgb_grad = torch.mean(torch.abs(self.rgbgradkx(rgb)) + torch.abs(self.rgbgradky(rgb)), dim=1, keepdim=True)

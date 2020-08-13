@@ -312,7 +312,7 @@ class MonoDataset(data.Dataset):
             try:
                 inputs.update(self.get_theta_fromfile(folder, frame_index, side, do_flip))
             except:
-                print("folder: %s, frame_index: %s, side: %s, do_flip: %d" % (folder, frame_index, side, do_flip))
+                print("Error Occurred on folder: %s, frame_index: %s, side: %s, do_flip: %d" % (folder, frame_index, side, do_flip))
 
         if self.surfnorm_gt_path is not None:
             inputs.update(self.get_surfnorm_fromfile(folder, frame_index, side, do_flip))
