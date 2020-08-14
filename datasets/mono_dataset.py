@@ -220,7 +220,10 @@ class MonoDataset(data.Dataset):
         for i in self.frame_idxs:
             if i == "s":
                 other_side = {"r": "l", "l": "r"}[side]
-                inputs[("color", i, -1)] = self.get_color(folder, frame_index, other_side, do_flip)
+                try:
+                    inputs[("color", i, -1)] = self.get_color(folder, frame_index, other_side, do_flip)
+                except:
+                    print("Error Occurred when read RGB folder: %s, frame_index: %s, side: %s, do_flip: %d" % (folder, frame_index + i, side, do_flip))
             else:
                 try:
                     inputs[("color", i, -1)] = self.get_color(folder, frame_index + i, side, do_flip)

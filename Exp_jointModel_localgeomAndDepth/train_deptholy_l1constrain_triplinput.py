@@ -78,7 +78,7 @@ class Trainer:
         if self.opt.use_stereo:
             self.opt.frame_ids.append("s")
         self.models["encoder"] = networks.ResnetEncoder(
-            self.opt.num_layers, self.opt.weights_init == "pretrained", num_input_images=3)
+            self.opt.num_layers, self.opt.weights_init == "pretrained", num_input_images=2)
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
         self.models["depth"] = networks.DepthDecoder(self.models["encoder"].num_ch_enc, self.opt.scales, num_output_channels=3)
@@ -244,6 +244,14 @@ class Trainer:
 
             self.step += 1
 
+    def depth2activation(self, depth):
+        min_disp = 1 / self.opt.max_depth
+        max_disp = 1 / self.opt.min_depth
+        activation = depth / self.STEREO_SCALE_FACTOR
+        activation = 1 / activation
+        activation = (activation - min_disp) / (max_disp - min_disp)
+        return activation
+
     def process_batch(self, inputs, isval = False):
         """Pass a minibatch through the network and generate images and losses
         """
@@ -254,7 +262,12 @@ class Trainer:
         outputs = dict()
         losses = dict()
 
-        outputs.update(self.models['depth'](self.models['encoder'](inputs[('color_aug', 0, 0)])))
+        normedDepth = self.depth2activation(inputs['predDepth'])
+        normedThetah = inputs['htheta'] / 2 / np.pi
+        normedThetav = inputs['vtheta'] / 2 / np.pi
+        cattedInput = torch.cat([inputs[('color_aug', 0, 0)], normedDepth, normedThetah, normedThetav], dim=1)
+
+        outputs.update(self.models['depth'](self.models['encoder'](cattedInput)))
 
         # Depth Branch
         self.generate_images_pred(inputs, outputs)
@@ -524,6 +537,12 @@ class Trainer:
         color_recon = tensor2rgb(outputs[('color', 's', 0)], ind=vind)
         combined2 = np.concatenate([figrgb2, figrgb_stereo, color_recon, occmask])
         self.writers['train'].add_image('rgb', (torch.from_numpy(combined2).float() / 255).permute([2, 0, 1]), self.step)
+
+        fig_inputDepth = tensor2disp(self.depth2activation(inputs['predDepth']), vmax=0.1, ind=0)
+        fig_htheta = tensor2disp(inputs['htheta'] - 1, vmax=4, ind=0)
+        fig_vtheta = tensor2disp(inputs['vtheta'] - 1, vmax=4, ind=0)
+        fig_input = np.concatenate([np.array(fig_inputDepth), np.array(fig_htheta), np.array(fig_vtheta)])
+        self.writers['train'].add_image('input', (torch.from_numpy(fig_input).float() / 255).permute([2, 0, 1]), self.step)
 
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
