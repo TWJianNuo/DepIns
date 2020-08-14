@@ -334,11 +334,15 @@ class Trainer:
         errors = list()
         with torch.no_grad():
             for batch_idx, inputs in enumerate(self.val_loader):
-                input_color = inputs[("color", 0, 0)].cuda()
-                outputs = self.models['depth'](self.models['encoder'](input_color))
+                normedDepth = self.depth2activation(inputs['predDepth'])
+                normedThetah = inputs['htheta'] / 2 / np.pi
+                normedThetav = inputs['vtheta'] / 2 / np.pi
+                cattedInput = torch.cat([inputs[('color', 0, 0)], normedDepth, normedThetah, normedThetav], dim=1).cuda()
+
+                outputs = self.models['depth'](self.models['encoder'](cattedInput))
                 _, pred_depth = disp_to_depth(outputs[("disp", 0)][:,2:3,:,:], self.opt.min_depth, self.opt.max_depth)
                 pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
-                for i in range(input_color.shape[0]):
+                for i in range(cattedInput.shape[0]):
                     gt_depth = self.gt_depths[count]
                     gt_height, gt_width = gt_depth.shape
                     cur_pred_depth = pred_depth[i:i+1,:,:,:]
