@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader
 import datasets
 import networks
 from utils import *
+from layers import disp_to_depth
 
 def get_entry_from_path(imgpath):
     comps = imgpath.split('/')
@@ -89,10 +90,13 @@ def export_gt_depths_kitti():
 
     lines = collect_all_entries(opt.data_path)
     mapping = {'l': 'image_02', 'r': 'image_03'}
-    mapping_cam = {'l': 2, 'r': 3}
 
     ts = time.time()
     imgCount = 0
+
+    min_depth = 0.1
+    max_depth = 100
+    STEREO_SCALE_FACTOR = 5.4
 
     dataset = datasets.KITTIRAWDataset(opt.data_path, lines, encoder_dict['height'], encoder_dict['width'], [0], 4, is_train=False)
     dataloader = DataLoader(dataset, 16, shuffle=False, num_workers=opt.num_workers, pin_memory=True, drop_last=False)
@@ -100,56 +104,30 @@ def export_gt_depths_kitti():
         for data in dataloader:
 
             outputs = dict()
-            outputs_flipped = dict()
             input_color = data[("color", 0, 0)].cuda()
-            input_color_flipped = torch.flip(input_color, dims=[3])
-            # tensor2rgb(input_color, ind=0).show()
-            # tensor2rgb(input_color_flipped, ind=0).show()
             outputs.update(depth_decoder(encoder(input_color)))
-            outputs_flipped.update(depth_decoder(encoder(input_color_flipped)))
+
+            scaledDisp, depth = disp_to_depth(outputs[('disp', 0)], min_depth, max_depth)
+            depth = depth * STEREO_SCALE_FACTOR
 
             for i in range(outputs[('disp', 0)].shape[0]):
                 folder, frame_id, direction, _, _ = data['entry_tag'][i].split()
                 direction = direction[0]
                 frame_id = int(frame_id)
 
-                print("Exporting: Folder: %s, direction: %s, frame_id: %d" % (folder, direction, frame_id))
+                output_folder = os.path.join(opt.save_dir, folder, mapping[direction])
+                os.makedirs(output_folder, exist_ok=True)
+                save_path = os.path.join(output_folder, str(frame_id).zfill(10) + '.png')
 
-                output_folder_h = os.path.join(opt.save_dir, folder, 'htheta', mapping[direction])
-                output_folder_v = os.path.join(opt.save_dir, folder, 'vtheta', mapping[direction])
-                os.makedirs(output_folder_h, exist_ok=True)
-                os.makedirs(output_folder_v, exist_ok=True)
-                save_path_h = os.path.join(output_folder_h, str(frame_id).zfill(10) + '.png')
-                save_path_v = os.path.join(output_folder_v, str(frame_id).zfill(10) + '.png')
+                depthnp = depth[i,0,:,:].cpu().numpy()
+                depthnp = depthnp * 256
+                depthnp = depthnp.astype(np.uint16)
 
-                thetah = outputs[('disp', 0)][i:i+1,0:1,:,:] * 2 * np.pi
-                thetav = outputs[('disp', 0)][i:i + 1, 1:2, :, :] * 2 * np.pi
+                cv2.imwrite(save_path, depthnp)
 
-                thetahnp = thetah.squeeze(0).squeeze(0).cpu().numpy()
-                thetavnp = thetav.squeeze(0).squeeze(0).cpu().numpy()
-
-                thetahnp_towrite = (thetahnp * 10 * 256).astype(np.uint16)
-                thetavnp_towrite = (thetavnp * 10 * 256).astype(np.uint16)
-                cv2.imwrite(save_path_h, thetahnp_towrite)
-                cv2.imwrite(save_path_v, thetavnp_towrite)
-
-                output_folder_h = os.path.join(opt.save_dir, folder, 'htheta_flipped', mapping[direction])
-                output_folder_v = os.path.join(opt.save_dir, folder, 'vtheta_flipped', mapping[direction])
-                os.makedirs(output_folder_h, exist_ok=True)
-                os.makedirs(output_folder_v, exist_ok=True)
-                save_path_h = os.path.join(output_folder_h, str(frame_id).zfill(10) + '.png')
-                save_path_v = os.path.join(output_folder_v, str(frame_id).zfill(10) + '.png')
-
-                thetah = outputs_flipped[('disp', 0)][i:i+1,0:1,:,:] * 2 * np.pi
-                thetav = outputs_flipped[('disp', 0)][i:i + 1, 1:2, :, :] * 2 * np.pi
-
-                thetahnp = thetah.squeeze(0).squeeze(0).cpu().numpy()
-                thetavnp = thetav.squeeze(0).squeeze(0).cpu().numpy()
-
-                thetahnp_towrite = (thetahnp * 10 * 256).astype(np.uint16)
-                thetavnp_towrite = (thetavnp * 10 * 256).astype(np.uint16)
-                cv2.imwrite(save_path_h, thetahnp_towrite)
-                cv2.imwrite(save_path_v, thetavnp_towrite)
+                # read_depth = pil.open(save_path)
+                # read_depth = np.array(read_depth).astype(np.float32) / 256.0
+                # np.abs(depth[i,0,:,:].cpu().numpy() - read_depth).max()
 
                 te = time.time()
                 imgCount = imgCount + 1
