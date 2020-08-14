@@ -57,15 +57,14 @@ class MonoDataset(data.Dataset):
                  hints_path = '',
                  load_detect = False,
                  detect_path = '',
-                 loadPredDepth = False,
-                 predDepthPath = '',
                  load_syn = False,
                  syn_filenames = None,
                  syn_root = '',
                  PreSIL_root = None,
                  kitti_gt_path = None,
                  theta_gt_path=None,
-                 surfnorm_gt_path=None
+                 surfnorm_gt_path=None,
+                 predDepth_path=None,
                  ):
         super(MonoDataset, self).__init__()
 
@@ -114,8 +113,6 @@ class MonoDataset(data.Dataset):
             self.detect_path = detect_path
             self.maxLoad = 100 # Load 100 objects per frame at most
         self.load_pose = load_pose
-        self.loadPredDepth = loadPredDepth
-        self.predDepthPath = predDepthPath
 
         self.load_hints = load_hints
         self.hints_path = hints_path
@@ -148,7 +145,10 @@ class MonoDataset(data.Dataset):
         else:
             self.surfnorm_gt_path = None
 
-
+        if predDepth_path is not 'None':
+            self.predDepth_path = predDepth_path
+        else:
+            self.predDepth_path = None
     def preprocess(self, inputs, color_aug):
         """Resize colour images to the required scales and augment if required
 
@@ -222,7 +222,10 @@ class MonoDataset(data.Dataset):
                 other_side = {"r": "l", "l": "r"}[side]
                 inputs[("color", i, -1)] = self.get_color(folder, frame_index, other_side, do_flip)
             else:
-                inputs[("color", i, -1)] = self.get_color(folder, frame_index + i, side, do_flip)
+                try:
+                    inputs[("color", i, -1)] = self.get_color(folder, frame_index + i, side, do_flip)
+                except:
+                    print("Error Occurred when read RGB folder: %s, frame_index: %s, side: %s, do_flip: %d" % (folder, frame_index + i, side, do_flip))
 
         # adjusting intrinsics to match each scale in the pyramid
         for scale in range(self.num_scales):
@@ -291,7 +294,7 @@ class MonoDataset(data.Dataset):
             inputs['poseM'] = self.get_pose(folder, frame_index)
             inputs['bundledPoseM'] = self.get_bundlePose(folder, frame_index)
 
-        if self.loadPredDepth:
+        if self.predDepth_path is not None:
             inputs['predDepth'] = self.get_predDepth(folder, frame_index, side, do_flip)
 
         if self.load_hints:
@@ -312,7 +315,7 @@ class MonoDataset(data.Dataset):
             try:
                 inputs.update(self.get_theta_fromfile(folder, frame_index, side, do_flip))
             except:
-                print("Error Occurred on folder: %s, frame_index: %s, side: %s, do_flip: %d" % (folder, frame_index, side, do_flip))
+                print("Error Occurred when read shape folder: %s, frame_index: %s, side: %s, do_flip: %d" % (folder, frame_index, side, do_flip))
 
         if self.surfnorm_gt_path is not None:
             inputs.update(self.get_surfnorm_fromfile(folder, frame_index, side, do_flip))

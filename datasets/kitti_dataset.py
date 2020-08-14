@@ -488,11 +488,11 @@ class KITTIRAWDataset(KITTIDataset):
 
     def get_predDepth(self, folder, frame_index, side, do_flip):
         mapping = {'l' : 'image_02', 'r' : 'image_03'}
-        filePath = os.path.join(self.predDepthPath, folder, mapping[side], str(frame_index).zfill(10) + '.png')
-        predDepth = np.array(cv2.imread(filePath, -1))
+        filePath = os.path.join(self.predDepth_path, folder, mapping[side], str(frame_index).zfill(10) + '.png')
+        predDepth = np.array(pil.open(filePath))
         if do_flip:
             predDepth = np.fliplr(predDepth)
-        predDepth = predDepth.astype(np.float32) / 256
+        predDepth = predDepth.astype(np.float32) / 256.0
         predDepth = np.expand_dims(predDepth, axis=0)
         return predDepth
 

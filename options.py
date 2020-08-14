@@ -101,8 +101,9 @@ class MonodepthOptions:
                                  action="store_true")
         self.parser.add_argument("--loadPredDepth",
                                  action="store_true")
-        self.parser.add_argument("--predDepthPath",
-                                 type=str)
+        self.parser.add_argument("--predDepth_path",
+                                 type=str,
+                                 default='None')
         self.parser.add_argument("--doVisualization",
                                  action="store_true")
         self.parser.add_argument("--insResolution",

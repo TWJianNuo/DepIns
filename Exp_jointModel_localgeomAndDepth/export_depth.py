@@ -107,8 +107,9 @@ def export_gt_depths_kitti():
             input_color = data[("color", 0, 0)].cuda()
             outputs.update(depth_decoder(encoder(input_color)))
 
-            scaledDisp, depth = disp_to_depth(outputs[('disp', 0)], min_depth, max_depth)
+            scaledDisp, depth = disp_to_depth(outputs[('disp', 0)][:,2:3,:,:], min_depth, max_depth)
             depth = depth * STEREO_SCALE_FACTOR
+            depth = torch.clamp(depth, max=max_depth, min=min_depth)
 
             for i in range(outputs[('disp', 0)].shape[0]):
                 folder, frame_id, direction, _, _ = data['entry_tag'][i].split()
