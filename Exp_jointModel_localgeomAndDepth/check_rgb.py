@@ -6,7 +6,10 @@ from utils import readlines
 
 import PIL.Image as pil
 import numpy as np
-import torch
+
+from shutil import copyfile
+
+bckpath = '/home/shengjie/Documents/Data/Kitti/kitti_raw/kitti_data'
 
 train_fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", "eigen_full", "train_files.txt")
 test_fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", "eigen", "test_files.txt")
@@ -24,6 +27,8 @@ for entry in ck_filenames:
     else:
         try:
             rgb = pil.open(filepath)
-            np.sum(np.array(rgb))
+            rgb = np.array(rgb)
         except:
             print("Problematic: %s" % entry)
+            replacepath = os.path.join(bckpath, comps[0], dirmapping[comps[2]], 'data', comps[1].zfill(10) + '.png')
+            copyfile(src=replacepath, dst=filepath)
