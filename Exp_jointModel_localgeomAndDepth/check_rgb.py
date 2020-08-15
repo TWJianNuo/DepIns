@@ -27,7 +27,7 @@ for entry in ck_filenames:
     else:
         try:
             rgb = pil.open(filepath)
-            rgb = np.array(rgb)
+            np.sum(np.array(rgb))
         except:
             print("Problematic: %s" % entry)
             replacepath = os.path.join(bckpath, comps[0], dirmapping[comps[2]], 'data', comps[1].zfill(10) + '.png')
