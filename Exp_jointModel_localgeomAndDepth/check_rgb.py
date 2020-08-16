@@ -15,9 +15,6 @@ train_fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits",
 test_fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", "eigen", "test_files.txt")
 ck_filenames = readlines(train_fpath) + readlines(test_fpath)
 
-width = 1024
-height = 320
-
 dirmapping = {'l':'image_02', 'r':'image_03'}
 for entry in ck_filenames:
     comps = entry.split(' ')
@@ -26,8 +23,9 @@ for entry in ck_filenames:
         print("File %s missing" % filepath)
     else:
         try:
-            rgb = pil.open(filepath)
-            np.sum(np.array(rgb))
+            with open(filepath, 'rb') as f:
+                with pil.open(f) as img:
+                    rgb = img.convert('RGB')
         except:
             print("Problematic: %s" % entry)
             replacepath = os.path.join(bckpath, comps[0], dirmapping[comps[2]], 'data', comps[1].zfill(10) + '.png')

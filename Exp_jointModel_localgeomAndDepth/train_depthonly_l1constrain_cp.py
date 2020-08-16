@@ -33,7 +33,10 @@ warnings.filterwarnings("ignore")
 options = MonodepthOptions()
 opts = options.parse()
 
+torch.manual_seed(0)
 torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.deterministic = True
+np.random.seed(0)
 
 def compute_errors(gt, pred):
     """Computation of error metrics between predicted and ground truth depths
