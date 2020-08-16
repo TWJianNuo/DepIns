@@ -223,12 +223,12 @@ class MonoDataset(data.Dataset):
                 try:
                     inputs[("color", i, -1)] = self.get_color(folder, frame_index, other_side, do_flip)
                 except:
-                    print("Error Occurred when read RGB folder: %s, frame_index: %s, side: %s, do_flip: %d" % (folder, frame_index + i, side, do_flip))
+                    print("Error Occurred when read RGB folder: %s, frame_index: %s, side: %s, do_flip: %d" % (folder, frame_index, other_side, do_flip))
             else:
                 try:
                     inputs[("color", i, -1)] = self.get_color(folder, frame_index + i, side, do_flip)
                 except:
-                    print("Error Occurred when read RGB folder: %s, frame_index: %s, side: %s, do_flip: %d" % (folder, frame_index + i, side, do_flip))
+                    print("Error Occurred when read RGB folder: %s, frame_index: %s, side: %s, do_flip: %d" % (folder, frame_index, side, do_flip))
 
         # adjusting intrinsics to match each scale in the pyramid
         for scale in range(self.num_scales):
