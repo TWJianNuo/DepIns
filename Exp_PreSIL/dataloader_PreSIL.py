@@ -149,33 +149,61 @@ class PreSILDataset(data.Dataset):
         return imgcropped, intrinsic
 
     def __getitem__(self, index):
-        inputs = {}
+        try:
+            inputs = {}
 
-        do_color_aug = self.is_train and random.random() > 0.5
-        do_flip = self.is_train and random.random() > 0.5
+            do_color_aug = self.is_train and random.random() > 0.5
+            do_flip = self.is_train and random.random() > 0.5
 
-        line = self.filenames[index].split()
+            line = self.filenames[index].split()
 
-        folder = line[0]
-        frame_index = int(line[1])
+            folder = line[0]
+            frame_index = int(line[1])
 
-        rndseed = int(time.time())
+            rndseed = int(time.time())
 
-        # RGB
-        inputs['color'] = self.get_color(folder, frame_index, do_flip)
+            # RGB
+            inputs['color'] = self.get_color(folder, frame_index, do_flip)
 
-        # Depth Map
-        inputs['depthgt'] = self.get_depthgt(folder, frame_index, do_flip)
+            # Depth Map
+            inputs['depthgt'] = self.get_depthgt(folder, frame_index, do_flip)
 
-        if do_color_aug:
-            color_aug = transforms.ColorJitter.get_params(self.brightness, self.contrast, self.saturation, self.hue)
-        else:
-            color_aug = (lambda x: x)
+            if do_color_aug:
+                color_aug = transforms.ColorJitter.get_params(self.brightness, self.contrast, self.saturation, self.hue)
+            else:
+                color_aug = (lambda x: x)
 
-        self.preprocess(inputs, color_aug, rndseed)
+            self.preprocess(inputs, color_aug, rndseed)
 
-        inputs['tag'] = self.initTag(index, do_flip)
+            inputs['tag'] = self.initTag(index, do_flip)
+        except:
+            index = index + 10
+            inputs = {}
 
+            do_color_aug = self.is_train and random.random() > 0.5
+            do_flip = self.is_train and random.random() > 0.5
+
+            line = self.filenames[index].split()
+
+            folder = line[0]
+            frame_index = int(line[1])
+
+            rndseed = int(time.time())
+
+            # RGB
+            inputs['color'] = self.get_color(folder, frame_index, do_flip)
+
+            # Depth Map
+            inputs['depthgt'] = self.get_depthgt(folder, frame_index, do_flip)
+
+            if do_color_aug:
+                color_aug = transforms.ColorJitter.get_params(self.brightness, self.contrast, self.saturation, self.hue)
+            else:
+                color_aug = (lambda x: x)
+
+            self.preprocess(inputs, color_aug, rndseed)
+
+            inputs['tag'] = self.initTag(index, do_flip)
         return inputs
 
     def initTag(self, index, do_flip):
