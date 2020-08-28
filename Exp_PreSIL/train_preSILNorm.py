@@ -152,7 +152,7 @@ class Trainer:
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_loader = DataLoader(
             val_dataset, self.opt.batch_size, shuffle=False,
-            num_workers=self.opt.num_workers, pin_memory=True, drop_last=False)
+            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
 
         self.train_num = train_dataset.__len__()
         self.val_num = val_dataset.__len__()
