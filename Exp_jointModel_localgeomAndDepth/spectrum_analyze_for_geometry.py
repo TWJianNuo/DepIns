@@ -125,12 +125,15 @@ def evaluate(opt):
 
     htehta_np = htheta.detach().cpu().numpy()[0, 0, :, :]
     hthetaFromPred_np = hthetaFromPred.detach().cpu().numpy()[0, 0, :, :]
+    depthFromPred_np = preddepth_gtsize.detach().cpu().numpy()[0, 0, :, :]
 
     htehta_np_cropped = htehta_np[int(0.40810811 * gtheight):int(0.99189189 * gtheight), int(0.03594771 * gtwidth):int(0.96405229 * gtwidth)]
     hthetaFromPred_np_cropped = hthetaFromPred_np[int(0.40810811 * gtheight):int(0.99189189 * gtheight), int(0.03594771 * gtwidth):int(0.96405229 * gtwidth)]
+    depthFromPred_np_cropped = depthFromPred_np[int(0.40810811 * gtheight):int(0.99189189 * gtheight), int(0.03594771 * gtwidth):int(0.96405229 * gtwidth)]
 
     htehta_np_cropped_fft = fftpack.fft2(htehta_np_cropped)
     hthetaFromPred_np_cropped_fft = fftpack.fft2(hthetaFromPred_np_cropped)
+    depthFromPred_np_cropped_fft = fftpack.fft2(depthFromPred_np_cropped)
 
     # Input virtual kitti data
     seq, frame, dir = valframe[count].split(' ')
@@ -142,8 +145,11 @@ def evaluate(opt):
 
     htheta_vrkitti, vtheta_vrkitti = depcriptor.get_theta(depth_vrkitti)
     htheta_vrkitti_np = htheta_vrkitti.detach().cpu().numpy()[0, 0, :, :]
+    depth_vrkitti_np = depth_vrkitti.cpu().numpy()[0, 0, :, :]
     htheta_vrkitti_np_cropped = htheta_vrkitti_np[int(0.40810811 * gtheight):int(0.99189189 * gtheight), int(0.03594771 * gtwidth):int(0.96405229 * gtwidth)]
+    depth_vrkitti_np_cropped = depth_vrkitti_np[int(0.40810811 * gtheight):int(0.99189189 * gtheight), int(0.03594771 * gtwidth):int(0.96405229 * gtwidth)]
     htheta_vrkitti_np_cropped_fft = fftpack.fft2(htheta_vrkitti_np_cropped)
+    depth_vrkitti_np_cropped_fft = fftpack.fft2(depth_vrkitti_np_cropped)
 
     tensor2disp(1 / depth_vrkitti, vmax = 0.2, ind=0).show()
     tensor2disp(htheta_vrkitti - 1, vmax=4, ind=0).show()
@@ -155,12 +161,22 @@ def evaluate(opt):
     plt.title('Fourier transform')
 
     plt.figure()
-    plot_spectrum(hthetaFromPred_np_cropped_fft)
+    plot_spectrum(depthFromPred_np_cropped_fft)
     plt.title('Fourier transform')
 
     plt.figure()
     plot_spectrum(htheta_vrkitti_np_cropped_fft)
     plt.title('Fourier transform')
+
+    plt.figure()
+    plot_spectrum(depth_vrkitti_np_cropped_fft)
+    plt.title('Fourier transform')
+
+    plt.figure()
+    plot_spectrum(hthetaFromPred_np_cropped_fft)
+    plt.title('Fourier transform')
+
+
 
 
 

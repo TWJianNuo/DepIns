@@ -5751,41 +5751,38 @@ class LocalThetaDesp(nn.Module):
 
 
     def vls_geompred(self, depthmap, htheta, vtheta, rgb, depthmaplidar, eng=None, instancemap=None):
+        # minArea = 200
+        # candidates = list()
+        # candidatearea = list()
+        # for idx in np.unique(instancemap):
+        #     if idx > 0 and np.sum(instancemap) > minArea:
+        #         candidates.append(idx)
+        #         candidatearea.append(np.sum(instancemap == idx))
+        #
+        # selectedrank = 2
+        # sortedind = np.argsort(-np.array(candidatearea))
+        # selectedid = candidates[sortedind[selectedrank]]
+        #
+        # # Init the optimization mask
+        # shrinkkw = 7
+        # shrinkw = torch.ones([shrinkkw, shrinkkw], dtype=torch.float)
+        # shrinkw = shrinkw.view(1, 1, shrinkkw, shrinkkw)
+        # shrinkbar = shrinkkw * shrinkkw - 1
+        # shrinkConv = nn.Conv2d(1, 1, shrinkkw, bias=False, padding=int((shrinkkw-1)/2))
+        # shrinkConv.weight = nn.Parameter(shrinkw, requires_grad=False)
+        # shrinkConv = shrinkConv.cuda()
+        #
+        # vlsarea = instancemap == selectedid
+        # vlsarea = shrinkConv(torch.from_numpy(vlsarea).float().unsqueeze(0).unsqueeze(0).cuda()) > shrinkbar
 
-        minArea = 200
-        candidates = list()
-        candidatearea = list()
-        for idx in np.unique(instancemap):
-            if idx > 0 and np.sum(instancemap) > minArea:
-                candidates.append(idx)
-                candidatearea.append(np.sum(instancemap == idx))
+        optrat = 0.6
+        sth = int(self.height * (1 - optrat))
+        stw = int(self.width * (1 - optrat) / 2)
+        edw = int(self.width * (1 - (1 - optrat) / 2))
 
-        # selectedid = np.array(candidates)[np.random.randint(0, len(candidates))]
-        # selectedid = candidates[np.argmax(np.array(candidatearea))]
-        selectedrank = 1
-        sortedind = np.argsort(-np.array(candidatearea))
-        selectedid = candidates[sortedind[selectedrank]]
-
-        # fig1 = tensor2disp(torch.from_numpy(instancemap == selectedid).unsqueeze(0).unsqueeze(0), vmax=1, ind=0)
-        # fig2 = tensor2rgb(rgb, ind=0)
-        # figcombined = pil.fromarray(np.concatenate([np.array(fig1), np.array(fig2)], axis=0))
-        # figcombined.save('/home/shengjie/Desktop/tmpvls/combined.png')
-
-        # Init the optimization mask
-        shrinkkw = 5
-        shrinkw = torch.ones([shrinkkw, shrinkkw], dtype=torch.float)
-        shrinkw = shrinkw.view(1, 1, shrinkkw, shrinkkw)
-        shrinkbar = shrinkkw * shrinkkw - 1
-        shrinkConv = nn.Conv2d(1, 1, shrinkkw, bias=False, padding=int((shrinkkw-1)/2))
-        shrinkConv.weight = nn.Parameter(shrinkw, requires_grad=False)
-        shrinkConv = shrinkConv.cuda()
-
-        optimize_mask_np = instancemap == selectedid
-        optimize_mask_np = shrinkConv(torch.from_numpy(optimize_mask_np).float().unsqueeze(0).unsqueeze(0).cuda()) > shrinkbar
-        # tensor2disp(optimize_mask_np, ind=0, vmax=1).show()
-        optimize_mask_np = optimize_mask_np[0,0,:,:].cpu().numpy().astype(np.bool)
-        optimize_mask_np = optimize_mask_np > -1
-
+        optimize_mask_np = np.zeros_like(instancemap)
+        optimize_mask_np[sth::, stw:edw] = 1
+        # tensor2disp(torch.from_numpy(optimize_mask_np.astype(np.float32)).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
 
         fidalMask_np = np.zeros([self.height, self.width], dtype=np.bool)
         horConsMask_np = np.zeros([self.height, self.width], dtype=np.bool)
@@ -5793,13 +5790,18 @@ class LocalThetaDesp(nn.Module):
         datavalmask = depthmap[0,0,:,:].detach().cpu().numpy() > 0
         init_arb_mask(self.height, self.width, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, datavalmask)
 
+        penalrat = 2
+        rgb_grad = torch.mean(torch.abs(self.rgbgradkx(rgb)) + torch.abs(self.rgbgradky(rgb)), dim=1, keepdim=True)
+        rgb_gradw = 1 - torch.exp(-rgb_grad * penalrat)
+        # tensor2disp(rgb_gradw, ind=0, vmax=1).show()
+
+
         from sparsMMul import SparsMMul
         sparsmmul = SparsMMul.apply
 
-        lambdafw = 0.9
+        lambdafw = 0.5
 
-
-        optimize_mask = torch.from_numpy(optimize_mask_np).cuda() == 1
+        optimize_mask = torch.from_numpy(optimize_mask_np.astype(np.float32)).cuda() == 1
 
         linearIndexMap = torch.ones([self.height, self.width], device="cuda") * (-1)
         linearIndexMap[optimize_mask] = torch.arange(0, torch.sum(optimize_mask).float(), device="cuda")
@@ -5824,32 +5826,33 @@ class LocalThetaDesp(nn.Module):
         ratioh, ratiohl, ratiov, ratiovl = self.get_ratio(htheta, vtheta)
         # ratioh, ratiohl, ratiov, ratiovl = self.get_ratio(htheta_noisy, vtheta_noisy)
 
-        fidalrv = depthmap[0,0,:,:][fidalMask] * lambdafw
+
+        fidalrv = depthmap[0,0,:,:][fidalMask] * rgb_gradw[0,0,:,:][fidalMask]
         fidalindy = torch.arange(0, torch.sum(fidalMask), device="cuda", dtype=torch.long)
         fidalindx = linearIndexMap[fidalMask]
-        fidalw = torch.ones([torch.sum(fidalMask)], device="cuda", dtype=torch.float) * lambdafw
+        fidalw = torch.ones([torch.sum(fidalMask)], device="cuda", dtype=torch.float) * rgb_gradw[0,0,:,:][fidalMask]
 
-        conshw1 = ratioh[0,0,:,:][horConsMask]
+        conshw1 = ratioh[0,0,:,:][horConsMask] * (1 - rgb_gradw[0,0,:,:][horConsMask])
         consindhy1 = torch.arange(torch.sum(fidalMask), torch.sum(fidalMask) + torch.sum(horConsMask), device="cuda", dtype=torch.long)
         consindhx1 = linearIndexMap[yy[horConsMask], xx[horConsMask]]
-        conshw2 = -torch.ones([torch.sum(horConsMask)], device="cuda", dtype=torch.float)
+        conshw2 = -torch.ones([torch.sum(horConsMask)], device="cuda", dtype=torch.float) * (1 - rgb_gradw[0,0,:,:][horConsMask])
         consindhy2 = torch.arange(torch.sum(fidalMask), torch.sum(fidalMask) + torch.sum(horConsMask), device="cuda", dtype=torch.long)
         consindhx2 = linearIndexMap[yy[horConsMask], xx[horConsMask] + 1]
-        conshw = torch.cat([conshw1, conshw2], dim=0) * (1 - lambdafw)
+        conshw = torch.cat([conshw1, conshw2], dim=0)
         consindhy = torch.cat([consindhy1, consindhy2], dim=0)
         consindhx = torch.cat([consindhx1, consindhx2], dim=0)
-        conshrv = torch.zeros(torch.sum(horConsMask), device="cuda") * (1 - lambdafw)
+        conshrv = torch.zeros(torch.sum(horConsMask), device="cuda")
 
-        consvw1 = ratiov[0,0,:,:][verConsMask]
+        consvw1 = ratiov[0,0,:,:][verConsMask] * (1 - rgb_gradw[0,0,:,:][verConsMask])
         consindvy1 = torch.arange(torch.sum(fidalMask) + torch.sum(horConsMask), torch.sum(fidalMask) + torch.sum(horConsMask) + torch.sum(verConsMask), device="cuda", dtype=torch.long)
         consindvx1 = linearIndexMap[yy[verConsMask], xx[verConsMask]]
-        consvw2 = -torch.ones([torch.sum(verConsMask)], device="cuda", dtype=torch.float)
+        consvw2 = -torch.ones([torch.sum(verConsMask)], device="cuda", dtype=torch.float) * (1 - rgb_gradw[0,0,:,:][verConsMask])
         consindvy2 = torch.arange(torch.sum(fidalMask) + torch.sum(horConsMask), torch.sum(fidalMask) + torch.sum(horConsMask) + torch.sum(verConsMask), device="cuda", dtype=torch.long)
         consindvx2 = linearIndexMap[yy[verConsMask] + 1, xx[verConsMask]]
-        consvw = torch.cat([consvw1, consvw2], dim=0) * (1 - lambdafw)
+        consvw = torch.cat([consvw1, consvw2], dim=0)
         consindvy = torch.cat([consindvy1, consindvy2], dim=0)
         consindvx = torch.cat([consindvx1, consindvx2], dim=0)
-        consvrv = torch.zeros(torch.sum(verConsMask), device="cuda") * (1 - lambdafw)
+        consvrv = torch.zeros(torch.sum(verConsMask), device="cuda")
 
         spsindx = torch.cat([fidalindx, consindhx, consindvx], dim=0).contiguous()
         spsindy = torch.cat([fidalindy, consindhy, consindvy], dim=0).contiguous()
@@ -5868,91 +5871,199 @@ class LocalThetaDesp(nn.Module):
         r0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, spsrv, True)
         p0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, spsrv, True)
         t0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, p0, False)
-        for i in range(200):
-            # if torch.mean((sparsmmul(spsindx, spsindy, sizeM, spsindw, x0, False) - spsrv)**2) < 1e-6:
-            #     break
+        for i in range(10):
+            if torch.sum(t0 * t0) < 1:
+                break
             alpha = torch.sum(r0 * r0) / torch.sum(t0 * t0)
             x0 = x0 + alpha * p0
             d0 = d0 - alpha * t0
             r1 = sparsmmul(spsindx, spsindy, sizeM, spsindw, d0, True)
+            if torch.sum(r0 * r0) < 1:
+                break
             beta = torch.sum(r1 * r1) / torch.sum(r0 * r0)
             p0 = r1 + beta * p0
             t0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, p0, False)
             r0 = r1
-
-
+        print(i)
         depthmaplidar_torch = torch.from_numpy(depthmaplidar).float().unsqueeze(0).unsqueeze(0).cuda()
         recovered_depth = torch.zeros_like(depthmap)
         recovered_depth[0,0,:,:][yy[optimize_mask], xx[optimize_mask]] = x0
-        pts3d_recovered = recovered_depth.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1, -1, -1, 3, -1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size, -1, -1, -1, -1]))
-        pts3d_org = depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1, -1, -1, 3, -1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size, -1, -1, -1, -1]))
-        pts3d_lidar = depthmaplidar_torch.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1, -1, -1, 3, -1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size, -1, -1, -1, -1]))
 
-        tensor2disp(1/recovered_depth, vmax=0.2, ind=0).show()
-        tensor2disp(1 / depthmap, vmax=0.2, ind=0).show()
+        # pts3d_recovered = recovered_depth.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1, -1, -1, 3, -1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size, -1, -1, -1, -1]))
+        # pts3d_org = depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1, -1, -1, 3, -1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size, -1, -1, -1, -1]))
+        # pts3d_lidar = depthmaplidar_torch.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1, -1, -1, 3, -1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size, -1, -1, -1, -1]))
+        #
+        # tensor2disp(1/recovered_depth, vmax=0.2, ind=0).show()
+        # tensor2disp(1 / depthmap, vmax=0.2, ind=0).show()
+        #
+        # htheta_rec, vtheta_rec = self.get_theta(recovered_depth)
+        # htheta_org, vtheta_org = self.get_theta(depthmap)
+        # tensor2disp(htheta_rec-1, vmax=4, ind=0).show()
+        # tensor2disp(htheta_org-1, vmax=4, ind=0).show()
+        #
+        # vlsareanp = vlsarea.cpu().numpy()[0, 0, :, :] == 1
+        # vlsareanp_lidar = (vlsareanp * (depthmaplidar > 0)) == True
+        #
+        # def extract_pts(torchpts, numpymask):
+        #     import matlab
+        #     import matlab.engine
+        #     nppts = torchpts[0,:,:,:,0].detach().cpu().numpy()
+        #     npx = nppts[:, :, 0][numpymask]
+        #     npy = nppts[:, :, 1][numpymask]
+        #     npz = nppts[:, :, 2][numpymask]
+        #
+        #     npx = matlab.double(npx.tolist())
+        #     npy = matlab.double(npy.tolist())
+        #     npz = matlab.double(npz.tolist())
+        #
+        #     return npx, npy, npz
+        #
+        # npxorg, npyorg, npzorg = extract_pts(pts3d_org, vlsareanp)
+        # npxopted, npyopted, npzopted = extract_pts(pts3d_recovered, vlsareanp)
+        # npxlidar, npylidar, npzlidar = extract_pts(pts3d_lidar, vlsareanp)
+        #
+        # import matlab
+        # eng.eval('subplot(1,2,1)', nargout=0)
+        # eng.scatter3(npxopted, npyopted, npzopted, 3, 'g', 'filled', nargout=0)
+        # eng.eval('axis equal', nargout=0)
+        # eng.title('From shape', nargout=0)
+        # xlim = eng.eval('xlim', nargout=1)
+        # ylim = eng.eval('ylim', nargout=1)
+        # zlim = eng.eval('zlim', nargout=1)
+        #
+        # eng.eval('subplot(1,2,2)', nargout=0)
+        # eng.scatter3(npxorg, npyorg, npzorg, 3, 'k', 'filled', nargout=0)
+        # eng.eval('axis equal', nargout=0)
+        # eng.title('From Depth', nargout=0)
+        # eng.xlim(xlim, nargout=0)
+        # eng.ylim(ylim, nargout=0)
+        # eng.zlim(zlim, nargout=0)
 
-        fig1 = tensor2disp(1/recovered_depth, vmax=0.2, ind=0)
-        fig2 = tensor2disp(1 / depthmap, vmax=0.2, ind=0)
-        figcombined = pil.fromarray(np.concatenate([np.array(fig1), np.array(fig2)], axis=0))
-        figcombined.save('/home/shengjie/Desktop/tmpvls/combined.png')
+        return recovered_depth
 
-        htheta_rec, vtheta_rec = self.get_theta(recovered_depth)
-        tensor2disp(htheta_rec-1, vmax=4, ind=0).show()
+    def vls_geompred_debug(self, depthmap, htheta, vtheta, rgb, depthmaplidar, eng=None, instancemap=None, optround=500):
+        optrat = 0.8
+        sth = int(self.height * (1 - optrat))
+        stw = int(self.width * (1 - optrat) / 2)
+        edw = int(self.width * (1 - (1 - optrat) / 2))
 
-        optimize_mask_np = optimize_mask.cpu().numpy() == 1
-        optimize_mask_anchor = fidalMask.cpu().numpy() == 1
-        optimize_mask_np_lidar = (optimize_mask_np * (depthmaplidar > 0)) == True
-        # tensor2disp(torch.from_numpy(optimize_mask_np).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
-        # tensor2disp(htheta-1, vmax=4, ind=0).show()
-        # tensor2disp(vtheta - 1, vmax=4, ind=0).show()
-
-        def extract_pts(torchpts, numpymask):
-            import matlab
-            import matlab.engine
-            nppts = torchpts[0,:,:,:,0].detach().cpu().numpy()
-            npx = nppts[:, :, 0][numpymask]
-            npy = nppts[:, :, 1][numpymask]
-            npz = nppts[:, :, 2][numpymask]
-
-            npx = matlab.double(npx.tolist())
-            npy = matlab.double(npy.tolist())
-            npz = matlab.double(npz.tolist())
-
-            return npx, npy, npz
-
-        npxorg, npyorg, npzorg = extract_pts(pts3d_org, optimize_mask_np)
-        # npxanchor, npyanchor, npzanchor = extract_pts(pts3d_org, optimize_mask_anchor)
-        npxopted, npyopted, npzopted = extract_pts(pts3d_recovered, optimize_mask_np)
-        npxlidar, npylidar, npzlidar = extract_pts(pts3d_lidar, optimize_mask_np_lidar)
-
-        import matlab
-        eng.eval('subplot(1,3,1)', nargout=0)
-        eng.scatter3(npxlidar, npylidar, npzlidar, 15, 'p', 'filled', nargout=0)
-        eng.eval('axis equal', nargout=0)
-        xlim = eng.eval('xlim', nargout=1)
-        ylim = eng.eval('ylim', nargout=1)
-        zlim = eng.eval('zlim', nargout=1)
-        eng.title('From Lidar', nargout=0)
-
-
-        eng.eval('subplot(1,3,2)', nargout=0)
-        eng.scatter3(npxopted, npyopted, npzopted, 3, 'g', 'filled', nargout=0)
-        eng.eval('axis equal', nargout=0)
-        eng.title('From shape', nargout=0)
-        eng.xlim(xlim, nargout=0)
-        eng.ylim(ylim, nargout=0)
-        eng.zlim(zlim, nargout=0)
-
-        eng.eval('subplot(1,3,3)', nargout=0)
-        eng.scatter3(npxorg, npyorg, npzorg, 3, 'k', 'filled', nargout=0)
-        eng.eval('axis equal', nargout=0)
-        eng.title('From Depth', nargout=0)
-        eng.xlim(xlim, nargout=0)
-        eng.ylim(ylim, nargout=0)
-        eng.zlim(zlim, nargout=0)
+        optimize_mask_np = np.zeros_like(instancemap)
+        optimize_mask_np[sth::, stw:edw] = 1
 
 
-        return 0
+
+        fidalMask_np = np.zeros([self.height, self.width], dtype=np.bool)
+        horConsMask_np = np.zeros([self.height, self.width], dtype=np.bool)
+        verConsMask_np = np.zeros([self.height, self.width], dtype=np.bool)
+        datavalmask = depthmap[0,0,:,:].detach().cpu().numpy() > 0
+        init_arb_mask(self.height, self.width, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, datavalmask)
+
+        penalrat = 2
+        rgb_grad = torch.mean(torch.abs(self.rgbgradkx(rgb)) + torch.abs(self.rgbgradky(rgb)), dim=1, keepdim=True)
+        rgb_gradw = 1 - torch.exp(-rgb_grad * penalrat)
+        # tensor2disp(rgb_gradw, ind=0, vmax=1).show()
+
+
+        from sparsMMul import SparsMMul
+        sparsmmul = SparsMMul.apply
+
+        lambdafw = 0.5
+
+        optimize_mask = torch.from_numpy(optimize_mask_np.astype(np.float32)).cuda() == 1
+
+        linearIndexMap = torch.ones([self.height, self.width], device="cuda") * (-1)
+        linearIndexMap[optimize_mask] = torch.arange(0, torch.sum(optimize_mask).float(), device="cuda")
+        linearIndexMap = linearIndexMap.long()
+
+        # Init Fidality terms
+        fidalMask = torch.from_numpy(fidalMask_np).cuda() == 1
+        # tensor2disp(fidalMask.unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
+
+        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing="xy")
+        xx = torch.from_numpy(xx).cuda()
+        yy = torch.from_numpy(yy).cuda()
+
+        # Init Horizontal Consrtain terms
+        horConsMask = torch.from_numpy(horConsMask_np).cuda() == 1
+        # tensor2disp(horConsMask.unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
+
+        # Init Vertical Consrtain terms
+        verConsMask = torch.from_numpy(verConsMask_np).cuda() == 1
+        # tensor2disp(verConsMask.unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
+
+        ratioh, ratiohl, ratiov, ratiovl = self.get_ratio(htheta, vtheta)
+        # ratioh, ratiohl, ratiov, ratiovl = self.get_ratio(htheta_noisy, vtheta_noisy)
+
+
+        fidalrv = depthmap[0,0,:,:][fidalMask] * rgb_gradw[0,0,:,:][fidalMask]
+        fidalindy = torch.arange(0, torch.sum(fidalMask), device="cuda", dtype=torch.long)
+        fidalindx = linearIndexMap[fidalMask]
+        fidalw = torch.ones([torch.sum(fidalMask)], device="cuda", dtype=torch.float) * rgb_gradw[0,0,:,:][fidalMask]
+
+        conshw1 = ratioh[0,0,:,:][horConsMask] * (1 - rgb_gradw[0,0,:,:][horConsMask])
+        consindhy1 = torch.arange(torch.sum(fidalMask), torch.sum(fidalMask) + torch.sum(horConsMask), device="cuda", dtype=torch.long)
+        consindhx1 = linearIndexMap[yy[horConsMask], xx[horConsMask]]
+        conshw2 = -torch.ones([torch.sum(horConsMask)], device="cuda", dtype=torch.float) * (1 - rgb_gradw[0,0,:,:][horConsMask])
+        consindhy2 = torch.arange(torch.sum(fidalMask), torch.sum(fidalMask) + torch.sum(horConsMask), device="cuda", dtype=torch.long)
+        consindhx2 = linearIndexMap[yy[horConsMask], xx[horConsMask] + 1]
+        conshw = torch.cat([conshw1, conshw2], dim=0)
+        consindhy = torch.cat([consindhy1, consindhy2], dim=0)
+        consindhx = torch.cat([consindhx1, consindhx2], dim=0)
+        conshrv = torch.zeros(torch.sum(horConsMask), device="cuda")
+
+        consvw1 = ratiov[0,0,:,:][verConsMask] * (1 - rgb_gradw[0,0,:,:][verConsMask])
+        consindvy1 = torch.arange(torch.sum(fidalMask) + torch.sum(horConsMask), torch.sum(fidalMask) + torch.sum(horConsMask) + torch.sum(verConsMask), device="cuda", dtype=torch.long)
+        consindvx1 = linearIndexMap[yy[verConsMask], xx[verConsMask]]
+        consvw2 = -torch.ones([torch.sum(verConsMask)], device="cuda", dtype=torch.float) * (1 - rgb_gradw[0,0,:,:][verConsMask])
+        consindvy2 = torch.arange(torch.sum(fidalMask) + torch.sum(horConsMask), torch.sum(fidalMask) + torch.sum(horConsMask) + torch.sum(verConsMask), device="cuda", dtype=torch.long)
+        consindvx2 = linearIndexMap[yy[verConsMask] + 1, xx[verConsMask]]
+        consvw = torch.cat([consvw1, consvw2], dim=0)
+        consindvy = torch.cat([consindvy1, consindvy2], dim=0)
+        consindvx = torch.cat([consindvx1, consindvx2], dim=0)
+        consvrv = torch.zeros(torch.sum(verConsMask), device="cuda")
+
+        spsindx = torch.cat([fidalindx, consindhx, consindvx], dim=0).contiguous()
+        spsindy = torch.cat([fidalindy, consindhy, consindvy], dim=0).contiguous()
+        spsindw = torch.cat([fidalw, conshw, consvw], dim=0).contiguous()
+        spsrv = torch.cat([fidalrv, conshrv, consvrv], dim=0).contiguous()
+
+        spsck = depthmap[0,0,:,:][optimize_mask]
+        spsSizeM = torch.Tensor([torch.sum(fidalMask) + torch.sum(horConsMask) + torch.sum(verConsMask), torch.sum(optimize_mask)]).int().cuda()
+
+        th = spsSizeM[0]
+        tw = spsSizeM[1]
+        sizeM = spsSizeM
+
+        x0 = torch.zeros([tw], device="cuda", dtype=torch.float)
+        d0 = spsrv
+        r0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, spsrv, True)
+        p0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, spsrv, True)
+        t0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, p0, False)
+
+        t0summin = 1e10
+        r0summin = 1e10
+
+        for i in range(optround):
+            # if torch.sum(t0 * t0) < t0summin:
+            #     t0summin = float(torch.sum(t0 * t0).detach().cpu().numpy())
+            alpha = torch.sum(r0 * r0) / torch.sum(t0 * t0)
+            x0 = x0 + alpha * p0
+            d0 = d0 - alpha * t0
+            r1 = sparsmmul(spsindx, spsindy, sizeM, spsindw, d0, True)
+            # if torch.sum(r0 * r0) < r0summin:
+            #     r0summin = float(torch.sum(r0 * r0).detach().cpu().numpy())
+            beta = torch.sum(r1 * r1) / torch.sum(r0 * r0)
+            p0 = r1 + beta * p0
+            t0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, p0, False)
+            r0 = r1
+        print(i)
+        depthmaplidar_torch = torch.from_numpy(depthmaplidar).float().unsqueeze(0).unsqueeze(0).cuda()
+        recovered_depth = torch.zeros_like(depthmap)
+        recovered_depth[0,0,:,:][yy[optimize_mask], xx[optimize_mask]] = x0
+
+        return recovered_depth
+
+
 
     def inplacePath_loss(self, depthmap, htheta, vtheta, balancew = 10, isExcludehw = False):
         srw = 5
@@ -5968,7 +6079,6 @@ class LocalThetaDesp(nn.Module):
         inboundv = (vtheta < self.upperboundv) * (vtheta > self.lowerboundv)
         inboundv = inboundv.float()
         outboundv = 1 - inboundv
-
 
         bk_htheta = self.backconvert_htheta(htheta)
         npts3d_pdiff_uph = torch.cos(bk_htheta) * self.npts3d_p_h[:,:,:,1,0].unsqueeze(1) - torch.sin(bk_htheta) * self.npts3d_p_h[:,:,:,0,0].unsqueeze(1)

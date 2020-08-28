@@ -23,6 +23,12 @@ splits_dir = os.path.join(os.path.dirname(__file__), "..", "splits")
 
 STEREO_SCALE_FACTOR = 5.4
 
+torch.manual_seed(0)
+np.random.seed(0)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = True
+
+
 def get_indwith_isntancelabel(mapping):
     wins_ind = list()
     for idx, m in enumerate(mapping):
@@ -62,9 +68,11 @@ def evaluate(opt):
     depth_decoder.load_state_dict(torch.load(decoder_path))
 
     encoder.cuda()
-    encoder.eval()
+    # encoder.eval()
+    encoder.train()
     depth_decoder.cuda()
-    depth_decoder.eval()
+    # depth_decoder.eval()
+    depth_decoder.train()
 
     print("-> Computing predictions with size {}x{}".format(
         encoder_dict['width'], encoder_dict['height']))
@@ -72,11 +80,11 @@ def evaluate(opt):
     predw = encoder_dict['width']
     predh = encoder_dict['height']
 
-
     import matlab.engine
     eng = matlab.engine.start_matlab()
 
-    count = np.random.randint(0,len(filenames))
+    # count = np.random.randint(0,len(filenames))
+    count = 0
 
     comps = filenames[count].split(' ')
 
@@ -101,27 +109,93 @@ def evaluate(opt):
     descriptor = LocalThetaDesp(height=gtheight, width=gtwidth, batch_size=1, intrinsic=gtscale_intrinsic).cuda()
 
     data = dataset.__getitem__(count)
-    input_color = data[("color", 0, 0)].unsqueeze(0).cuda()
-
-    output = depth_decoder(encoder(input_color))
-
     htheta = data['htheta'].unsqueeze(0).cuda()
     vtheta = data['vtheta'].unsqueeze(0).cuda()
-    _, preddepth = disp_to_depth(output[("disp", 0)][:,2:3,:,:], opt.min_depth, opt.max_depth)
-    preddepth = preddepth * STEREO_SCALE_FACTOR
 
-    semantics = torch.from_numpy(data['semanLabel']).unsqueeze(0).float()
-
-    preddepth_gtsize = F.interpolate(preddepth, [gtheight, gtwidth], mode='bilinear', align_corners=True)
     htheta_gtsize = F.interpolate(htheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
     vtheta_gtsize = F.interpolate(vtheta, [gtheight, gtwidth], mode='bilinear', align_corners=True)
+
+    input_color = data[("color", 0, 0)].unsqueeze(0).cuda()
     input_color_gtsize = F.interpolate(input_color, [gtheight, gtwidth], mode='bilinear', align_corners=True)
-    semantics_gtsize = F.interpolate(semantics, [gtheight, gtwidth], mode='nearest')
 
-    # optimizedDepth_torch = descriptor.vls_geompred(preddepth_gtsize, htheta_gtsize, vtheta_gtsize, input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt)
-    optimizedDepth_torch = descriptor.vls_geompred(semidense_depth_torch, htheta_gtsize, vtheta_gtsize, input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt)
+    htheta_gtsize = htheta_gtsize / 2 / np.pi
+    vtheta_gtsize = vtheta_gtsize / 2 / np.pi
+    htheta_gtsize_act = torch.log(htheta_gtsize / (1 - htheta_gtsize))
+    vtheta_gtsize_act = torch.log(vtheta_gtsize / (1 - vtheta_gtsize))
+
+    htheta_gtsize_act.requires_grad = True
+    vtheta_gtsize_act.requires_grad = True
 
 
+    # optimizer = optim.Adam(list(encoder.parameters()) + list(depth_decoder.parameters()),  lr = 1e-5)
+    optimizer = optim.Adam([htheta_gtsize_act] + [vtheta_gtsize_act], lr=1e-3)
+    # torch.nn.utils.clip_grad_value_([htheta_gtsize_act] + [vtheta_gtsize_act], clip_value = 10)
+
+    loss_rec = list()
+    for kk in range(200000):
+        if kk ==0:
+            htheta_gtsize = torch.sigmoid(htheta_gtsize_act) * 2 * np.pi
+            vtheta_gtsize = torch.sigmoid(vtheta_gtsize_act) * 2 * np.pi
+            optimizedDepth_torch = descriptor.vls_geompred_debug(
+                torch.from_numpy(gt_depth).unsqueeze(0).unsqueeze(0).cuda().float(), htheta_gtsize, vtheta_gtsize,
+                input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt, optround=10)
+            sel = (semidense_depth_torch > 0).float()
+            loss = torch.sum(torch.abs(semidense_depth_torch - optimizedDepth_torch) * sel) / torch.sum(sel)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        htheta_gtsize = torch.sigmoid(htheta_gtsize_act) * 2 * np.pi
+        vtheta_gtsize = torch.sigmoid(vtheta_gtsize_act) * 2 * np.pi
+
+        # output = depth_decoder(encoder(input_color))
+
+        # _, preddepth = disp_to_depth(output[("disp", 0)][:,2:3,:,:], opt.min_depth, opt.max_depth)
+        # preddepth = preddepth * STEREO_SCALE_FACTOR
+
+        # semantics = torch.from_numpy(data['semanLabel']).unsqueeze(0).float()
+
+        # preddepth_gtsize = F.interpolate(preddepth, [gtheight, gtwidth], mode='bilinear', align_corners=True)
+        # semantics_gtsize = F.interpolate(semantics, [gtheight, gtwidth], mode='nearest')
+
+
+        optimizedDepth_torch = descriptor.vls_geompred(torch.from_numpy(gt_depth).unsqueeze(0).unsqueeze(0).cuda().float(), htheta_gtsize, vtheta_gtsize, input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt)
+        # optimizedDepth_torch = descriptor.vls_geompred(preddepth_gtsize, htheta_gtsize, vtheta_gtsize, input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt)
+
+        sel = (semidense_depth_torch > 0).float()
+        loss = torch.sum(torch.abs(semidense_depth_torch - optimizedDepth_torch) * sel) / torch.sum(sel)
+        optimizer.zero_grad()
+        loss.backward()
+        if torch.sum(torch.isnan(htheta_gtsize_act.grad)) + torch.sum(torch.isnan(htheta_gtsize_act.grad)) > 0:
+            htheta_gtsize = torch.sigmoid(htheta_gtsize_act) * 2 * np.pi
+            vtheta_gtsize = torch.sigmoid(vtheta_gtsize_act) * 2 * np.pi
+            optimizedDepth_torch = descriptor.vls_geompred_debug(
+                torch.from_numpy(gt_depth).unsqueeze(0).unsqueeze(0).cuda().float(), htheta_gtsize, vtheta_gtsize,
+                input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt, optround=50)
+            sel = (semidense_depth_torch > 0).float()
+            loss = torch.sum(torch.abs(semidense_depth_torch - optimizedDepth_torch) * sel) / torch.sum(sel)
+            optimizer.zero_grad()
+            loss.backward()
+            torch.sum(torch.isnan(htheta_gtsize_act.grad)) + torch.sum(torch.isnan(htheta_gtsize_act.grad))
+
+        optimizer.step()
+
+        loss_rec.append(float(loss.detach().cpu().numpy()))
+
+        print("Iteration %d, loss: %f" % (kk, loss.detach().cpu().numpy()))
+
+    plt.figure()
+    plt.plot(list(range(len(loss_rec))), loss_rec)
+    plt.xlabel('Iteration Number')
+    plt.ylabel('Mean absolute difference')
+    plt.title('Optimization curve')
+
+    hthetaopted, vthetaopted = descriptor.get_theta(optimizedDepth_torch)
+    tensor2disp(1 / optimizedDepth_torch, vmax=0.2, ind=0).show()
+    tensor2disp(htheta_gtsize - 1, vmax=4, ind=0).show()
+    tensor2disp(htheta - 1, vmax=4, ind=0).show()
+    tensor2disp(vtheta_gtsize - 1, vmax=4, ind=0).show()
+    tensor2disp(hthetaopted - 1, vmax=4, ind=0).show()
 if __name__ == "__main__":
     options = MonodepthOptions()
     args = options.parse()
