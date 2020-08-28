@@ -477,14 +477,13 @@ class ComputeSurfaceNormal(nn.Module):
                                 [-1., 0., 1.]]).unsqueeze(0).unsqueeze(0)
 
         weightsy = torch.Tensor([[-1., -2., -1.],
-                                [0., 0., 0.],
-                                [1., 2., 1.]]).unsqueeze(0).unsqueeze(0)
+                                 [0., 0., 0.],
+                                 [1., 2., 1.]]).unsqueeze(0).unsqueeze(0)
         self.convx = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
         self.convy = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
 
         self.convx.weight = nn.Parameter(weightsx,requires_grad=False)
         self.convy.weight = nn.Parameter(weightsy,requires_grad=False)
-
 
     def forward(self, depthMap, invcamK):
         depthMap = depthMap.view(self.batch_size, -1)
@@ -496,21 +495,14 @@ class ComputeSurfaceNormal(nn.Module):
         changex = torch.cat([self.convx(veh_coords[:, 0:1, :, :]), self.convx(veh_coords[:, 1:2, :, :]), self.convx(veh_coords[:, 2:3, :, :])], dim=1)
         changey = torch.cat([self.convy(veh_coords[:, 0:1, :, :]), self.convy(veh_coords[:, 1:2, :, :]), self.convy(veh_coords[:, 2:3, :, :])], dim=1)
         surfnorm = torch.cross(changex, changey, dim=1)
-        surfnorm = F.normalize(surfnorm, dim = 1)
+        surfnorm = F.normalize(surfnorm, dim=1)
+        surfnorm = torch.clamp(surfnorm, min=-1+1e-6, max=1-1e-6)
         return surfnorm
 
-    def visualization_forward(self, depthMap, invcamK):
-        depthMap = depthMap.view(self.batch_size, -1)
-        cam_coords = self.pix_coords * torch.stack([depthMap, depthMap, depthMap], dim=1)
-        cam_coords = torch.cat([cam_coords, self.ones], dim=1)
-        veh_coords = torch.matmul(invcamK, cam_coords)
-        veh_coords = veh_coords.view(self.batch_size, 4, self.height, self.width)
-        veh_coords = veh_coords
-        changex = torch.cat([self.convx(veh_coords[:, 0:1, :, :]), self.convx(veh_coords[:, 1:2, :, :]), self.convx(veh_coords[:, 2:3, :, :])], dim=1)
-        changey = torch.cat([self.convy(veh_coords[:, 0:1, :, :]), self.convy(veh_coords[:, 1:2, :, :]), self.convy(veh_coords[:, 2:3, :, :])], dim=1)
-        surfnorm = torch.cross(changex, changey, dim=1)
-        surfnorm = F.normalize(surfnorm, dim = 1)
-        return surfnorm
+    def get_theta_from_norm(self, surfnorm):
+        hthetagt = torch.acos(surfnorm[:, 0:1, :, :])
+        vthetagt = torch.acos(surfnorm[:, 1:2, :, :])
+        return hthetagt, vthetagt
 
 class localGeomDesp(nn.Module):
     def __init__(self, height, width, batch_size, ptspair):
