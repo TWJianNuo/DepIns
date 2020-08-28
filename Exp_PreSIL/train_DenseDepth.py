@@ -185,8 +185,6 @@ class Trainer:
         self.model_lr_scheduler.step()
         self.set_train()
 
-        self.val()
-
         for batch_idx, inputs in enumerate(self.train_loader):
 
             before_op_time = time.time()
