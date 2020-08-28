@@ -24,30 +24,6 @@ h = 576
 
 maxM = 1000
 sMax = 255 ** 3 - 1
-def ndcToDepth(ndc):
-    nc_z = 0.15
-    fc_z = 600
-    fov_v = 59 #degrees
-    nc_h = 2 * nc_z * math.tan(fov_v / 2.0)
-    nc_w = 1920 / 1080.0 * nc_h
-
-    depth = np.zeros((rows,cols))
-
-    # Iterate through values
-    # d_nc could be saved as it is identical for each computation
-    # Then the rest of the calculations could be vectorized
-    # TODO if need to use this frequently
-    for j in range(0,rows):
-        for i in range(0,cols):
-            nc_x = abs(((2 * i) / (cols - 1.0)) - 1) * nc_w / 2.0
-            nc_y = abs(((2 * j) / (rows - 1.0)) - 1) * nc_h / 2.0
-
-            d_nc = math.sqrt(pow(nc_x,2) + pow(nc_y,2) + pow(nc_z,2))
-            depth[j,i] = d_nc / (ndc[j,i] + (nc_z * d_nc / (2 * fc_z)))
-            if ndc[j,i] == 0.0:
-                depth[j,i] = fc_z
-    return depth
-
 def batch_ndcToDepth(ndc):
     nc_z = 0.15
     fc_z = 600
@@ -83,6 +59,16 @@ def resize_arr_rgb(rgb):
     rgb_r = pil.Image.resize(rgb, [w, h],  resample = pil.LANCZOS)
     rgb_r = np.array(rgb_r)[32 * cut::, :, :]
     return rgb_r
+
+def check_validity(seqNum, img_idx, target_dir):
+    valid = True
+    try:
+        pil.open(os.path.join(target_dir, str(seqNum).zfill(6), 'rgb', "{}.png".format(str(img_idx).zfill(6))))
+        pil.open(os.path.join(target_dir, str(seqNum).zfill(6), 'depth', "{}.png".format(str(img_idx).zfill(6))))
+    except:
+        valid = False
+
+    return valid
 
 import time
 st = time.time()
@@ -136,8 +122,10 @@ lidar_mask[lidar_dummyscanp2dval[:, 1], lidar_dummyscanp2dval[:, 0]] = True
 pil.fromarray(lidar_mask.astype(np.uint8) * 255).save(os.path.join(target_dir, 'lidar_mask.png'))
 
 for img_idx in range(51075):
-    # img_idx = 1090
     seqNum = int(img_idx / 5000)
+
+    if check_validity(seqNum, img_idx, target_dir):
+        continue
 
     file_path = depth_dir + '/{:06d}.bin'.format(img_idx)
     fd = open(file_path, 'rb')

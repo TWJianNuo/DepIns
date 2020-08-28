@@ -225,7 +225,6 @@ class Trainer:
         inputs["hthetagt"] = hthetagt
         inputs["vthetagt"] = vthetagt
 
-
         outputs = dict()
         losses = dict()
 
