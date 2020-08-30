@@ -454,56 +454,6 @@ class Conv2d(torch.nn.Conv2d):
         output_shape = [x.shape[0], self.weight.shape[0]] + output_shape
         return _NewEmptyTensorOp.apply(x, output_shape)
 
-
-class ComputeSurfaceNormal(nn.Module):
-    def __init__(self, height, width, batch_size):
-        super(ComputeSurfaceNormal, self).__init__()
-        self.height = height
-        self.width = width
-        self.batch_size = batch_size
-        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
-        xx = xx.flatten().astype(np.float32)
-        yy = yy.flatten().astype(np.float32)
-        self.pix_coords = np.expand_dims(np.stack([xx, yy, np.ones(self.width * self.height).astype(np.float32)], axis=1), axis=0).repeat(self.batch_size, axis=0)
-        self.pix_coords = torch.from_numpy(self.pix_coords).permute(0,2,1)
-        self.ones = torch.ones(self.batch_size, 1, self.height * self.width)
-        self.pix_coords = self.pix_coords.cuda()
-        self.ones = self.ones.cuda()
-        self.init_gradconv()
-
-    def init_gradconv(self):
-        weightsx = torch.Tensor([[-1., 0., 1.],
-                                [-2., 0., 2.],
-                                [-1., 0., 1.]]).unsqueeze(0).unsqueeze(0)
-
-        weightsy = torch.Tensor([[-1., -2., -1.],
-                                 [0., 0., 0.],
-                                 [1., 2., 1.]]).unsqueeze(0).unsqueeze(0)
-        self.convx = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
-        self.convy = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
-
-        self.convx.weight = nn.Parameter(weightsx,requires_grad=False)
-        self.convy.weight = nn.Parameter(weightsy,requires_grad=False)
-
-    def forward(self, depthMap, invcamK):
-        depthMap = depthMap.view(self.batch_size, -1)
-        cam_coords = self.pix_coords * torch.stack([depthMap, depthMap, depthMap], dim=1)
-        cam_coords = torch.cat([cam_coords, self.ones], dim=1)
-        veh_coords = torch.matmul(invcamK, cam_coords)
-        veh_coords = veh_coords.view(self.batch_size, 4, self.height, self.width)
-        veh_coords = veh_coords
-        changex = torch.cat([self.convx(veh_coords[:, 0:1, :, :]), self.convx(veh_coords[:, 1:2, :, :]), self.convx(veh_coords[:, 2:3, :, :])], dim=1)
-        changey = torch.cat([self.convy(veh_coords[:, 0:1, :, :]), self.convy(veh_coords[:, 1:2, :, :]), self.convy(veh_coords[:, 2:3, :, :])], dim=1)
-        surfnorm = torch.cross(changex, changey, dim=1)
-        surfnorm = F.normalize(surfnorm, dim=1)
-        surfnorm = torch.clamp(surfnorm, min=-1+1e-6, max=1-1e-6)
-        return surfnorm
-
-    def get_theta_from_norm(self, surfnorm):
-        hthetagt = torch.acos(surfnorm[:, 0:1, :, :])
-        vthetagt = torch.acos(surfnorm[:, 1:2, :, :])
-        return hthetagt, vthetagt
-
 class localGeomDesp(nn.Module):
     def __init__(self, height, width, batch_size, ptspair):
         super(localGeomDesp, self).__init__()
@@ -6120,6 +6070,58 @@ class LocalThetaDesp(nn.Module):
 
         return inbl, outbl, scl
 
+class SurfaceNormalOptimizer(nn.Module):
+    def __init__(self, height, width, batch_size):
+        super(SurfaceNormalOptimizer, self).__init__()
+        self.height = height
+        self.width = width
+        self.batch_size = batch_size
+        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        xx = xx.flatten().astype(np.float32)
+        yy = yy.flatten().astype(np.float32)
+        self.pix_coords = np.expand_dims(np.stack([xx, yy, np.ones(self.width * self.height).astype(np.float32)], axis=1), axis=0).repeat(self.batch_size, axis=0)
+        self.pix_coords = torch.from_numpy(self.pix_coords).permute(0, 2, 1)
+        self.ones = torch.ones(self.batch_size, 1, self.height * self.width)
+        self.pix_coords = self.pix_coords.cuda()
+        self.ones = self.ones.cuda()
+        self.init_gradconv()
+
+    def init_gradconv(self):
+        weightsx = torch.Tensor([[-1., 0., 1.],
+                                [-2., 0., 2.],
+                                [-1., 0., 1.]]).unsqueeze(0).unsqueeze(0).expand([3, -1, -1, -1])
+
+        weightsy = torch.Tensor([[-1., -2., -1.],
+                                 [0., 0., 0.],
+                                 [1., 2., 1.]]).unsqueeze(0).unsqueeze(0).expand([3, -1, -1, -1])
+        self.convx = nn.Conv2d(in_channels=3, out_channels=3, kernel_size=3, padding=1, bias=False, groups=3)
+        self.convy = nn.Conv2d(in_channels=3, out_channels=3, kernel_size=3, padding=1, bias=False, groups=3)
+
+        self.convx.weight = nn.Parameter(weightsx, requires_grad=False)
+        self.convy.weight = nn.Parameter(weightsy, requires_grad=False)
+
+    def depth2norm(self, depthMap, intrinsic):
+        # intrinsic: (batch_size, 4, 4)
+        invcamK = torch.inverse(intrinsic)
+        depthMap = depthMap.view(self.batch_size, -1)
+        cam_coords = self.pix_coords * torch.stack([depthMap, depthMap, depthMap], dim=1)
+        cam_coords = torch.cat([cam_coords, self.ones], dim=1)
+        veh_coords = torch.matmul(invcamK, cam_coords)
+        veh_coords = veh_coords.view(self.batch_size, 4, self.height, self.width)
+        veh_coords = veh_coords[:, 0:3, :, :]
+        changex = self.convx(veh_coords)
+        changey = self.convy(veh_coords)
+        surfnorm = torch.cross(changex, changey, dim=1)
+        surfnorm = F.normalize(surfnorm, dim=1)
+        surfnorm = torch.clamp(surfnorm, min=-1+1e-6, max=1-1e-6)
+
+        # vind = 1
+        # tensor2disp(surfnorm[:, 0:1, :, :] + 1, vmax=2, ind=vind).show()
+        # tensor2disp(surfnorm[:, 1:2, :, :] + 1, vmax=2, ind=vind).show()
+        # tensor2disp(surfnorm[:, 2:3, :, :] + 1, vmax=2, ind=vind).show()
+        return surfnorm
+
+
 
 '''
 # Code Back up Area
@@ -6413,3 +6415,6 @@ class LocalThetaDesp(nn.Module):
         eng.legend(['after opt', 'lidar'], nargout=0)
         return 0
 '''
+
+
+

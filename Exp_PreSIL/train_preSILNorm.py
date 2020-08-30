@@ -96,7 +96,7 @@ class Trainer:
         self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
-        self.models["depth"] = DepthDecoder(self.models["encoder"].num_ch_enc, num_output_channels=2)
+        self.models["depth"] = DepthDecoder(self.models["encoder"].num_ch_enc, num_output_channels=3)
         self.models["depth"].to(self.device)
         self.parameters_to_train += list(self.models["depth"].parameters())
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
@@ -126,7 +126,7 @@ class Trainer:
 
         self.best_abs = 1e10
 
-        self.surfnormer = ComputeSurfaceNormal(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size).cuda()
+        self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size).cuda()
 
     def set_dataset(self):
         """properly handle multiple dataset situation
@@ -218,12 +218,7 @@ class Trainer:
         for key, ipt in inputs.items():
             if not key == 'tag':
                 inputs[key] = ipt.to(self.device)
-        normgt = self.surfnormer.forward(inputs["depthgt"], torch.inverse(inputs["K"]))
-        hthetagt, vthetagt = self.surfnormer.get_theta_from_norm(normgt)
-
-        inputs["normgt"] = normgt
-        inputs["hthetagt"] = hthetagt
-        inputs["vthetagt"] = vthetagt
+        inputs["normgt"] = self.sfnormOptimizer.depth2norm(inputs["depthgt"], inputs["K"])
 
         outputs = dict()
         losses = dict()
@@ -288,7 +283,6 @@ class Trainer:
     def val(self):
         """Validate the model on a single minibatch
         """
-        count = 0
         self.set_eval()
         toterr = 0
         with torch.no_grad():
@@ -297,21 +291,16 @@ class Trainer:
                     if not key == 'tag':
                         inputs[key] = ipt.to(self.device)
 
-                normgt = self.surfnormer.forward(inputs["depthgt"], torch.inverse(inputs["K"]))
-                hthetagt, vthetagt = self.surfnormer.get_theta_from_norm(normgt)
-
-                inputs["normgt"] = normgt
-                inputs["hthetagt"] = hthetagt
-                inputs["vthetagt"] = vthetagt
+                normgt = self.sfnormOptimizer.depth2norm(inputs["depthgt"], inputs["K"])
 
                 outputs = self.models['depth'](self.models['encoder'](inputs["color"]))
-                pred_htheta = outputs[('disp', 0)][:, 0:1, :, :] * np.pi
-                pred_vtheta = outputs[('disp', 0)][:, 1:2, :, :] * np.pi
-                for i in range(inputs["color"].shape[0]):
-                    toterr = toterr + float(torch.mean(torch.abs(pred_htheta - inputs['hthetagt']) + torch.abs(pred_vtheta - inputs['vthetagt'])).cpu().numpy())
-                    count = count + 1
+
+                prednorm = (outputs[('disp', 0)] - 0.5) * 2
+                prednorm = prednorm / torch.norm(prednorm, dim=1, keepdim=True).expand([-1, 3, -1, -1])
+
+                toterr = torch.mean(1 - torch.sum(prednorm * normgt, dim=1, keepdim=True))
             del inputs, outputs
-        mean_err = toterr / count
+        mean_err = toterr / self.val_loader.__len__()
 
         if mean_err < self.best_abs:
             self.best_abs = mean_err
@@ -327,14 +316,10 @@ class Trainer:
         losses = {}
         l1loss = 0
         for scale in range(4):
-            pred_htheta = outputs[('disp', scale)][:, 0:1, :, :] * np.pi
-            pred_vtheta = outputs[('disp', scale)][:, 1:2, :, :] * np.pi
-            pred_htheta = F.interpolate(pred_htheta, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            pred_vtheta = F.interpolate(pred_vtheta, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            l1loss = l1loss + torch.mean(torch.abs(pred_htheta - inputs['hthetagt']) + torch.abs(pred_vtheta - inputs['vthetagt']))
-            if scale == 0:
-                outputs['pred_htheta'] = pred_htheta
-                outputs['pred_vtheta'] = pred_vtheta
+            pred_norm = (outputs[('disp', scale)] - 0.5) * 2
+            pred_htheta = F.interpolate(pred_norm, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
+            l1loss = l1loss + torch.mean(torch.abs(pred_htheta - inputs['normgt']))
+
         l1loss = l1loss / 4
         losses['norm_l1loss'] = l1loss
 
@@ -353,14 +338,31 @@ class Trainer:
         vind = 0
 
         figrgb = tensor2rgb(inputs['color'], ind=vind)
-        fighthetagt = tensor2disp(inputs['hthetagt'], vmax=np.pi, ind=0)
-        figvthetagt = tensor2disp(inputs['vthetagt'], vmax=np.pi, ind=0)
-        fighthetapred = tensor2disp(outputs['pred_htheta'], vmax=np.pi, ind=0)
-        figvthetapred = tensor2disp(outputs['pred_vtheta'], vmax=np.pi, ind=0)
-        fig1 = np.concatenate([np.array(figrgb), np.array(fighthetapred), np.array(fighthetagt)], axis=0)
-        fig2 = np.concatenate([np.array(figrgb), np.array(figvthetapred), np.array(figvthetagt)], axis=0)
-        self.writers['train'].add_image('htheta-view', (torch.from_numpy(fig1).float() / 255).permute([2, 0, 1]), self.step)
-        self.writers['train'].add_image('vtheta-view', (torch.from_numpy(fig2).float() / 255).permute([2, 0, 1]), self.step)
+
+        fignormc1gt = tensor2disp((inputs['normgt'][:, 0:1, :, :] + 1) / 2, vmax=1, ind=0)
+        fignormc1pred = tensor2disp(outputs[('disp', 0)][:, 0:1, :, :], vmax=1, ind=0)
+
+        fignormc2gt = tensor2disp((inputs['normgt'][:, 1:2, :, :] + 1) / 2, vmax=1, ind=0)
+        fignormc2pred = tensor2disp(outputs[('disp', 0)][:, 1:2, :, :], vmax=1, ind=0)
+
+        fignormc3gt = tensor2disp((inputs['normgt'][:, 2:3, :, :] + 1) / 2, vmax=1, ind=0)
+        fignormc3pred = tensor2disp(outputs[('disp', 0)][:, 2:3, :, :], vmax=1, ind=0)
+
+        fignormgt = tensor2rgb((inputs['normgt'] + 1) / 2, ind=0)
+        prednorm = (outputs[('disp', 0)] - 0.5) * 2
+        prednorm = prednorm / torch.norm(prednorm, dim=1, keepdim=True).expand([-1, 3, -1, -1])
+        fignormpred = tensor2rgb((prednorm + 1) / 2, ind=0)
+
+        fignormc1view = np.concatenate([np.array(figrgb), np.array(fignormc1gt), np.array(fignormc1pred)], axis=0)
+        fignormc2view = np.concatenate([np.array(figrgb), np.array(fignormc2gt), np.array(fignormc2pred)], axis=0)
+        fignormc3view = np.concatenate([np.array(figrgb), np.array(fignormc3gt), np.array(fignormc3pred)], axis=0)
+        fignormview = np.concatenate([np.array(figrgb), np.array(fignormgt), np.array(fignormpred)], axis=0)
+
+        self.writers['train'].add_image('normc1view', (torch.from_numpy(fignormc1view).float() / 255).permute([2, 0, 1]), self.step)
+        self.writers['train'].add_image('normc2view', (torch.from_numpy(fignormc2view).float() / 255).permute([2, 0, 1]), self.step)
+        self.writers['train'].add_image('normc3view', (torch.from_numpy(fignormc3view).float() / 255).permute([2, 0, 1]), self.step)
+        self.writers['train'].add_image('normview', (torch.from_numpy(fignormview).float() / 255).permute([2, 0, 1]), self.step)
+
 
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file
