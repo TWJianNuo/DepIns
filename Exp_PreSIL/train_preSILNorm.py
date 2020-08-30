@@ -185,7 +185,7 @@ class Trainer:
         """
         self.model_lr_scheduler.step()
         self.set_train()
-
+        
         for batch_idx, inputs in enumerate(self.train_loader):
 
             before_op_time = time.time()
@@ -298,7 +298,7 @@ class Trainer:
                 prednorm = (outputs[('disp', 0)] - 0.5) * 2
                 prednorm = prednorm / torch.norm(prednorm, dim=1, keepdim=True).expand([-1, 3, -1, -1])
 
-                toterr = torch.mean(1 - torch.sum(prednorm * normgt, dim=1, keepdim=True))
+                toterr = toterr + torch.mean(1 - torch.sum(prednorm * normgt, dim=1, keepdim=True))
             del inputs, outputs
         mean_err = toterr / self.val_loader.__len__()
 
