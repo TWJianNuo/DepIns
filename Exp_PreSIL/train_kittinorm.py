@@ -20,7 +20,7 @@ with warnings.catch_warnings():
     else:
         from tensorboardX import SummaryWriter
 
-from Exp_PreSIL.dataloader_PreSIL import PreSILDataset
+from Exp_PreSIL.dataloader_kitti import KittiDataset
 
 import networks
 
@@ -35,6 +35,7 @@ import argparse
 default_logpath = os.path.join(project_rootdir, 'tmp')
 parser = argparse.ArgumentParser(description='Train Dense Depth of PreSIL Synthetic Data')
 parser.add_argument("--data_path",              type=str,                               help="path to dataset")
+parser.add_argument("--gt_path",                type=str,                               help="path to kitti gt file")
 parser.add_argument("--model_name",             type=str,                               help="name of the model")
 parser.add_argument("--split",                  type=str,                               help="train/val split to use")
 parser.add_argument("--log_dir",                type=str,   default=default_logpath,    help="path to log file")
@@ -45,7 +46,6 @@ parser.add_argument("--min_depth",              type=float, default=0.1,        
 parser.add_argument("--max_depth",              type=float, default=100.0,              help="maximum depth")
 parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
-parser.add_argument("--as_lidar",                action="store_true")
 
 # OPTIMIZATION options
 parser.add_argument("--batch_size",             type=int,   default=12,                 help="batch size")
@@ -137,14 +137,14 @@ class Trainer:
         train_filenames = readlines(fpath.format("train"))
         val_filenames = readlines(test_fpath)
 
-        train_dataset = PreSILDataset(
-            self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
-            is_train=True, as_lidar=self.opt.as_lidar
+        train_dataset = KittiDataset(
+            self.opt.data_path, self.opt.gt_path, train_filenames, self.opt.height, self.opt.width,
+            is_train=True
         )
 
-        val_dataset = PreSILDataset(
-            self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
-            is_train=False, as_lidar=self.opt.as_lidar
+        val_dataset = KittiDataset(
+            self.opt.data_path, self.opt.gt_path, val_filenames, self.opt.height, self.opt.width,
+            is_train=False
         )
 
         self.train_loader = DataLoader(
@@ -212,40 +212,13 @@ class Trainer:
 
             self.step += 1
 
-    def process_batch(self, inputs):
+    def process_batch(self, inputs, isval = False):
         """Pass a minibatch through the network and generate images and losses
         """
         for key, ipt in inputs.items():
             if not key == 'tag':
                 inputs[key] = ipt.to(self.device)
-        inputs["normgt"] = self.sfnormOptimizer.depth2norm(inputs["depthgt"], inputs["K"], issharp=True)
-        self.sfnormOptimizer.intergrationloss(inputs["normgt"], inputs["K"], inputs["depthgt"])
-
-        # dummynormseed = torch.rand([self.opt.batch_size, 3, self.opt.height, self.opt.width], dtype=torch.float, device="cuda", requires_grad=True)
-        # dummyoptimizer = optim.Adam([dummynormseed], lr=1e-1)
-        #
-        # for i in range(100000):
-        #     dummynorm = (torch.sigmoid(dummynormseed) - 0.5) * 2
-        #     dummynorm = F.normalize(dummynorm, dim=1)
-        #     dummyloss, outrangeval = self.sfnormOptimizer.intergrationloss(dummynorm, inputs["K"], inputs["depthgt"])
-        #     dummyoptimizer.zero_grad()
-        #     dummyloss.backward()
-        #     dummyoptimizer.step()
-        #     print("Iteration: %d, Loss: %f, outrange: %f" % (i, float(dummyloss.detach().cpu().numpy()), float(outrangeval.detach().cpu().numpy())))
-
-
-        # for i in range(100000):
-        #     outputs = dict()
-        #     outputs.update(self.models['depth'](self.models['encoder'](inputs['color_aug'])))
-        #     dummynorm = (outputs['disp', 0] - 0.5) * 2
-        #     dummynorm = F.normalize(dummynorm, dim=1)
-        #     dummyloss, outrangeval = self.sfnormOptimizer.intergrationloss(dummynorm, inputs["K"], inputs["depthgt"])
-        #     dummyloss = dummyloss
-        #     self.model_optimizer.zero_grad()
-        #     dummyloss.backward()
-        #     self.model_optimizer.step()
-        #     print("Iteration: %d, Loss: %f, outrange: %f" % (i, float(dummyloss.detach().cpu().numpy()), float(outrangeval.detach().cpu().numpy())))
-
+        inputs["normgt"] = self.sfnormOptimizer.depth2norm(inputs["depthgt"], inputs["K"])
 
         outputs = dict()
         losses = dict()
@@ -256,56 +229,13 @@ class Trainer:
         # losses.update(self.theta_compute_losses(inputs, outputs))
 
         # Depth Branch
-        losses.update(self.norm_compute_losses(inputs, outputs, isIntegration=True))
+        losses.update(self.norm_compute_losses(inputs, outputs))
 
         # Constrain Branch
         # losses.update(self.constrain_compute_losses(inputs, outputs))
 
         losses['totLoss'] = losses['norm_l1loss']
         return outputs, losses
-
-    def constrain_compute_losses(self, inputs, outputs):
-        losses = dict()
-        l1constrain = 0
-        htheta_pred_detached = outputs['htheta_pred'].detach()
-        vtheta_pred_detached = outputs['vtheta_pred'].detach()
-
-        # htheta, vtheta = self.presil_localthetadesp.get_theta(inputs['pSIL_depth'])
-        # self.presil_localthetadesp.depth_localgeom_consistency(inputs['pSIL_depth'], htheta, vtheta)
-        for i in range(len(self.opt.scales)):
-            scaledDepth = F.interpolate(outputs[('depth', 0, i)] * self.STEREO_SCALE_FACTOR, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            l1constrain = l1constrain + self.localthetadespKitti_scaled.depth_localgeom_consistency(scaledDepth, htheta_pred_detached, vtheta_pred_detached, mask=self.thetalossmap)
-        l1constrain = l1constrain / len(self.opt.scales)
-        losses['norm_l1loss'] = l1constrain
-        return losses
-
-    def theta_compute_losses(self, inputs, outputs):
-        losses = dict()
-        ltheta = 0
-        sclLoss = 0
-        for i in range(len(self.opt.scales)):
-            pred_theta = outputs[('disp', i)][:,0:2,:,:]
-            pred_theta = F.interpolate(pred_theta, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            pred_theta = pred_theta * float(np.pi) * 2
-            htheta_pred = pred_theta[:, 0:1, :, :]
-            vtheta_pred = pred_theta[:, 1:2, :, :]
-
-            inbl, outbl, scl = self.localthetadespKitti.inplacePath_loss(depthmap=inputs['depthgt'], htheta=htheta_pred, vtheta=vtheta_pred, balancew = self.opt.balancew)
-
-            if i == 0:
-                outputs['htheta_pred'] = outputs[('disp', i)][:, 0:1, :, :] * float(np.pi) * 2
-                outputs['vtheta_pred'] = outputs[('disp', i)][:, 1:2, :, :] * float(np.pi) * 2
-
-            ltheta = ltheta + inbl + outbl / 10
-            sclLoss = sclLoss + scl
-
-        ltheta = ltheta / 4
-        sclLoss = sclLoss / 4
-
-        losses['ltheta'] = ltheta
-        losses['sclLoss'] = sclLoss
-
-        return losses
 
     def val(self):
         """Validate the model on a single minibatch
@@ -337,20 +267,14 @@ class Trainer:
         print("\nBest Performance: %f" % self.best_abs)
         self.set_train()
 
-    def norm_compute_losses(self, inputs, outputs, isIntegration = False):
+    def norm_compute_losses(self, inputs, outputs):
         """Compute the reprojection and smoothness losses for a minibatch
         """
         losses = {}
         l1loss = 0
         for scale in range(4):
             pred_norm = (outputs[('disp', scale)] - 0.5) * 2
-            pred_norm = F.normalize(pred_norm, dim=1)
             pred_norm = F.interpolate(pred_norm, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            if not isIntegration:
-                l1loss = l1loss + torch.mean(torch.abs(pred_norm - inputs['normgt']))
-            else:
-                integrationloss, outrangeval = self.sfnormOptimizer.intergrationloss(pred_norm, inputs["K"], inputs["depthgt"])
-                l1loss = l1loss + integrationloss
 
         l1loss = l1loss / 4
         losses['norm_l1loss'] = l1loss

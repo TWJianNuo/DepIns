@@ -14,23 +14,23 @@ from utils import *
 
 import time
 
-class PreSILDataset(data.Dataset):
+class KittiDataset(data.Dataset):
     def __init__(self,
                  data_path,
+                 gt_path,
                  filenames,
                  height,
                  width,
-                 as_lidar=False,
                  is_train=False
                  ):
-        super(PreSILDataset, self).__init__()
+        super(KittiDataset, self).__init__()
 
         self.data_path = data_path
+        self.gt_path = gt_path
         self.filenames = filenames
         self.height = height
         self.width = width
         self.is_train = is_train
-        self.as_lidar = as_lidar
 
         self.to_tensor = transforms.ToTensor()
         self.interp = Image.ANTIALIAS
@@ -48,23 +48,17 @@ class PreSILDataset(data.Dataset):
             self.saturation = 0.2
             self.hue = 0.1
 
-        scaleM = np.array([
-            [1024 / 1920, 0, 0],
-            [0, 576 / 1080, -128],
-            [0, 0, 1]
-        ])
+        self.dirmapping = {'l': 'image_02', 'r': 'image_03'}
 
-        intrinsic = np.array([
-            [960, 0, 960],
-            [0, 960, 540],
-            [0, 0, 1]
-        ])
-        intrinsic = scaleM @ intrinsic
-        self.intrinsic = np.eye(4)
-        self.intrinsic[0:3, 0:3] = intrinsic
+        self.crph = 365
+        self.crpw = 1220
 
-        self.lidarMask = pil.open(os.path.join(self.data_path, "lidar_mask.png"))
-        self.lidarMask = pil.fromarray((np.array(self.lidarMask) == 255).astype(np.uint8))
+        self.resize = transforms.Resize((self.height, self.width), interpolation=self.interp)
+
+        self.rescaleK = np.eye(4)
+        self.rescaleK[0, 0] = self.width / self.crpw
+        self.rescaleK[1, 1] = self.height / self.crph
+
     def preprocess(self, inputs, color_aug, rndseed):
         """Resize colour images to the required scales and augment if required
 
@@ -74,10 +68,11 @@ class PreSILDataset(data.Dataset):
         """
         # Do random Crop
         cropped_color = self.rndcrop_color(inputs["color"], rndseed)
-        cropped_depth, intrinsic = self.rndcrop_depth(inputs["depthgt"], rndseed)
+        cropped_depth, intrinsic = self.rndcrop_depth(inputs["depthgt"], rndseed, inputs['K'])
 
-        inputs["color"] = cropped_color
+        inputs["color"] = self.resize(cropped_color)
         inputs["depthgt"] = cropped_depth
+
 
         for k in list(inputs):
             f = inputs[k]
@@ -89,6 +84,7 @@ class PreSILDataset(data.Dataset):
                 inputs[k] = np.array(f).astype(np.float32) / 256.0
                 inputs[k] = torch.from_numpy(inputs[k]).unsqueeze(0)
                 inputs["K"] = torch.from_numpy(intrinsic.astype(np.float32))
+                inputs["K_scaled"] = torch.from_numpy((self.rescaleK @ intrinsic).astype(np.float32))
 
     def __len__(self):
         return len(self.filenames)
@@ -99,87 +95,84 @@ class PreSILDataset(data.Dataset):
         w, h = img.size
 
         if not self.is_train:
-            left = np.random.randint(w - self.width + 1)
-            top = np.random.randint(h - self.height + 1)
+            left = np.random.randint(w - self.crpw + 1)
+            top = np.random.randint(h - self.crph + 1)
         else:
-            left = int((w - self.width) / 2)
-            top = int((h - self.height) / 2)
-        imgcropped = img.crop((left, top, left + self.width, top + self.height))
+            left = int((w - self.crpw) / 2)
+            top = int((h - self.crph) / 2)
+        imgcropped = img.crop((left, top, left + self.crpw, top + self.crph))
 
         return imgcropped
 
-    def rndcrop_depth(self, img, rndseed):
+    def rndcrop_depth(self, img, rndseed, intrinsic):
         np.random.seed(rndseed)
 
         w, h = img.size
 
         if not self.is_train:
-            left = np.random.randint(w - self.width + 1)
-            top = np.random.randint(h - self.height + 1)
+            left = np.random.randint(w - self.crpw + 1)
+            top = np.random.randint(h - self.crph + 1)
         else:
-            left = int((w - self.width) / 2)
-            top = int((h - self.height) / 2)
-        imgcropped = img.crop((left, top, left + self.width, top + self.height))
+            left = int((w - self.crpw) / 2)
+            top = int((h - self.crph) / 2)
+        imgcropped = img.crop((left, top, left + self.crpw, top + self.crph))
 
-        if self.as_lidar:
-            maskcropped = self.lidarMask.copy().crop((left, top, left + self.width, top + self.height))
-            imgcropped = np.array(imgcropped).astype(np.float32) * np.array(maskcropped).astype(np.float32)
-            imgcropped = np.array(imgcropped).astype(np.uint16)
-            imgcropped = pil.fromarray(imgcropped)
-
-        intrinsic = np.copy(self.intrinsic)
-        intrinsic[0, 2] = intrinsic[0, 2] - left
-        intrinsic[1, 2] = intrinsic[1, 2] - top
+        intrinsic_cropped = np.copy(intrinsic)
+        intrinsic_cropped[0, 2] = intrinsic_cropped[0, 2] - left
+        intrinsic_cropped[1, 2] = intrinsic_cropped[1, 2] - top
 
         # Check
-        # xx_old = 500
-        # yy_old = 200
+        # xx, yy = np.meshgrid(range(w), range(h), indexing='xy')
+        # xx = xx[np.array(img) > 0]
+        # yy = yy[np.array(img) > 0]
+        #
+        # xx_old = xx[200]
+        # yy_old = yy[200]
         # d_old = float(np.array(img)[yy_old, xx_old]) / 256.0
         # pts_old = np.array([[xx_old * d_old, yy_old * d_old, d_old, 1]]).T
-        # pts_old = np.linalg.inv(self.intrinsic) @ pts_old
+        # pts_old = np.linalg.inv(intrinsic) @ pts_old
         #
         # xx_new = xx_old - left
         # yy_new = yy_old - top
         # d_new = float(np.array(imgcropped)[yy_new, xx_new]) / 256.0
         # pts_new = np.array([[xx_new * d_new, yy_new * d_new, d_new, 1]]).T
-        # pts_new = np.linalg.inv(intrinsic) @ pts_new
+        # pts_new = np.linalg.inv(intrinsic_cropped) @ pts_new
         #
         # assert np.abs(pts_new - pts_old).max() < 1e-3
 
-        return imgcropped, intrinsic
+        return imgcropped, intrinsic_cropped
 
     def __getitem__(self, index):
-        try:
-            inputs = {}
+        inputs = {}
 
-            do_color_aug = self.is_train and random.random() > 0.5
-            do_flip = self.is_train and random.random() > 0.5
+        do_color_aug = self.is_train and random.random() > 0.5
+        do_flip = self.is_train and random.random() > 0.5
 
-            line = self.filenames[index].split()
+        line = self.filenames[index].split()
 
-            folder = line[0]
-            frame_index = int(line[1])
+        folder = line[0]
+        frame_index = int(line[1])
+        side = line[2]
 
-            rndseed = int(time.time())
+        rndseed = int(time.time())
 
-            # RGB
-            inputs['color'] = self.get_color(folder, frame_index, do_flip)
+        # RGB
+        inputs['color'] = self.get_color(folder, frame_index, side, do_flip)
 
-            # Depth Map
-            inputs['depthgt'] = self.get_depthgt(folder, frame_index, do_flip)
+        # Depth Map
+        inputs['depthgt'] = self.get_depthgt(folder, frame_index, side, do_flip)
 
-            if do_color_aug:
-                color_aug = transforms.ColorJitter.get_params(self.brightness, self.contrast, self.saturation, self.hue)
-            else:
-                color_aug = (lambda x: x)
+        # intrinsic parameter
+        inputs['K'] = self.get_intrinsic(folder, side)
 
-            self.preprocess(inputs, color_aug, rndseed)
+        if do_color_aug:
+            color_aug = transforms.ColorJitter.get_params(self.brightness, self.contrast, self.saturation, self.hue)
+        else:
+            color_aug = (lambda x: x)
 
-            inputs['tag'] = self.initTag(index, do_flip)
+        self.preprocess(inputs, color_aug, rndseed)
 
-        except:
-            print(self.filenames[index])
-
+        inputs['tag'] = self.initTag(index, do_flip)
         return inputs
 
     def initTag(self, index, do_flip):
@@ -192,15 +185,20 @@ class PreSILDataset(data.Dataset):
             tag = tag + ' flipNoo'
         return tag
 
-    def get_color(self, folder, frame_index, do_flip):
-        color = pil.open(os.path.join(self.data_path, folder, "{}.png".format(str(frame_index).zfill(6))))
+    def get_color(self, folder, frame_index, side, do_flip):
+        color = pil.open(os.path.join(self.data_path, folder, self.dirmapping[side], "data/{}.png".format(str(frame_index).zfill(10))))
         if do_flip:
             color = color.transpose(pil.FLIP_LEFT_RIGHT)
         return color
 
-    def get_depthgt(self, folder, frame_index, do_flip):
-        depth_path = os.path.join(self.data_path, folder, "{}.png".format(str(frame_index).zfill(6))).replace("rgb", "depth")
-        depthgt = pil.open(depth_path)
+    def get_depthgt(self, folder, frame_index, side, do_flip):
+        depthgt = pil.open(os.path.join(self.gt_path, folder, self.dirmapping[side], "{}.png".format(str(frame_index).zfill(10))))
         if do_flip:
             depthgt = depthgt.transpose(Image.FLIP_LEFT_RIGHT)
         return depthgt
+
+    def get_intrinsic(self, folder, side):
+        cam2cam = read_calib_file(os.path.join(self.data_path, folder.split('/')[0], 'calib_cam_to_cam.txt'))
+        K = np.eye(4)
+        K[0:3, :] = cam2cam['P_rect_0{}'.format(self.dirmapping[side][-1])].reshape(3, 4)
+        return K

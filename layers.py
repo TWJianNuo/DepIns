@@ -6077,41 +6077,171 @@ class SurfaceNormalOptimizer(nn.Module):
         self.width = width
         self.batch_size = batch_size
         xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+
+        self.xx = nn.Parameter(torch.from_numpy(xx).unsqueeze(0).repeat([self.batch_size, 1, 1]).float(), requires_grad=False)
+        self.yy = nn.Parameter(torch.from_numpy(yy).unsqueeze(0).repeat([self.batch_size, 1, 1]).float(), requires_grad=False)
+
         xx = xx.flatten().astype(np.float32)
         yy = yy.flatten().astype(np.float32)
-        self.pix_coords = np.expand_dims(np.stack([xx, yy, np.ones(self.width * self.height).astype(np.float32)], axis=1), axis=0).repeat(self.batch_size, axis=0)
-        self.pix_coords = torch.from_numpy(self.pix_coords).permute(0, 2, 1)
-        self.ones = torch.ones(self.batch_size, 1, self.height * self.width)
-        self.pix_coords = self.pix_coords.cuda()
-        self.ones = self.ones.cuda()
+        pix_coords = np.expand_dims(np.stack([xx, yy, np.ones(self.width * self.height).astype(np.float32)], axis=1), axis=0).repeat(self.batch_size, axis=0)
+        self.pix_coords = nn.Parameter(torch.from_numpy(pix_coords).permute(0, 2, 1), requires_grad=False)
+        self.ones = nn.Parameter(torch.ones([self.batch_size, 1, self.height * self.width]), requires_grad=False)
         self.init_gradconv()
+        self.init_integration_kernel()
 
+    def init_integration_kernel(self):
+        lossh = torch.Tensor(
+            [[0, 1, 1, 0, 0],
+             [1, 1, 1, 0, 0],
+             [1, 1, 1, 1, 0],
+            ]
+        )
+        gth = torch.Tensor(
+            [[0, -1, 0, 1, 0],
+             [-1, 0, 0, 1, 0],
+             [-1, 0, 0, 0, 1],
+            ]
+        )
+        idh = torch.Tensor(
+            [[0, 1, 0, 1, 0],
+             [1, 0, 0, 1, 0],
+             [1, 0, 0, 0, 1],
+            ]
+        )
+        self.lossh = torch.nn.Conv2d(1, 3, [1, 5], padding=[0, 2], bias=False)
+        self.lossh.weight = torch.nn.Parameter(lossh.unsqueeze(1).unsqueeze(1).float(), requires_grad=False)
+        self.gth = torch.nn.Conv2d(1, 3, [1, 5], padding=[0, 2], bias=False)
+        self.gth.weight = torch.nn.Parameter(gth.unsqueeze(1).unsqueeze(1).float(), requires_grad=False)
+        self.idh = torch.nn.Conv2d(1, 3, [1, 5], padding=[0, 2], bias=False)
+        self.idh.weight = torch.nn.Parameter(idh.unsqueeze(1).unsqueeze(1).float(), requires_grad=False)
+
+
+        lossv = torch.Tensor(
+            [[1, 1, 1, 0, 0, 0, 0, 0, 0],
+             [1, 1, 1, 1, 0, 0, 0, 0, 0],
+             [1, 1, 1, 1, 1, 0, 0, 0, 0],
+             [1, 1, 1, 1, 1, 1, 0, 0, 0],
+             [1, 1, 1, 1, 1, 1, 1, 0, 0],
+             [1, 1, 1, 1, 1, 1, 1, 1, 0],
+            ]
+        )
+        gtv = torch.Tensor(
+            [[-1, 0, 0, 1, 0, 0, 0, 0, 0],
+             [-1, 0, 0, 0, 1, 0, 0, 0, 0],
+             [-1, 0, 0, 0, 0, 1, 0, 0, 0],
+             [-1, 0, 0, 0, 0, 0, 1, 0, 0],
+             [-1, 0, 0, 0, 0, 0, 0, 1, 0],
+             [-1, 0, 0, 0, 0, 0, 0, 0, 1],
+            ]
+        )
+        idv = torch.Tensor(
+            [[1, 0, 0, 1, 0, 0, 0, 0, 0],
+             [1, 0, 0, 0, 1, 0, 0, 0, 0],
+             [1, 0, 0, 0, 0, 1, 0, 0, 0],
+             [1, 0, 0, 0, 0, 0, 1, 0, 0],
+             [1, 0, 0, 0, 0, 0, 0, 1, 0],
+             [1, 0, 0, 0, 0, 0, 0, 0, 1],
+            ]
+        )
+
+        self.lossv = torch.nn.Conv2d(1, 6, [9, 1], padding=[4, 0], bias=False)
+        self.lossv.weight = torch.nn.Parameter(lossv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
+        self.gtv = torch.nn.Conv2d(1, 6, [9, 1], padding=[4, 0], bias=False)
+        self.gtv.weight = torch.nn.Parameter(gtv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
+        self.idv = torch.nn.Conv2d(1, 6, [9, 1], padding=[4, 0], bias=False)
+        self.idv.weight = torch.nn.Parameter(idv.unsqueeze(1).unsqueeze(3).float(), requires_grad=False)
+
+        selfconh = torch.Tensor(
+            [[0, 0, 0],
+             [0, 1, 0],
+             [0, 0, -1]
+            ]
+        )
+        self.selfconh = torch.nn.Conv2d(1, 1, 3, padding=1, bias=False)
+        self.selfconh.weight = torch.nn.Parameter(selfconh.unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
+        selfconv = torch.Tensor(
+            [[0, 0, 0],
+             [0, 0, 1],
+             [0, -1, 0]
+            ]
+        )
+        self.selfconv = torch.nn.Conv2d(1, 1, 3, padding=1, bias=False)
+        self.selfconv.weight = torch.nn.Parameter(selfconv.unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
+
+        selfconhIndW = torch.Tensor(
+            [[0, 0, 0],
+             [0, 1, 0],
+             [0, 0, 1]
+            ]
+        )
+        self.selfconhInd = torch.nn.Conv2d(1, 1, 3, padding=1, bias=False)
+        self.selfconhInd.weight = torch.nn.Parameter(selfconhIndW.unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
+        selfconvIndW = torch.Tensor(
+            [[0, 0, 0],
+             [0, 0, 1],
+             [0, 1, 0]
+            ]
+        )
+        self.selfconvInd = torch.nn.Conv2d(1, 1, 3, padding=1, bias=False)
+        self.selfconvInd.weight = torch.nn.Parameter(selfconvIndW.unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
     def init_gradconv(self):
         weightsx = torch.Tensor([[-1., 0., 1.],
                                 [-2., 0., 2.],
-                                [-1., 0., 1.]]).unsqueeze(0).unsqueeze(0).expand([3, -1, -1, -1])
+                                [-1., 0., 1.]]).unsqueeze(0).unsqueeze(0)
+        weightsx = weightsx / 4 / 2
 
         weightsy = torch.Tensor([[-1., -2., -1.],
                                  [0., 0., 0.],
-                                 [1., 2., 1.]]).unsqueeze(0).unsqueeze(0).expand([3, -1, -1, -1])
-        self.convx = nn.Conv2d(in_channels=3, out_channels=3, kernel_size=3, padding=1, bias=False, groups=3)
-        self.convy = nn.Conv2d(in_channels=3, out_channels=3, kernel_size=3, padding=1, bias=False, groups=3)
+                                 [1., 2., 1.]]).unsqueeze(0).unsqueeze(0)
+        weightsy = weightsy / 4 / 2
+        self.diffx = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+        self.diffy = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
 
-        self.convx.weight = nn.Parameter(weightsx, requires_grad=False)
-        self.convy.weight = nn.Parameter(weightsy, requires_grad=False)
+        self.diffx.weight = nn.Parameter(weightsx, requires_grad=False)
+        self.diffy.weight = nn.Parameter(weightsy, requires_grad=False)
 
-    def depth2norm(self, depthMap, intrinsic):
+        weightsx = torch.Tensor([[0., 0., 0.],
+                                [0., -1., 1.],
+                                [0., 0., 0.]]).unsqueeze(0).unsqueeze(0)
+        weightsx = weightsx
+
+        weightsy = torch.Tensor([[0., 0., 0.],
+                                 [0., -1., 0.],
+                                 [0., 1., 0.]]).unsqueeze(0).unsqueeze(0)
+        weightsy = weightsy
+        self.diffx_sharp = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+        self.diffy_sharp = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+
+        self.diffx_sharp.weight = nn.Parameter(weightsx, requires_grad=False)
+        self.diffy_sharp.weight = nn.Parameter(weightsy, requires_grad=False)
+
+    def depth2norm(self, depthMap, intrinsic, issharp=True):
         # intrinsic: (batch_size, 4, 4)
-        invcamK = torch.inverse(intrinsic)
-        depthMap = depthMap.view(self.batch_size, -1)
-        cam_coords = self.pix_coords * torch.stack([depthMap, depthMap, depthMap], dim=1)
-        cam_coords = torch.cat([cam_coords, self.ones], dim=1)
-        veh_coords = torch.matmul(invcamK, cam_coords)
-        veh_coords = veh_coords.view(self.batch_size, 4, self.height, self.width)
-        veh_coords = veh_coords[:, 0:3, :, :]
-        changex = self.convx(veh_coords)
-        changey = self.convy(veh_coords)
-        surfnorm = torch.cross(changex, changey, dim=1)
+        depthMaps = depthMap.squeeze(1)
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        if not issharp:
+            depthMap_gradx = self.diffx(depthMap).squeeze(1)
+            depthMap_grady = self.diffy(depthMap).squeeze(1)
+        else:
+            depthMap_gradx = self.diffx_sharp(depthMap).squeeze(1)
+            depthMap_grady = self.diffy_sharp(depthMap).squeeze(1)
+
+        vx1 = depthMaps / fx + (self.xx - bx) / fx * depthMap_gradx
+        vx2 = (self.yy - by) / fy * depthMap_gradx
+        vx3 = depthMap_gradx
+
+        vy1 = (self.xx - bx) / fx * depthMap_grady
+        vy2 = depthMaps / fy + (self.yy - by) / fy * depthMap_grady
+        vy3 = depthMap_grady
+
+        vx = torch.stack([vx1, vx2, vx3], dim=1)
+        vy = torch.stack([vy1, vy2, vy3], dim=1)
+
+        surfnorm = torch.cross(vx, vy, dim=1)
         surfnorm = F.normalize(surfnorm, dim=1)
         surfnorm = torch.clamp(surfnorm, min=-1+1e-6, max=1-1e-6)
 
@@ -6119,302 +6249,310 @@ class SurfaceNormalOptimizer(nn.Module):
         # tensor2disp(surfnorm[:, 0:1, :, :] + 1, vmax=2, ind=vind).show()
         # tensor2disp(surfnorm[:, 1:2, :, :] + 1, vmax=2, ind=vind).show()
         # tensor2disp(surfnorm[:, 2:3, :, :] + 1, vmax=2, ind=vind).show()
+        # tensor2rgb((surfnorm + 1) / 2, ind=vind).show()
+
+        # import random
+        # ckx = random.randint(0, self.width)
+        # cky = random.randint(0, self.height)
+        # ckz = random.randint(0, self.batch_size - 1)
+        #
+        # if not issharp:
+        #     ckdiff = depthMap_gradx[ckz, cky, ckx] - ((depthMap[ckz, 0, cky, ckx + 1] * 0.5 + depthMap[ckz, 0, cky + 1, ckx + 1] * 0.25 + depthMap[ckz, 0, cky - 1, ckx + 1] * 0.25) - (depthMap[ckz, 0, cky, ckx - 1] * 0.5 + depthMap[ckz, 0, cky + 1, ckx - 1] * 0.25 + depthMap[ckz, 0, cky - 1, ckx - 1] * 0.25)) / 2
+
         return surfnorm
 
+    def intergrationloss(self, surfnorm, intrinsic, depthMap):
+        anglebound = 0
+        protectmin = 1e-6
+        angw = 1e0
+        sclw = 1e-1
 
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
 
-'''
-# Code Back up Area
-# 2020/07/30
-    def vls_geompred(self, depthmap, htheta, vtheta, rgb, depthmaplidar, eng=None, instancemap=None):
-        # from tridepth.extractor import Mesh2DExtractor
-        # mesh_extractor = Mesh2DExtractor(canny_params={"denoise": False}, at_params={"filter_itr": 4, "error_thresh": 0.01}, min_edge_size=35)
+        surfnormx = torch.stack([surfnorm[:, 1, :, :] * (self.yy -by) / fy + surfnorm[:, 2, :, :], -(self.yy -by) / fy * surfnorm[:, 0, :, :], -surfnorm[:, 0, :, :]], dim=1)
+        surfnormy = torch.stack([-surfnorm[:, 1, :, :] * (self.xx -bx) / fx, (self.xx -bx) / fx * surfnorm[:, 0, :, :] + surfnorm[:, 2, :, :], -surfnorm[:, 1, :, :]], dim=1)
+
+        a1 = ((self.yy - by) / fy)**2 + 1
+        b1 = -(self.xx - bx) / fx
+
+        a2 = ((self.yy - by) / fy)**2 + 1
+        b2 = -(self.xx + 1 - bx) / fx
+
+        a3 = (self.yy - by) / fy * surfnormx[:, 1, :, :] + surfnormx[:, 2, :, :]
+        b3 = -surfnormx[:, 0, :, :]
+
+        u1 = ((self.xx - bx) / fx)**2 + 1
+        v1 = -(self.yy - by) / fy
+
+        u2 = ((self.xx - bx) / fx)**2 + 1
+        v2 = -(self.yy + 1 - by) / fy
+
+        u3 = surfnormy[:, 2, :, :] + (self.xx - bx) / fx * surfnormy[:, 0, :, :]
+        v3 = -surfnormy[:, 1, :, :]
+
+        logh = torch.log(torch.clamp(torch.abs(a3 * b1 - a1 * b3), min=protectmin)) - torch.log(torch.clamp(torch.abs(a3 * b2 - a2 * b3), min=protectmin))
+        logh = torch.clamp(logh, min=-10, max=10)
+
+        logv = torch.log(torch.abs(u2)) - torch.log(torch.abs(u1)) + torch.log(torch.clamp(torch.abs(u3 * v1 - u1 * v3), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3 * v2 - u2 * v3), min=protectmin))
+        logv = torch.clamp(logv, min=-10, max=10)
+
+        depthMapl = torch.log(depthMap)
+
+        low_angh = torch.atan2(-a1, b1)
+        high_angh = torch.atan2(a2, -b2)
+        pred_angh = torch.atan2(a3, -b3)
+        inboundh = ((pred_angh < (high_angh - anglebound)) * (pred_angh > (low_angh + anglebound))).float()
+
+        low_angv = torch.atan2(-u1, v1)
+        high_angv = torch.atan2(u2, -v2)
+        pred_angv = torch.atan2(u3, -v3)
+        inboundv = ((pred_angv < (high_angv - anglebound)) * (pred_angv > (low_angv + anglebound))).float()
+
+        gth = self.diffx_sharp(depthMapl)
+        gtv = self.diffy_sharp(depthMapl)
+
+        logh = logh.unsqueeze(1)
+        logv = logv.unsqueeze(1)
+        inboundh = inboundh.unsqueeze(1)
+        inboundv = inboundv.unsqueeze(1)
+
+        lossh = logh
+        lossv = logv
+
+        scl_pixelwise = self.selfconh(logh) + self.selfconv(logv)
+        scl = torch.mean(torch.abs(scl_pixelwise))
+
+        loss = torch.mean(torch.abs(lossh - gth) * inboundh) + \
+               torch.mean(torch.abs(lossv - gtv) * inboundv) + \
+               torch.sum(torch.abs((low_angh + high_angh) / 2 - pred_angh) * (1 - inboundh)) / self.height / self.width / self.batch_size * angw + \
+               torch.sum(torch.abs((low_angv + high_angv) / 2 - pred_angv) * (1 - inboundv)) / self.height / self.width / self.batch_size * angw + \
+               scl * sclw
+        outrangeval = torch.sum((1 - inboundh)) + torch.sum((1 - inboundv))
+
+        # depthMapl = torch.log(depthMap)
+        # depthMapval = (depthMap > 0).float()
         #
-        # rgb_fig = tensor2rgb(rgb, ind=0)
-        # dsmpRat = 1
-        # newsize = [int(self.width / dsmpRat), int(self.height / dsmpRat)]
-        # base_mesh = mesh_extractor(np.array(rgb_fig.resize(newsize)))
+        # balancew = 20
+        # balancehw = 10
         #
-        # # Prepare Fidality term
-        # triangles = base_mesh.faces
-        # xloc = base_mesh.verts_2d[:,0] * self.width
-        # yloc = base_mesh.verts_2d[:,1] * self.height
+        # lossh = self.lossh(logh)
+        # gth = self.gth(depthMapl)
+        # integratableh = ((self.idh(depthMapval) == 2) * (self.lossh(1 - inboundh) == 0)).float()
+        # hloss = ( torch.sum(torch.abs(gth - lossh) * integratableh) \
+        #         + torch.sum(torch.abs((low_angh + high_angh) / 2 - pred_angh) * (1 - inboundh)) / balancew) \
+        #         / (torch.sum(integratableh) + 1)
         #
-        # rngxmin = int(0.03594771 * self.width-1)
-        # rgbxmax = int(0.96405229 * self.width+1)
-        # rngymin = int(0.40810811 * self.height-1)
-        # rngymax = int(0.99189189 * self.height+1)
-        # validfacesel = (xloc[base_mesh.faces[:,0]] > rngxmin) * (xloc[base_mesh.faces[:,0]] < rgbxmax) * (yloc[base_mesh.faces[:,0]] > rngymin) * (yloc[base_mesh.faces[:,0]] < rngymax) * \
-        #                (xloc[base_mesh.faces[:, 1]] > rngxmin) * (xloc[base_mesh.faces[:, 1]] < rgbxmax) * (yloc[base_mesh.faces[:, 1]] > rngymin) * (yloc[base_mesh.faces[:, 1]] < rngymax) * \
-        #                (xloc[base_mesh.faces[:, 2]] > rngxmin) * (xloc[base_mesh.faces[:, 2]] < rgbxmax) * (yloc[base_mesh.faces[:, 2]] > rngymin) * (yloc[base_mesh.faces[:, 2]] < rngymax)
-        # valface = base_mesh.faces[validfacesel, :]
-
-        # xmin = 213
-        # ymin = 227
-        # xmax = 340
-        # ymax = 270
         #
-        # fig, ax = plt.subplots(1)
-        # ax.imshow(tensor2rgb(rgb, ind=0))
-        # rect = patches.Rectangle((xmin, ymin), xmax - xmin - 1, ymax - ymin - 1, linewidth=1, edgecolor='r', facecolor='none')
-        # ax.add_patch(rect)
+        # lossv = self.lossv(logv)
+        # gtv = self.gtv(depthMapl)
+        # integratablev = ((self.idv(depthMapval) == 2) * (self.lossv(1 - inboundv) == 0)).float()
+        # vloss = ( torch.sum(torch.abs(gtv - lossv) * integratablev) \
+        #         + torch.sum(torch.abs((low_angv + high_angv) / 2 - pred_angv) * (1 - inboundv)) / balancew) \
+        #         / (torch.sum(integratablev) + 1)
+        #
+        # scl_pixelwise = self.selfconh(logh) + self.selfconv(logv)
+        # scl_mask = ((self.selfconvInd(inboundv) == 2) * (self.selfconhInd(inboundh) == 2)).float()
+        # scl = torch.sum(torch.abs(scl_pixelwise) * scl_mask) / (torch.sum(scl_mask) + 1)
+        #
+        # totloss = hloss * balancehw / 2 + vloss / 2 + scl
+        # # ====Validation part code====
+        #
+        # Visualization
+        # tensor2disp((1 - inboundh).unsqueeze(1), vmax=1, ind=0).show()
+        # tensor2disp((1 - inboundv).unsqueeze(1), vmax=1, ind=0).show()
+        #
+        # # Validation for range
+        # import random
+        # ckx = random.randint(0, self.width)
+        # cky = random.randint(0, self.height)
+        # ckz = random.randint(0, self.batch_size - 1)
+        #
+        # lowang_ck = low_angh[ckz, cky, ckx].detach().cpu().numpy()
+        # highang_ck = high_angh[ckz, cky, ckx].detach().cpu().numpy()
+        # predang_ck = pred_angh[ckz, cky, ckx].detach().cpu().numpy()
+        #
+        # intrinsicnpck = intrinsic[ckz, :, :].cpu().numpy()
+        # cknum = 10000
+        # d1 = np.linspace(1, 100, cknum)
+        # d2 = np.flip(np.linspace(1, 100, cknum))
+        #
+        # pts1 = np.stack([np.ones(cknum) * ckx * d1, np.ones(cknum) * cky * d1, d1, np.ones(cknum)], axis=0)
+        # pts1 = (np.linalg.inv(intrinsicnpck) @ pts1).T
+        # pts1 = pts1[:, 0:3]
+        # pts2 = np.stack([np.ones(cknum) * (ckx + 1) * d2, np.ones(cknum) * cky * d2, d2, np.ones(cknum)], axis=0)
+        # pts2 = (np.linalg.inv(intrinsicnpck) @ pts2).T
+        # pts2 = pts2[:, 0:3]
+        #
+        # d1gt = float(depthMap[ckz, 0, cky, ckx].detach().cpu().numpy())
+        # d2gt = float(depthMap[ckz, 0, cky, ckx + 1].detach().cpu().numpy())
+        # ptsgt1 = np.array([[ckx * d1gt, cky * d1gt, d1gt, 1]]).T
+        # ptsgt2 = np.array([[(ckx + 1) * d2gt, cky * d2gt, d2gt, 1]]).T
+        # ptsgt1 = (np.linalg.inv(intrinsicnpck) @ ptsgt1).T
+        # ptsgt2 = (np.linalg.inv(intrinsicnpck) @ ptsgt2).T
+        # ptsgt1 = ptsgt1[:, 0:3]
+        # ptsgt2 = ptsgt2[:, 0:3]
+        #
+        # xax = np.array([1, 0, 0])
+        # yax = np.array([0, (cky - by[ckz, cky, ckx].detach().cpu().numpy()) / fy[ckz, cky, ckx].detach().cpu().numpy(), 1])
+        #
+        # pts1x = pts1 @ np.expand_dims(xax, axis=1)
+        # pts1y = pts1 @ np.expand_dims(yax, axis=1)
+        #
+        # pts2x = pts2 @ np.expand_dims(xax, axis=1)
+        # pts2y = pts2 @ np.expand_dims(yax, axis=1)
+        #
+        # ptsgt1x = ptsgt1 @ np.expand_dims(xax, axis=1)
+        # ptsgt1y = ptsgt1 @ np.expand_dims(yax, axis=1)
+        #
+        # ptsgt2x = ptsgt2 @ np.expand_dims(xax, axis=1)
+        # ptsgt2y = ptsgt2 @ np.expand_dims(yax, axis=1)
+        #
+        # ckang = np.arctan2(pts2y - pts1y, pts2x - pts1x)
+        # ckgt = np.arctan2(ptsgt2y - ptsgt1y, ptsgt2x - ptsgt1x)
+        #
+        # loggtnum = np.log(float((depthMap[ckz, 0, cky, ckx + 1] / depthMap[ckz, 0, cky, ckx]).detach().cpu().numpy()))
+        # loggththeo = np.log(ptsgt2y / ptsgt1y)
+        # logsampled = np.log(pts2y / pts1y)
+        # logpred = float(logh[ckz, 0, cky, ckx].detach().cpu().numpy())
+        #
+        # fig, axs = plt.subplots()
+        # axs.scatter(np.cos(ckang), np.sin(ckang))
+        # axs.scatter(np.cos(lowang_ck), np.sin(lowang_ck), c='r')
+        # axs.scatter(np.cos(highang_ck), np.sin(highang_ck), c='r')
+        # axs.scatter(np.cos(predang_ck), np.sin(predang_ck), c='g')
+        # axs.scatter(np.cos(ckgt), np.sin(ckgt), c='k')
+        # axs.set_aspect('equal')
+        #
+        # fig, axs = plt.subplots()
+        # axs.scatter(ckang, logsampled)
+        # axs.scatter(ckgt, loggththeo, c='k')
+        # axs.scatter(predang_ck, logpred, c='r')
+        # axs.set_aspect('equal')
+        #
+        # # Validation for log ratio
+        # depthMaps = depthMap.squeeze(1)
+        # depthMap_gradx = self.diffx_sharp(depthMap).squeeze(1)
+        # depthMap_grady = self.diffy_sharp(depthMap).squeeze(1)
+        #
+        # vx1 = depthMaps / fx + (self.xx - bx) / fx * depthMap_gradx
+        # vx2 = (self.yy - by) / fy * depthMap_gradx
+        # vx3 = depthMap_gradx
+        #
+        # vy1 = (self.xx - bx) / fx * depthMap_grady
+        # vy2 = depthMaps / fy + (self.yy - by) / fy * depthMap_grady
+        # vy3 = depthMap_grady
+        #
+        # vx = torch.stack([vx1, vx2, vx3], dim=1)
+        # vy = torch.stack([vy1, vy2, vy3], dim=1)
+        #
+        # vxnormed = F.normalize(vx, dim=1)
+        # vynormed = F.normalize(vy, dim=1)
+        # surfnormxnormed = F.normalize(surfnormx, dim=1)
+        # surfnormynormed = F.normalize(surfnormy, dim=1)
+        #
+        # diffvx = torch.abs(surfnormxnormed - vxnormed)
+        # diffvy = torch.abs(surfnormynormed - vynormed)
+        #
+        # import random
+        # ckx = random.randint(0, self.width)
+        # cky = random.randint(0, self.height)
+        # ckz = random.randint(0, self.batch_size - 1)
+        #
+        # xax = np.array([1, 0, 0])
+        # yax = np.array([0, (cky - by[ckz, cky, ckx].detach().cpu().numpy()) / fy[ckz, cky, ckx].detach().cpu().numpy(), 1])
+        # intrinsicnpck = intrinsic[ckz, :, :].cpu().numpy()
+        #
+        # ptsckdnp1 = depthMap[ckz, 0, cky, ckx].detach().cpu().numpy()
+        # ptscknp1 = np.linalg.inv(intrinsicnpck) @ np.array([[ckx * ptsckdnp1, cky * ptsckdnp1, ptsckdnp1, 1]]).T
+        #
+        # ptsckdnp1t = depthMap[ckz, 0, cky, ckx].detach().cpu().numpy() + np.random.random(1) * 100
+        # ptscknp1t = np.linalg.inv(intrinsicnpck) @ np.array([[ckx * ptsckdnp1t, cky * ptsckdnp1t, ptsckdnp1t, 1]]).T
+        #
+        # ptsckdnp2 = depthMap[ckz, 0, cky, ckx + 1].detach().cpu().numpy()
+        # ptscknp2 = np.linalg.inv(intrinsicnpck) @ np.array([[(ckx + 1) * ptsckdnp2, cky * ptsckdnp2, ptsckdnp2, 1]]).T
+        #
+        # ptsckdnp2t = depthMap[ckz, 0, cky, ckx + 1].detach().cpu().numpy() + np.random.random(1) * 100
+        # ptscknp2t = np.linalg.inv(intrinsicnpck) @ np.array([[(ckx + 1) * ptsckdnp2t, cky * ptsckdnp2t, ptsckdnp2t, 1]]).T
+        #
+        # assert np.sum((ptscknp2 - ptscknp1)[0:3, 0] * np.cross(xax, yax)) < 1e-3, print("colinear check failed") # should be zero
+        #
+        # ptscknp1p = np.array([np.sum(ptscknp1[0:3, 0] * xax), np.sum(ptscknp1[0:3, 0] * yax)])
+        # ptscknp1tp = np.array([float(np.sum(ptscknp1t[0:3, 0] * xax)), float(np.sum(ptscknp1t[0:3, 0] * yax))])
+        # a1cknp = a1[ckz, cky, ckx].detach().cpu().numpy()
+        # b1cknp = b1[ckz, cky, ckx].detach().cpu().numpy()
+        # l1param = np.array([a1cknp, b1cknp])
+        # assert np.sum(l1param * (ptscknp1tp - ptscknp1p)) < 1e-3, print("line1 param check failed") # should be zero
+        #
+        # ptscknp2p = np.array([np.sum(ptscknp2[0:3, 0] * xax), np.sum(ptscknp2[0:3, 0] * yax)])
+        # ptscknp2tp = np.array([float(np.sum(ptscknp2t[0:3, 0] * xax)), float(np.sum(ptscknp2t[0:3, 0] * yax))])
+        # a2cknp = a2[ckz, cky, ckx].detach().cpu().numpy()
+        # b2cknp = b2[ckz, cky, ckx].detach().cpu().numpy()
+        # l2param = np.array([a2cknp, b2cknp])
+        # assert np.sum(l2param * (ptscknp2tp - ptscknp2p)) < 1e-3, print("line1 param check failed") # should be zero
+        #
+        # ptscknp3 = ptscknp1
+        # incre = surfnormx[ckz, :, cky, ckx].detach().cpu().numpy() * np.random.random(1) * 100
+        # incre = np.expand_dims(np.concatenate([incre, np.array([0])]), axis=1)
+        # ptscknp3t = ptscknp3 + incre
+        # ptscknp3p = np.array([np.sum(ptscknp3[0:3, 0] * xax), np.sum(ptscknp3[0:3, 0] * yax)])
+        # ptscknp3tp = np.array([float(np.sum(ptscknp3t[0:3, 0] * xax)), float(np.sum(ptscknp3t[0:3, 0] * yax))])
+        # a3cknp = a3[ckz, cky, ckx].detach().cpu().numpy()
+        # b3cknp = b3[ckz, cky, ckx].detach().cpu().numpy()
+        # l3param = np.array([a3cknp, b3cknp])
+        # assert np.sum(l3param * (ptscknp3tp - ptscknp3p)) < 1e-3, print("line1 param check failed")  # should be zero
+        #
+        # samplenum = 100000
+        # inct = np.linspace(-1, 1, samplenum)
+        # surfnormck = surfnormx[ckz, :, cky, ckx].detach().cpu().numpy()
+        # assert np.sum(surfnormck * np.cross(xax, yax)) < 1e-3, print("surfnormx colplane check failed")  # should be zero
+        #
+        # incpts = np.stack([surfnormck[0] * inct + ptscknp3[0], surfnormck[1] * inct + ptscknp3[1], surfnormck[2] * inct + ptscknp3[2], np.ones([samplenum])], axis=0)
+        # incpts_projected = (intrinsicnpck @ incpts).T
+        # incpts_projected[:, 0] = incpts_projected[:, 0] / incpts_projected[:, 2]
+        # incpts_projected[:, 1] = incpts_projected[:, 1] / incpts_projected[:, 2]
+        # incpts_projected = incpts_projected[:, 0:3]
+        # indnearest = np.argmin(np.abs((incpts_projected[:, 0] - ckx - 1)))
+        # depthnearest = incpts_projected[indnearest, 2]
+        #
+        # ratio_theo_ab = np.log(np.abs(a2cknp)) - np.log(np.abs(a1cknp)) + np.log(np.abs((a3cknp * b1cknp - a1cknp * b3cknp))) - np.log(np.abs((a3cknp * b2cknp - a2cknp * b3cknp)))
+        # rationum = np.log(depthnearest) - np.log(ptsckdnp1)
+        # rationum_imgage = (np.log(depthMap[ckz, 0, cky, ckx + 1].detach().cpu().numpy()) - np.log(depthMap[ckz, 0, cky, ckx].detach().cpu().numpy()))
+        # loghck = logh[ckz, cky, ckx].detach().cpu().numpy()
+        #
+        # rationum_imgage = (np.log(depthMap[ckz, 0, cky + 1, ckx].detach().cpu().numpy()) - np.log(depthMap[ckz, 0, cky, ckx].detach().cpu().numpy()))
+        # logvck = logv[ckz, cky, ckx].detach().cpu().numpy()
+        #
+        # # Singular value analysis
+        # ins = torch.isinf(logh)
+        # batchind = list()
+        # for i in range(self.batch_size):
+        #     batchind.append(torch.ones([self.height, self.width]) * i)
+        # batchind = torch.stack(batchind, dim=0).cuda()
+        #
+        # insbz = batchind[ins].long()[0].detach().cpu().numpy()
+        # insxx = self.xx[ins].long()[0].detach().cpu().numpy()
+        # insyy = self.yy[ins].long()[0].detach().cpu().numpy()
+        #
+        # intrinsicnpck = intrinsic[insbz, :, :].cpu().numpy()
+        #
+        # ptsckdnp1 = depthMap[insbz, 0, insyy, insxx].detach().cpu().numpy()
+        # ptscknp1 = np.linalg.inv(intrinsicnpck) @ np.array([[insxx * ptsckdnp1, insyy * ptsckdnp1, ptsckdnp1, 1]]).T
+        #
+        # ptsckdnp2 = depthMap[insbz, 0, insyy, insxx + 1].detach().cpu().numpy()
+        # ptscknp2 = np.linalg.inv(intrinsicnpck) @ np.array([[(insxx + 1) * ptsckdnp2, insyy * ptsckdnp2, ptsckdnp2, 1]]).T
+        #
+        # singularnormx = surfnormx[insbz, :, insyy, insxx]
+        # singularnormx = singularnormx / torch.sqrt(torch.sum(singularnormx ** 2))
+        # singularnumx = ptscknp2 - ptscknp1
+        # singularnumx = (singularnumx / np.sqrt(np.sum(singularnumx ** 2)))[0:3, 0]
+        # singulartheolx = np.array([(insxx + 1 - bx[insbz, insyy, insxx].detach().cpu().numpy()) / fx[insbz, insyy, insxx].detach().cpu().numpy(), (insyy - by[insbz, insyy, insxx].detach().cpu().numpy()) / fy[insbz, insyy, insxx].detach().cpu().numpy(), 1])
+        # singulartheolx = singulartheolx / np.sqrt(np.sum(singulartheolx ** 2))
+        #
+        # pltrange = 1e1
+        # plt.figure()
+        # plt.hist(np.clip(logh.detach().cpu().numpy().flatten(), a_min=-pltrange, a_max=pltrange), bins=100, range=[-0.01, 0.01])
 
-        minArea = 200
-        candidates = list()
-        candidatearea = list()
-        for idx in np.unique(instancemap):
-            if idx > 0 and np.sum(instancemap) > minArea:
-                candidates.append(idx)
-                candidatearea.append(np.sum(instancemap == idx))
-
-        # selectedid = np.array(candidates)[np.random.randint(0, len(candidates))]
-        # selectedid = candidates[np.argmax(np.array(candidatearea))]
-        selectedid = 7
-
-        tensor2disp(torch.from_numpy(instancemap == selectedid).unsqueeze(0).unsqueeze(0), vmax=1, ind=0).show()
-        tensor2rgb(rgb, ind=0).show()
-
-
-        # optimize_mask_np = np.zeros([self.height, self.width], dtype=np.bool)
-        # optimize_mask_np[ymin:ymax + 1, xmin:xmax + 1] = True
-        # optimize_mask_np[0:self.height, 0:self.width] = True
-        optimize_mask_np = instancemap == selectedid
-        fidalMask_np = np.zeros([self.height, self.width], dtype=np.bool)
-        horConsMask_np = np.zeros([self.height, self.width], dtype=np.bool)
-        verConsMask_np = np.zeros([self.height, self.width], dtype=np.bool)
-        datavalmask = depthmap[0,0,:,:].detach().cpu().numpy() > 0
-        init_arb_mask(self.height, self.width, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, datavalmask)
-
-        # initind = 100
-        # optimize_mask_np = np.zeros([self.height, self.width], dtype=np.bool)
-        # fidalMask_np = np.zeros([self.height, self.width], dtype=np.bool)
-        # horConsMask_np = np.zeros([self.height, self.width], dtype=np.bool)
-        # verConsMask_np = np.zeros([self.height, self.width], dtype=np.bool)
-        # tmp_rec = np.zeros([self.height, self.width], dtype=np.int)
-        # init_a_meshed_triangle(valface, xloc, yloc, self.height, self.width, initind, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, tmp_rec)
-        # tensor2disp(torch.from_numpy(optimize_mask_np).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
-        # tensor2disp(torch.from_numpy(horConsMask_np).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
-        # tensor2disp(torch.from_numpy(verConsMask_np).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
-        # tensor2disp(torch.from_numpy(fidalMask_np).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
-
-
-        # import matplotlib.tri as tri
-        # triang = tri.Triangulation(xloc, yloc, valface[initind:initind+1, :])
-        # fig1, ax1 = plt.subplots()
-        # ax1.imshow(rgb_fig)
-        # # ax1.imshow(tensor2disp(depthmaplidar_torch > 0, vmax=1, ind=0))
-        # ax1.set_aspect('equal')
-        # ax1.triplot(triang, 'b-', lw=1)
-        # fig1.show()
-
-
-        from sparsMMul import SparsMMul
-        sparsmmul = SparsMMul.apply
-
-        lambdafw = 0.1
-
-        # optimize_mask = torch.zeros([self.height, self.width], device="cuda")
-        # optimize_mask[ymin:ymax, xmin:xmax] = 1
-        # optimize_mask = optimize_mask == 1
-        # optimize_mask = torch.ones([self.height, self.width], device="cuda")
-        # optimize_mask = optimize_mask == 1
-        optimize_mask = torch.from_numpy(optimize_mask_np).cuda() == 1
-
-        linearIndexMap = torch.ones([self.height, self.width], device="cuda") * (-1)
-        linearIndexMap[optimize_mask] = torch.arange(0, torch.sum(optimize_mask).float(), device="cuda")
-        linearIndexMap = linearIndexMap.long()
-
-        # Init Fidality terms
-        # fidalMask = torch.zeros([self.height, self.width], device="cuda")
-        # fidalMask[ymin:ymax, xmin:xmax] = 1
-        # fidalMask[int((ymin+ymax)/2), int((xmin+xmax)/2)] = 1
-        # fidalMask = fidalMask == 1
-        # fidalMask = torch.from_numpy(inited_fidalmask).float().cuda() == 1
-        # fidalMask = fidalMask * optimize_mask
-        fidalMask = torch.from_numpy(fidalMask_np).cuda() == 1
-        # tensor2disp(fidalMask.unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
-
-        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing="xy")
-        xx = torch.from_numpy(xx).cuda()
-        yy = torch.from_numpy(yy).cuda()
-
-        # Init Horizontal Consrtain terms
-        # horConsMask = torch.zeros([self.height, self.width], device="cuda")
-        # horConsMask[ymin:ymax, xmin:xmax-1] = 1
-        # horConsMask = horConsMask == 1
-        # horConsMask = torch.from_numpy(inited_consmask).cuda().float()
-        # horConsMask = horConsMask == 0
-        # horConsMask = horConsMask * optimize_mask
-        # horConsMask[:, xmax-1] = 0
-        horConsMask = torch.from_numpy(horConsMask_np).cuda() == 1
-        # tensor2disp(horConsMask.unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
-
-        # Init Vertical Consrtain terms
-        # verConsMask = torch.zeros([self.height, self.width], device="cuda")
-        # verConsMask[ymin:ymax-1, xmin:xmax] = 1
-        # verConsMask = verConsMask == 1
-        # verConsMask = torch.from_numpy(inited_consmask).cuda().float()
-        # verConsMask = verConsMask == 0
-        # verConsMask = verConsMask * optimize_mask
-        # verConsMask[ymax - 1, :] = 0
-        verConsMask = torch.from_numpy(verConsMask_np).cuda() == 1
-        # tensor2disp(verConsMask.unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
-
-        htheta_noisy = torch.ones_like(htheta) * np.pi
-        vtheta_noisy = torch.ones_like(vtheta) * np.pi
-        htheta_noisy.requires_grad = True
-        vtheta_noisy.requires_grad = True
-        # tensor2disp(htheta_noisy-1, vmax=4, ind=0).show()
-
-        optimizer = torch.optim.Adam([htheta_noisy] + [vtheta_noisy], lr=1e-4)
-        errrec = list()
-        itnum = 100000
-        for kk in range(itnum):
-            ratioh, ratiohl, ratiov, ratiovl = self.get_ratio(htheta, vtheta)
-            # ratioh, ratiohl, ratiov, ratiovl = self.get_ratio(htheta_noisy, vtheta_noisy)
-
-            fidalrv = depthmap[0,0,:,:][fidalMask] * lambdafw
-            fidalindy = torch.arange(0, torch.sum(fidalMask), device="cuda", dtype=torch.long)
-            fidalindx = linearIndexMap[fidalMask]
-            fidalw = torch.ones([torch.sum(fidalMask)], device="cuda", dtype=torch.float) * lambdafw
-
-            conshw1 = ratioh[0,0,:,:][horConsMask]
-            consindhy1 = torch.arange(torch.sum(fidalMask), torch.sum(fidalMask) + torch.sum(horConsMask), device="cuda", dtype=torch.long)
-            consindhx1 = linearIndexMap[yy[horConsMask], xx[horConsMask]]
-            conshw2 = -torch.ones([torch.sum(horConsMask)], device="cuda", dtype=torch.float)
-            consindhy2 = torch.arange(torch.sum(fidalMask), torch.sum(fidalMask) + torch.sum(horConsMask), device="cuda", dtype=torch.long)
-            consindhx2 = linearIndexMap[yy[horConsMask], xx[horConsMask] + 1]
-            conshw = torch.cat([conshw1, conshw2], dim=0) * (1 - lambdafw)
-            consindhy = torch.cat([consindhy1, consindhy2], dim=0)
-            consindhx = torch.cat([consindhx1, consindhx2], dim=0)
-            conshrv = torch.zeros(torch.sum(horConsMask), device="cuda") * (1 - lambdafw)
-
-            consvw1 = ratiov[0,0,:,:][verConsMask]
-            consindvy1 = torch.arange(torch.sum(fidalMask) + torch.sum(horConsMask), torch.sum(fidalMask) + torch.sum(horConsMask) + torch.sum(verConsMask), device="cuda", dtype=torch.long)
-            consindvx1 = linearIndexMap[yy[verConsMask], xx[verConsMask]]
-            consvw2 = -torch.ones([torch.sum(verConsMask)], device="cuda", dtype=torch.float)
-            consindvy2 = torch.arange(torch.sum(fidalMask) + torch.sum(horConsMask), torch.sum(fidalMask) + torch.sum(horConsMask) + torch.sum(verConsMask), device="cuda", dtype=torch.long)
-            consindvx2 = linearIndexMap[yy[verConsMask] + 1, xx[verConsMask]]
-            consvw = torch.cat([consvw1, consvw2], dim=0) * (1 - lambdafw)
-            consindvy = torch.cat([consindvy1, consindvy2], dim=0)
-            consindvx = torch.cat([consindvx1, consindvx2], dim=0)
-            consvrv = torch.zeros(torch.sum(verConsMask), device="cuda") * (1 - lambdafw)
-
-            spsindx = torch.cat([fidalindx, consindhx, consindvx], dim=0).contiguous()
-            spsindy = torch.cat([fidalindy, consindhy, consindvy], dim=0).contiguous()
-            spsindw = torch.cat([fidalw, conshw, consvw], dim=0).contiguous()
-            spsrv = torch.cat([fidalrv, conshrv, consvrv], dim=0).contiguous()
-
-            # m = np.zeros([int((torch.sum(fidalMask) + torch.sum(horConsMask) + torch.sum(verConsMask)).cpu().numpy()), int(torch.sum(optimize_mask).cpu().numpy())])
-            # m[spsindy.cpu().numpy(), spsindx.cpu().numpy()] = spsindw.detach().cpu().numpy()
-            # np.linalg.cond(m)
-            # minv = np.linalg.inv(m.transpose() @ m)
-
-            spsck = depthmap[0,0,:,:][optimize_mask]
-            spsSizeM = torch.Tensor([torch.sum(fidalMask) + torch.sum(horConsMask) + torch.sum(verConsMask), torch.sum(optimize_mask)]).int().cuda()
-
-            # torch.abs(sparsmmul(spsindx, spsindy, spsSizeM, spsindw, spsck, False) - spsrv).max()
-            # errmaxind = torch.argmax(torch.abs(sparsmmul(spsindx, spsindy, spsSizeM, spsindw, spsck, False) - spsrv))
-            # errrowsel = spsindy==errmaxind
-            # errconsind = spsindx[errrowsel]
-            # errconsterm = spsindw[errrowsel]
-            # errrconsdataterm = spsck[errconsind]
-            # errdesiredval = spsrv[errmaxind]
-
-            th = spsSizeM[0]
-            tw = spsSizeM[1]
-            sizeM = spsSizeM
-
-            # errrec = list()
-            # innererrrec = list()
-
-            x0 = torch.zeros([tw], device="cuda", dtype=torch.float)
-            d0 = spsrv
-            r0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, spsrv, True)
-            p0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, spsrv, True)
-            t0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, p0, False)
-            for i in range(200):
-                # if torch.mean((sparsmmul(spsindx, spsindy, sizeM, spsindw, x0, False) - spsrv)**2) < 1e-6:
-                #     break
-                alpha = torch.sum(r0 * r0) / torch.sum(t0 * t0)
-                x0 = x0 + alpha * p0
-                d0 = d0 - alpha * t0
-                r1 = sparsmmul(spsindx, spsindy, sizeM, spsindw, d0, True)
-                beta = torch.sum(r1 * r1) / torch.sum(r0 * r0)
-                p0 = r1 + beta * p0
-                t0 = sparsmmul(spsindx, spsindy, sizeM, spsindw, p0, False)
-                r0 = r1
-
-
-            loss = torch.mean(torch.abs((x0 - spsck)))
-            # loss = torch.mean((x0 - spsck) ** 2)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            print("it:%d, loss:%f" % (kk, float(loss.detach().cpu().numpy())))
-            errrec.append(float(loss.detach().cpu().numpy()))
-            # plt.figure()
-            # plt.stem(errrec)
-
-
-        depthmaplidar_torch = torch.from_numpy(depthmaplidar).float().unsqueeze(0).unsqueeze(0).cuda()
-        recovered_depth = torch.zeros_like(depthmap)
-        recovered_depth[0,0,:,:][yy[optimize_mask], xx[optimize_mask]] = x0
-        pts3d_recovered = recovered_depth.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1, -1, -1, 3, -1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size, -1, -1, -1, -1]))
-        pts3d_org = depthmap.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1, -1, -1, 3, -1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size, -1, -1, -1, -1]))
-        pts3d_lidar = depthmaplidar_torch.squeeze(1).unsqueeze(3).unsqueeze(4).expand([-1, -1, -1, 3, -1]) * (self.invIn.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand([self.batch_size, self.height, self.width, -1, -1]) @ self.pixelLocs.unsqueeze(0).unsqueeze(4).expand([self.batch_size, -1, -1, -1, -1]))
-
-        tensor2disp(1/recovered_depth, vmax=0.2, ind=0).show()
-        tensor2disp(1 / depthmap, vmax=0.2, ind=0).show()
-
-        htheta_rec, vtheta_rec = self.get_theta(recovered_depth)
-        tensor2disp(htheta_rec-1, vmax=4, ind=0).show()
-
-
-        optimize_mask_np = optimize_mask.cpu().numpy() == 1
-        optimize_mask_anchor = fidalMask.cpu().numpy() == 1
-        optimize_mask_np_lidar = (optimize_mask_np * (depthmaplidar > 0)) == True
-        # tensor2disp(torch.from_numpy(optimize_mask_np).unsqueeze(0).unsqueeze(0), ind=0, vmax=1).show()
-        # tensor2disp(htheta-1, vmax=4, ind=0).show()
-        # tensor2disp(vtheta - 1, vmax=4, ind=0).show()
-
-        def extract_pts(torchpts, numpymask):
-            import matlab
-            import matlab.engine
-            nppts = torchpts[0,:,:,:,0].detach().cpu().numpy()
-            npx = nppts[:, :, 0][numpymask]
-            npy = nppts[:, :, 1][numpymask]
-            npz = nppts[:, :, 2][numpymask]
-
-            npx = matlab.double(npx.tolist())
-            npy = matlab.double(npy.tolist())
-            npz = matlab.double(npz.tolist())
-
-            return npx, npy, npz
-
-        npxorg, npyorg, npzorg = extract_pts(pts3d_org, optimize_mask_np)
-        # npxanchor, npyanchor, npzanchor = extract_pts(pts3d_org, optimize_mask_anchor)
-        npxopted, npyopted, npzopted = extract_pts(pts3d_recovered, optimize_mask_np)
-        npxlidar, npylidar, npzlidar = extract_pts(pts3d_lidar, optimize_mask_np_lidar)
-
-        import matlab
-        eng.eval('figure()', nargout=0)
-        eng.scatter3(npxopted, npyopted, npzopted, 3, 'g', 'filled', nargout=0)
-        eng.eval('hold on', nargout=0)
-        # if len(npzlidar) > 0:
-        #     eng.scatter3(npxlidar, npylidar, npzlidar, 15, 'p', 'filled', nargout=0)
-        eng.eval('axis equal', nargout=0)
-        eng.legend(['after opt', 'lidar'], nargout=0)
-
-        eng.eval('figure()', nargout=0)
-        eng.scatter3(npxorg, npyorg, npzorg, 3, 'k', 'filled', nargout=0)
-        eng.eval('hold on', nargout=0)
-        # if len(npzlidar) > 0:
-        #     eng.scatter3(npxlidar, npylidar, npzlidar, 15, 'p', 'filled', nargout=0)
-        eng.eval('axis equal', nargout=0)
-        eng.legend(['after opt', 'lidar'], nargout=0)
-        return 0
-'''
-
-
-
+        return loss, outrangeval
