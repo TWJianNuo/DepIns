@@ -6006,7 +6006,6 @@ class LocalThetaDesp(nn.Module):
         return recovered_depth
 
 
-
     def inplacePath_loss(self, depthmap, htheta, vtheta, balancew = 10, isExcludehw = False):
         srw = 5
         srh = 15
@@ -6087,7 +6086,7 @@ class SurfaceNormalOptimizer(nn.Module):
         self.pix_coords = nn.Parameter(torch.from_numpy(pix_coords).permute(0, 2, 1), requires_grad=False)
         self.ones = nn.Parameter(torch.ones([self.batch_size, 1, self.height * self.width]), requires_grad=False)
         self.init_gradconv()
-        self.init_integration_kernel()
+        # self.init_integration_kernel()
 
     def init_integration_kernel(self):
         lossh = torch.Tensor(
@@ -6184,6 +6183,7 @@ class SurfaceNormalOptimizer(nn.Module):
         )
         self.selfconvInd = torch.nn.Conv2d(1, 1, 3, padding=1, bias=False)
         self.selfconvInd.weight = torch.nn.Parameter(selfconvIndW.unsqueeze(0).unsqueeze(0).float(), requires_grad=False)
+
     def init_gradconv(self):
         weightsx = torch.Tensor([[-1., 0., 1.],
                                 [-2., 0., 2.],
@@ -6311,54 +6311,29 @@ class SurfaceNormalOptimizer(nn.Module):
         pred_angv = torch.atan2(u3, -v3)
         inboundv = ((pred_angv < (high_angv - anglebound)) * (pred_angv > (low_angv + anglebound))).float()
 
-        gth = self.diffx_sharp(depthMapl)
-        gtv = self.diffy_sharp(depthMapl)
-
-        logh = logh.unsqueeze(1)
-        logv = logv.unsqueeze(1)
-        inboundh = inboundh.unsqueeze(1)
-        inboundv = inboundv.unsqueeze(1)
-
-        lossh = logh
-        lossv = logv
-
-        scl_pixelwise = self.selfconh(logh) + self.selfconv(logv)
-        scl = torch.mean(torch.abs(scl_pixelwise))
-
-        loss = torch.mean(torch.abs(lossh - gth) * inboundh) + \
-               torch.mean(torch.abs(lossv - gtv) * inboundv) + \
-               torch.sum(torch.abs((low_angh + high_angh) / 2 - pred_angh) * (1 - inboundh)) / self.height / self.width / self.batch_size * angw + \
-               torch.sum(torch.abs((low_angv + high_angv) / 2 - pred_angv) * (1 - inboundv)) / self.height / self.width / self.batch_size * angw + \
-               scl * sclw
-        outrangeval = torch.sum((1 - inboundh)) + torch.sum((1 - inboundv))
-
-        # depthMapl = torch.log(depthMap)
-        # depthMapval = (depthMap > 0).float()
+        # # ====Temporarily Suppressed Loss Related Code==== #
+        # gth = self.diffx_sharp(depthMapl)
+        # gtv = self.diffy_sharp(depthMapl)
         #
-        # balancew = 20
-        # balancehw = 10
+        # logh = logh.unsqueeze(1)
+        # logv = logv.unsqueeze(1)
+        # inboundh = inboundh.unsqueeze(1)
+        # inboundv = inboundv.unsqueeze(1)
         #
-        # lossh = self.lossh(logh)
-        # gth = self.gth(depthMapl)
-        # integratableh = ((self.idh(depthMapval) == 2) * (self.lossh(1 - inboundh) == 0)).float()
-        # hloss = ( torch.sum(torch.abs(gth - lossh) * integratableh) \
-        #         + torch.sum(torch.abs((low_angh + high_angh) / 2 - pred_angh) * (1 - inboundh)) / balancew) \
-        #         / (torch.sum(integratableh) + 1)
-        #
-        #
-        # lossv = self.lossv(logv)
-        # gtv = self.gtv(depthMapl)
-        # integratablev = ((self.idv(depthMapval) == 2) * (self.lossv(1 - inboundv) == 0)).float()
-        # vloss = ( torch.sum(torch.abs(gtv - lossv) * integratablev) \
-        #         + torch.sum(torch.abs((low_angv + high_angv) / 2 - pred_angv) * (1 - inboundv)) / balancew) \
-        #         / (torch.sum(integratablev) + 1)
+        # lossh = logh
+        # lossv = logv
         #
         # scl_pixelwise = self.selfconh(logh) + self.selfconv(logv)
-        # scl_mask = ((self.selfconvInd(inboundv) == 2) * (self.selfconhInd(inboundh) == 2)).float()
-        # scl = torch.sum(torch.abs(scl_pixelwise) * scl_mask) / (torch.sum(scl_mask) + 1)
+        # scl = torch.mean(torch.abs(scl_pixelwise))
         #
-        # totloss = hloss * balancehw / 2 + vloss / 2 + scl
-        # # ====Validation part code====
+        # loss = torch.mean(torch.abs(lossh - gth) * inboundh) + \
+        #        torch.mean(torch.abs(lossv - gtv) * inboundv) + \
+        #        torch.sum(torch.abs((low_angh + high_angh) / 2 - pred_angh) * (1 - inboundh)) / self.height / self.width / self.batch_size * angw + \
+        #        torch.sum(torch.abs((low_angv + high_angv) / 2 - pred_angv) * (1 - inboundv)) / self.height / self.width / self.batch_size * angw + \
+        #        scl * sclw
+        # outrangeval = torch.sum((1 - inboundh)) + torch.sum((1 - inboundv))
+
+        # # ====Validation part code==== #
         #
         # Visualization
         # tensor2disp((1 - inboundh).unsqueeze(1), vmax=1, ind=0).show()
@@ -6432,7 +6407,7 @@ class SurfaceNormalOptimizer(nn.Module):
         # axs.scatter(predang_ck, logpred, c='r')
         # axs.set_aspect('equal')
         #
-        # # Validation for log ratio
+        # Validation for log ratio
         # depthMaps = depthMap.squeeze(1)
         # depthMap_gradx = self.diffx_sharp(depthMap).squeeze(1)
         # depthMap_grady = self.diffy_sharp(depthMap).squeeze(1)
@@ -6456,6 +6431,7 @@ class SurfaceNormalOptimizer(nn.Module):
         # diffvx = torch.abs(surfnormxnormed - vxnormed)
         # diffvy = torch.abs(surfnormynormed - vynormed)
         #
+        # # X direction
         # import random
         # ckx = random.randint(0, self.width)
         # cky = random.randint(0, self.height)
@@ -6522,8 +6498,181 @@ class SurfaceNormalOptimizer(nn.Module):
         # rationum_imgage = (np.log(depthMap[ckz, 0, cky, ckx + 1].detach().cpu().numpy()) - np.log(depthMap[ckz, 0, cky, ckx].detach().cpu().numpy()))
         # loghck = logh[ckz, cky, ckx].detach().cpu().numpy()
         #
+        # # Y Direction
+        # import random
+        # ckx = random.randint(0, self.width)
+        # cky = random.randint(0, self.height)
+        # ckz = random.randint(0, self.batch_size - 1)
+        #
+        # xay = np.array([0, 1, 0])
+        # yay = np.array([(ckx - bx[ckz, cky, ckx].detach().cpu().numpy()) / fx[ckz, cky, ckx].detach().cpu().numpy(), 0, 1])
+        # intrinsicnpck = intrinsic[ckz, :, :].cpu().numpy()
+        #
+        # ptsckdnp1 = depthMap[ckz, 0, cky, ckx].detach().cpu().numpy()
+        # ptscknp1 = np.linalg.inv(intrinsicnpck) @ np.array([[ckx * ptsckdnp1, cky * ptsckdnp1, ptsckdnp1, 1]]).T
+        #
+        # ptsckdnp1t = depthMap[ckz, 0, cky, ckx].detach().cpu().numpy() + np.random.random(1) * 100
+        # ptscknp1t = np.linalg.inv(intrinsicnpck) @ np.array([[ckx * ptsckdnp1t, cky * ptsckdnp1t, ptsckdnp1t, 1]]).T
+        #
+        # ptsckdnp2 = depthMap[ckz, 0, cky + 1, ckx].detach().cpu().numpy()
+        # ptscknp2 = np.linalg.inv(intrinsicnpck) @ np.array([[ckx * ptsckdnp2, (cky + 1) * ptsckdnp2, ptsckdnp2, 1]]).T
+        #
+        # ptsckdnp2t = depthMap[ckz, 0, cky, ckx + 1].detach().cpu().numpy() + np.random.random(1) * 100
+        # ptscknp2t = np.linalg.inv(intrinsicnpck) @ np.array([[ckx * ptsckdnp2t, (cky + 1) * ptsckdnp2t, ptsckdnp2t, 1]]).T
+        #
+        # assert np.sum((ptscknp2 - ptscknp1)[0:3, 0] * np.cross(xay, yay)) < 1e-3, print("colinear check failed") # should be zero
+        #
+        # ptscknp1p = np.array([np.sum(ptscknp1[0:3, 0] * xay), np.sum(ptscknp1[0:3, 0] * yay)])
+        # ptscknp1tp = np.array([float(np.sum(ptscknp1t[0:3, 0] * xay)), float(np.sum(ptscknp1t[0:3, 0] * yay))])
+        # a1cknp = u1[ckz, cky, ckx].detach().cpu().numpy()
+        # b1cknp = v1[ckz, cky, ckx].detach().cpu().numpy()
+        # l1param = np.array([a1cknp, b1cknp])
+        # assert np.sum(l1param * (ptscknp1tp - ptscknp1p)) < 1e-3, print("line1 param check failed") # should be zero
+        #
+        # ptscknp2p = np.array([np.sum(ptscknp2[0:3, 0] * xay), np.sum(ptscknp2[0:3, 0] * yay)])
+        # ptscknp2tp = np.array([float(np.sum(ptscknp2t[0:3, 0] * xay)), float(np.sum(ptscknp2t[0:3, 0] * yay))])
+        # a2cknp = u2[ckz, cky, ckx].detach().cpu().numpy()
+        # b2cknp = v2[ckz, cky, ckx].detach().cpu().numpy()
+        # l2param = np.array([a2cknp, b2cknp])
+        # assert np.sum(l2param * (ptscknp2tp - ptscknp2p)) < 1e-3, print("line1 param check failed") # should be zero
+        #
+        # ptscknp3 = ptscknp1
+        # incre = surfnormy[ckz, :, cky, ckx].detach().cpu().numpy() * np.random.random(1) * 100
+        # incre = np.expand_dims(np.concatenate([incre, np.array([0])]), axis=1)
+        # ptscknp3t = ptscknp3 + incre
+        # ptscknp3p = np.array([np.sum(ptscknp3[0:3, 0] * xay), np.sum(ptscknp3[0:3, 0] * yay)])
+        # ptscknp3tp = np.array([float(np.sum(ptscknp3t[0:3, 0] * xay)), float(np.sum(ptscknp3t[0:3, 0] * yay))])
+        # a3cknp = u3[ckz, cky, ckx].detach().cpu().numpy()
+        # b3cknp = v3[ckz, cky, ckx].detach().cpu().numpy()
+        # l3param = np.array([a3cknp, b3cknp])
+        # c3cknp = -(a3cknp * ptscknp3p[0] + b3cknp * ptscknp3p[1])
+        # assert np.sum(l3param * (ptscknp3tp - ptscknp3p)) < 1e-3, print("line1 param check failed")  # should be zero
+        # assert a3cknp * ptscknp3tp[0] + b3cknp * ptscknp3tp[1] + c3cknp < 1e-3
+        #
+        # intercept2x = -(b2cknp * c3cknp) / (a3cknp * b2cknp - a2cknp * b3cknp)
+        # intercept2y = (a2cknp * c3cknp) / (a3cknp * b2cknp - a2cknp * b3cknp)
+        # intercept1x = -(b1cknp * c3cknp) / (a3cknp * b1cknp - a1cknp * b3cknp)
+        # intercept1y = (a1cknp * c3cknp) / (a3cknp * b1cknp - a1cknp * b3cknp)
+        # assert np.abs(intercept2x - ptscknp2p[0]) + np.abs(intercept2y - ptscknp2p[1]) < 1e-2
+        # assert np.abs(intercept1x - ptscknp1p[0]) + np.abs(intercept1y - ptscknp1p[1]) < 1e-3
+        #
+        # samplenum = 100000
+        # inct = np.linspace(-1, 1, samplenum)
+        # surfnormck = surfnormy[ckz, :, cky, ckx].detach().cpu().numpy()
+        # assert np.sum(surfnormck * np.cross(xay, yay)) < 1e-3, print("surfnormx colplane check failed")  # should be zero
+        #
+        # incpts = np.stack([surfnormck[0] * inct + ptscknp3[0], surfnormck[1] * inct + ptscknp3[1], surfnormck[2] * inct + ptscknp3[2], np.ones([samplenum])], axis=0)
+        # incpts_projected = (intrinsicnpck @ incpts).T
+        # incpts_projected[:, 0] = incpts_projected[:, 0] / incpts_projected[:, 2]
+        # incpts_projected[:, 1] = incpts_projected[:, 1] / incpts_projected[:, 2]
+        # incpts_projected = incpts_projected[:, 0:3]
+        # indnearest = np.argmin(np.abs((incpts_projected[:, 1] - cky - 1)))
+        # depthnearest = incpts_projected[indnearest, 2]
+        #
         # rationum_imgage = (np.log(depthMap[ckz, 0, cky + 1, ckx].detach().cpu().numpy()) - np.log(depthMap[ckz, 0, cky, ckx].detach().cpu().numpy()))
+        # rationump = np.log(ptscknp2p[1]) - np.log(ptscknp1p[1])
+        # rationum = np.log(depthnearest) - np.log(ptsckdnp1)
+        # logvnp = np.log((a2cknp * c3cknp) / (a3cknp * b2cknp - a2cknp * b3cknp)) - np.log((a1cknp * c3cknp) / (a3cknp * b1cknp - a1cknp * b3cknp))
         # logvck = logv[ckz, cky, ckx].detach().cpu().numpy()
+        #
+        # # Regression Experiment
+        # import random
+        # ckx = random.randint(0, self.width - 1)
+        # cky = random.randint(0, self.height - 1)
+        # ckz = random.randint(0, self.batch_size - 1)
+        # fxr = intrinsic[ckz, 0, 0].detach()
+        # bxr = intrinsic[ckz, 0, 2].detach()
+        # fyr = intrinsic[ckz, 1, 1].detach()
+        # byr = intrinsic[ckz, 1, 2].detach()
+        #
+        # gthr = torch.log(depthMap[ckz, 0, cky, ckx + 1]) - torch.log(depthMap[ckz, 0, cky, ckx])
+        # gtvr = torch.log(depthMap[ckz, 0, cky + 1, ckx]) - torch.log(depthMap[ckz, 0, cky, ckx])
+        #
+        # surfnormrseed = torch.rand([3], dtype=torch.float, device="cuda")
+        # surfnormrseed = surfnormrseed - 10
+        # surfnormrseed.requires_grad = True
+        #
+        # expadam = torch.optim.Adam([surfnormrseed], lr=1e-1)
+        # optnum = 10000
+        # inboundw = 10000
+        # surfnormgt = surfnorm[ckz, :, cky, ckx]
+        #
+        # normrec = list()
+        # for i in range(optnum):
+        #     surfnormr = (torch.sigmoid(surfnormrseed) - 0.5) * 2
+        #     surfnormr = surfnormr / torch.sqrt(torch.sum(surfnormr ** 2))
+        #
+        #     surfnormxr = torch.stack([surfnormr[1] * (cky -byr) / fyr + surfnormr[2], -(cky -byr) / fyr * surfnormr[0], -surfnormr[0]])
+        #     surfnormyr = torch.stack([-surfnormr[1] * (ckx -bxr) / fxr, (ckx -bxr) / fxr * surfnormr[0] + surfnormr[2], -surfnormr[1]])
+        #
+        #     a1r = ((cky - byr) / fyr)**2 + 1
+        #     b1r = -(ckx - bxr) / fxr
+        #
+        #     a2r = ((cky - byr) / fyr)**2 + 1
+        #     b2r = -(ckx + 1 - bxr) / fxr
+        #
+        #     a3r = (cky - byr) / fyr * surfnormxr[1] + surfnormxr[2]
+        #     b3r = -surfnormxr[0]
+        #
+        #     u1r = ((ckx - bxr) / fxr)**2 + 1
+        #     v1r = -(cky - byr) / fyr
+        #
+        #     u2r = ((ckx - bxr) / fxr)**2 + 1
+        #     v2r = -(cky + 1 - byr) / fyr
+        #
+        #     u3r = surfnormyr[2] + (ckx - bxr) / fxr * surfnormyr[0]
+        #     v3r = -surfnormyr[1]
+        #
+        #     loghr = torch.log(torch.clamp(torch.abs(a3r * b1r - a1r * b3r), min=protectmin)) - torch.log(torch.clamp(torch.abs(a3r * b2r - a2r * b3r), min=protectmin))
+        #     loghr = torch.clamp(loghr, min=-10, max=10)
+        #
+        #     logvr = torch.log(torch.abs(u2r)) - torch.log(torch.abs(u1r)) + torch.log(torch.clamp(torch.abs(u3r * v1r - u1r * v3r), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3r * v2r - u2r * v3r), min=protectmin))
+        #     logvr = torch.clamp(logvr, min=-10, max=10)
+        #
+        #     low_anghr = torch.atan2(-a1r, b1r)
+        #     high_anghr = torch.atan2(a2r, -b2r)
+        #     pred_anghr = torch.atan2(a3r, -b3r)
+        #     inboundhr = ((pred_anghr < (high_anghr - anglebound)) * (pred_anghr > (low_anghr + anglebound))).float()
+        #
+        #     low_angvr = torch.atan2(-u1r, v1r)
+        #     high_angvr = torch.atan2(u2r, -v2r)
+        #     pred_angvr = torch.atan2(u3r, -v3r)
+        #     inboundvr = ((pred_angvr < (high_angvr - anglebound)) * (pred_angvr > (low_angvr + anglebound))).float()
+        #
+        #     loss = torch.abs(gthr - loghr) *inboundhr + torch.abs(gtvr - logvr) * inboundvr + \
+        #            torch.abs((high_anghr + low_anghr) / 2 - pred_anghr) * (1 - inboundhr) * inboundw + torch.abs((high_angvr + low_angvr) / 2 - pred_angvr) * (1 - inboundvr) * inboundw
+        #
+        #     expadam.zero_grad()
+        #     loss.backward()
+        #     expadam.step()
+        #
+        #     normrec.append(surfnormr.detach().cpu().numpy())
+        #     print("Iteration: %d, Loss: %f, ang: %f, vec: (%f, %f, %f)" % (i, float(loss.detach().cpu().numpy()), float(torch.sum(surfnormgt * surfnormr)), normrec[-1][0], normrec[-1][1], normrec[-1][2]))
+        #
+        # normrecnp = np.stack(normrec, axis=0)
+        # import matlab
+        # import matlab.engine
+        # eng = matlab.engine.start_matlab()
+        #
+        # pltx = matlab.double(normrecnp[:, 0].tolist())
+        # plty = matlab.double(normrecnp[:, 1].tolist())
+        # pltz = matlab.double(normrecnp[:, 2].tolist())
+        #
+        # surfnormgtnp = surfnormgt.detach().cpu().numpy()
+        # pltgtx = matlab.double(surfnormgtnp[0:1].tolist())
+        # pltgty = matlab.double(surfnormgtnp[1:2].tolist())
+        # pltgtz = matlab.double(surfnormgtnp[2:3].tolist())
+        #
+        # eng.figure()
+        # eng.plot3(pltx, plty, pltz)
+        # eng.eval('hold on', nargout=0)
+        # eng.scatter3(pltgtx, pltgty, pltgtz, 15, 'filled', 'r', nargout=0)
+        # eng.eval('axis equal', nargout=0)
+        # eng.title('Optimization on single pixel for 25000 epoch')
+        # eng.xlabel('Normx')
+        # eng.ylabel('Normy')
+        # eng.zlabel('Normz')
+        # eng.eval('grid on', nargout=0)
         #
         # # Singular value analysis
         # ins = torch.isinf(logh)
@@ -6554,5 +6703,4 @@ class SurfaceNormalOptimizer(nn.Module):
         # pltrange = 1e1
         # plt.figure()
         # plt.hist(np.clip(logh.detach().cpu().numpy().flatten(), a_min=-pltrange, a_max=pltrange), bins=100, range=[-0.01, 0.01])
-
-        return loss, outrangeval
+        return
