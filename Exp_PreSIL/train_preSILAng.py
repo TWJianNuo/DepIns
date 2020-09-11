@@ -45,7 +45,7 @@ parser.add_argument("--min_depth",              type=float, default=0.1,        
 parser.add_argument("--max_depth",              type=float, default=100.0,              help="maximum depth")
 parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
-parser.add_argument("--intloss",                type=bool,  default=True)
+parser.add_argument("--intloss",                action="store_true")
 
 # OPTIMIZATION options
 parser.add_argument("--batch_size",             type=int,   default=12,                 help="batch size")
