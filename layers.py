@@ -1248,21 +1248,23 @@ class SurfaceNormalOptimizer(nn.Module):
         gth = self.gth(depthMapl)
         indh = ((self.idh(vallidarmask) == 2) * (self.inth(1-inboundh) == 0)).float()
         # hloss = (torch.sum(torch.abs(gth - inth) * indh) + torch.sum(torch.abs(pred_angh) * (1 - inboundh) * vallidarmask) * angw) / (torch.sum(vallidarmask) + 1)
-        hloss1 = torch.sum(torch.abs(gth - inth) * indh) / (torch.sum(vallidarmask) + 1)
-        hloss2 = torch.sum(torch.abs(pred_angh) * (1 - inboundh) * vallidarmask) * angw / (torch.sum(vallidarmask) + 1)
+        # hloss1 = torch.sum(torch.abs(gth - inth) * indh) / (torch.sum(vallidarmask) + 1)
+        # hloss2 = torch.sum(torch.abs(pred_angh) * (1 - inboundh) * vallidarmask) * angw / (torch.sum(vallidarmask) + 1)
+        hloss = (torch.sum(torch.abs(gth - inth) * inboundh * indh) + torch.sum(torch.abs(pred_angh) * (1-inboundh) * indh) * angw) / (torch.sum(indh) + 1)
 
         intv = self.intv(logv)
         gtv = self.gtv(depthMapl)
         indv = ((self.idv(vallidarmask) == 2) * (self.intv(1-inboundv) == 0)).float()
         # vloss = (torch.sum(torch.abs(gtv - intv) * indv) * vlossw + torch.sum(torch.abs(pred_angv) * (1 - inboundv) * vallidarmask) * angw) / (torch.sum(vallidarmask) + 1)
-        vloss1 = torch.sum(torch.abs(gtv - intv) * indv) * vlossw / (torch.sum(vallidarmask) + 1)
-        vloss2 =  torch.sum(torch.abs(pred_angv) * (1 - inboundv) * vallidarmask) * angw / (torch.sum(vallidarmask) + 1)
+        # vloss1 = torch.sum(torch.abs(gtv - intv) * indv) * vlossw / (torch.sum(vallidarmask) + 1)
+        # vloss2 = torch.sum(torch.abs(pred_angv) * (1 - inboundv) * vallidarmask) * angw / (torch.sum(vallidarmask) + 1)
+        vloss = (torch.sum(torch.abs(gtv - intv) * indv * inboundv) + torch.sum(torch.abs(pred_angv) * (1-inboundh) * indv) * angw) / (torch.sum(indv) + 1)
 
         scl_pixelwise = self.selfconh(logh) + self.selfconv(logv)
         scl = torch.mean(torch.abs(scl_pixelwise))
 
-        # loss = hloss + vloss + scl * sclw
-        loss = hloss1 + hloss2 + vloss1 + vloss2 + scl * sclw
+        loss = hloss + vloss + scl * sclw
+        # loss = hloss1 + hloss2 + vloss1 + vloss2 + scl * sclw
 
         # import random
         # ckx = random.randint(0, self.width)
@@ -1396,7 +1398,8 @@ class SurfaceNormalOptimizer(nn.Module):
         # plt.figure()
         # plt.stem(anghit.detach().cpu().numpy()[inboundsel], np.abs(anghit.grad.detach().cpu().numpy())[inboundsel])
 
-        return loss, hloss1, hloss2, vloss1, vloss2, torch.sum((1 - inboundh)), torch.sum((1 - inboundv))
+        # return loss, hloss1, hloss2, vloss1, vloss2, torch.sum((1 - inboundh)), torch.sum((1 - inboundv))
+        return loss
 
     def ang2normal(self, ang, intrinsic):
         fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])

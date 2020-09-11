@@ -301,15 +301,16 @@ class Trainer:
         for scale in range(4):
             predang = (outputs[('disp', scale)] - 0.5) * 2 * np.pi
             predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-            integrationloss, hloss1, hloss2, vloss1, vloss2, houtnum, voutnum = self.sfnormOptimizer.intergrationloss_ang(predang, inputs["K"], inputs["depthgt"])
+            # integrationloss, hloss1, hloss2, vloss1, vloss2, houtnum, voutnum = self.sfnormOptimizer.intergrationloss_ang(predang, inputs["K"], inputs["depthgt"])
+            integrationloss = self.sfnormOptimizer.intergrationloss_ang(predang, inputs["K"], inputs["depthgt"])
             l1loss = l1loss + integrationloss
-            if scale == 0:
-                losses['hloss1'] = hloss1
-                losses['hloss2'] = hloss2
-                losses['vloss1'] = vloss1
-                losses['vloss2'] = vloss2
-                losses['houtnum'] = houtnum
-                losses['voutnum'] = voutnum
+            # if scale == 0:
+            #     losses['hloss1'] = hloss1
+            #     losses['hloss2'] = hloss2
+            #     losses['vloss1'] = vloss1
+            #     losses['vloss2'] = vloss2
+            #     losses['houtnum'] = houtnum
+            #     losses['voutnum'] = voutnum
 
         l1loss = l1loss / 4
         losses['ang_l1loss'] = l1loss
