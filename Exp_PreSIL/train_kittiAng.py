@@ -20,7 +20,7 @@ with warnings.catch_warnings():
     else:
         from tensorboardX import SummaryWriter
 
-from Exp_PreSIL.dataloader_PreSIL import PreSILDataset
+from Exp_PreSIL.dataloader_kitti import KittiDataset
 
 import networks
 
@@ -35,17 +35,19 @@ import argparse
 default_logpath = os.path.join(project_rootdir, 'tmp')
 parser = argparse.ArgumentParser(description='Train Dense Depth of PreSIL Synthetic Data')
 parser.add_argument("--data_path",              type=str,                               help="path to dataset")
+parser.add_argument("--gt_path",                type=str,                               help="path to kitti gt file")
 parser.add_argument("--model_name",             type=str,                               help="name of the model")
 parser.add_argument("--split",                  type=str,                               help="train/val split to use")
 parser.add_argument("--log_dir",                type=str,   default=default_logpath,    help="path to log file")
 parser.add_argument("--num_layers",             type=int,   default=18,                 help="number of resnet layers", choices=[18, 34, 50, 101, 152])
-parser.add_argument("--height",                 type=int,   default=192,                help="input image height")
-parser.add_argument("--width",                  type=int,   default=640,                help="input image width")
+parser.add_argument("--height",                 type=int,   default=320,                help="input image height")
+parser.add_argument("--width",                  type=int,   default=1024,               help="input image width")
+parser.add_argument("--crph",                   type=int,   default=365,                help="cropped image height")
+parser.add_argument("--crpw",                   type=int,   default=1220,               help="cropped image width")
 parser.add_argument("--min_depth",              type=float, default=0.1,                help="minimum depth")
 parser.add_argument("--max_depth",              type=float, default=100.0,              help="maximum depth")
 parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
-parser.add_argument("--as_lidar",                action="store_true")
 
 # OPTIMIZATION options
 parser.add_argument("--batch_size",             type=int,   default=12,                 help="batch size")
@@ -126,7 +128,7 @@ class Trainer:
 
         self.best_abs = 1e10
 
-        self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size).cuda()
+        self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size).cuda()
 
     def set_dataset(self):
         """properly handle multiple dataset situation
@@ -137,14 +139,14 @@ class Trainer:
         train_filenames = readlines(fpath.format("train"))
         val_filenames = readlines(test_fpath)
 
-        train_dataset = PreSILDataset(
-            self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
-            is_train=True, as_lidar=self.opt.as_lidar
+        train_dataset = KittiDataset(
+            self.opt.data_path, self.opt.gt_path, train_filenames, self.opt.height, self.opt.width,
+            crph=self.opt.crph, crpw=self.opt.crpw, is_train=True,
         )
 
-        val_dataset = PreSILDataset(
-            self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
-            is_train=False, as_lidar=self.opt.as_lidar
+        val_dataset = KittiDataset(
+            self.opt.data_path, self.opt.gt_path, val_filenames, self.opt.height, self.opt.width,
+            crph=self.opt.crph, crpw=self.opt.crpw, is_train=False
         )
 
         self.train_loader = DataLoader(
@@ -204,108 +206,62 @@ class Trainer:
             if self.step % 100 == 0:
                 self.log_time(batch_idx, duration, losses["totLoss"])
 
-            if self.step % 100 == 0:
-                self.log("train", inputs, outputs, losses, writeImage=False)
+            if self.step % 1 == 0:
+                self.log("train", losses)
 
-            if self.step % 2000 == 0 and self.step > 1999:
-                self.val()
+            # if self.step % 2000 == 0 and self.step > 1999:
+            #     self.val()
 
             self.step += 1
 
-    def process_batch(self, inputs):
+    def process_batch(self, inputs, isval = False):
         """Pass a minibatch through the network and generate images and losses
         """
         for key, ipt in inputs.items():
             if not key == 'tag':
                 inputs[key] = ipt.to(self.device)
-        inputs["normgt"] = self.sfnormOptimizer.depth2norm(inputs["depthgt"], inputs["K"], issharp=True)
-        self.sfnormOptimizer.intergrationloss(inputs["normgt"], inputs["K"], inputs["depthgt"])
 
-        # dummynormseed = torch.rand([self.opt.batch_size, 3, self.opt.height, self.opt.width], dtype=torch.float, device="cuda", requires_grad=True)
-        # dummyoptimizer = optim.Adam([dummynormseed], lr=1e-1)
-        #
-        # for i in range(100000):
-        #     dummynorm = (torch.sigmoid(dummynormseed) - 0.5) * 2
-        #     dummynorm = F.normalize(dummynorm, dim=1)
-        #     dummyloss, outrangeval = self.sfnormOptimizer.intergrationloss(dummynorm, inputs["K"], inputs["depthgt"])
-        #     dummyoptimizer.zero_grad()
-        #     dummyloss.backward()
-        #     dummyoptimizer.step()
-        #     print("Iteration: %d, Loss: %f, outrange: %f" % (i, float(dummyloss.detach().cpu().numpy()), float(outrangeval.detach().cpu().numpy())))
-
-
-        # for i in range(100000):
+        # for i in range(1000):
         #     outputs = dict()
+        #     losses = dict()
+        #
         #     outputs.update(self.models['depth'](self.models['encoder'](inputs['color_aug'])))
-        #     dummynorm = (outputs['disp', 0] - 0.5) * 2
-        #     dummynorm = F.normalize(dummynorm, dim=1)
-        #     dummyloss, outrangeval = self.sfnormOptimizer.intergrationloss(dummynorm, inputs["K"], inputs["depthgt"])
-        #     dummyloss = dummyloss
+        #     losses.update(self.ang_compute_losses(inputs, outputs))
+        #
         #     self.model_optimizer.zero_grad()
-        #     dummyloss.backward()
+        #     losses['ang_l1loss'].backward()
         #     self.model_optimizer.step()
-        #     print("Iteration: %d, Loss: %f, outrange: %f" % (i, float(dummyloss.detach().cpu().numpy()), float(outrangeval.detach().cpu().numpy())))
-
+        #
+        #     print("Iteration: %d, loss: %f" % (i, losses['ang_l1loss'].detach().cpu().numpy()))
+        #
+        # minang = - np.pi / 3 * 2
+        # maxang = 2 * np.pi - np.pi / 3 * 2
+        # vind = 0
+        #
+        # vlscolor = F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+        #
+        # predang = (outputs[('disp', 0)] - 0.5) * 2 * np.pi
+        # predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+        # normpred = self.sfnormOptimizer.ang2normal(predang, inputs['K'])
+        #
+        # figrgb = tensor2rgb(vlscolor, ind=vind)
+        # fig_anghpred = tensor2disp(predang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
+        # fig_angvpred = tensor2disp(predang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
+        # fig_normpred = tensor2rgb((normpred + 1) / 2, ind=vind)
+        #
+        # figoview = np.concatenate([np.array(figrgb), np.array(fig_anghpred), np.array(fig_angvpred), np.array(fig_normpred)], axis=0)
+        # pil.fromarray(figoview).show()
 
         outputs = dict()
         losses = dict()
 
         outputs.update(self.models['depth'](self.models['encoder'](inputs['color_aug'])))
 
-        # Normal Branch
-        # losses.update(self.theta_compute_losses(inputs, outputs))
+        # Ang Branch
+        losses.update(self.ang_compute_losses(inputs, outputs))
 
-        # Depth Branch
-        losses.update(self.norm_compute_losses(inputs, outputs, isIntegration=True))
-
-        # Constrain Branch
-        # losses.update(self.constrain_compute_losses(inputs, outputs))
-
-        losses['totLoss'] = losses['norm_l1loss']
+        losses['totLoss'] = losses['ang_l1loss']
         return outputs, losses
-
-    def constrain_compute_losses(self, inputs, outputs):
-        losses = dict()
-        l1constrain = 0
-        htheta_pred_detached = outputs['htheta_pred'].detach()
-        vtheta_pred_detached = outputs['vtheta_pred'].detach()
-
-        # htheta, vtheta = self.presil_localthetadesp.get_theta(inputs['pSIL_depth'])
-        # self.presil_localthetadesp.depth_localgeom_consistency(inputs['pSIL_depth'], htheta, vtheta)
-        for i in range(len(self.opt.scales)):
-            scaledDepth = F.interpolate(outputs[('depth', 0, i)] * self.STEREO_SCALE_FACTOR, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            l1constrain = l1constrain + self.localthetadespKitti_scaled.depth_localgeom_consistency(scaledDepth, htheta_pred_detached, vtheta_pred_detached, mask=self.thetalossmap)
-        l1constrain = l1constrain / len(self.opt.scales)
-        losses['norm_l1loss'] = l1constrain
-        return losses
-
-    def theta_compute_losses(self, inputs, outputs):
-        losses = dict()
-        ltheta = 0
-        sclLoss = 0
-        for i in range(len(self.opt.scales)):
-            pred_theta = outputs[('disp', i)][:,0:2,:,:]
-            pred_theta = F.interpolate(pred_theta, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            pred_theta = pred_theta * float(np.pi) * 2
-            htheta_pred = pred_theta[:, 0:1, :, :]
-            vtheta_pred = pred_theta[:, 1:2, :, :]
-
-            inbl, outbl, scl = self.localthetadespKitti.inplacePath_loss(depthmap=inputs['depthgt'], htheta=htheta_pred, vtheta=vtheta_pred, balancew = self.opt.balancew)
-
-            if i == 0:
-                outputs['htheta_pred'] = outputs[('disp', i)][:, 0:1, :, :] * float(np.pi) * 2
-                outputs['vtheta_pred'] = outputs[('disp', i)][:, 1:2, :, :] * float(np.pi) * 2
-
-            ltheta = ltheta + inbl + outbl / 10
-            sclLoss = sclLoss + scl
-
-        ltheta = ltheta / 4
-        sclLoss = sclLoss / 4
-
-        losses['ltheta'] = ltheta
-        losses['sclLoss'] = sclLoss
-
-        return losses
 
     def val(self):
         """Validate the model on a single minibatch
@@ -337,23 +293,26 @@ class Trainer:
         print("\nBest Performance: %f" % self.best_abs)
         self.set_train()
 
-    def norm_compute_losses(self, inputs, outputs, isIntegration = False):
+    def ang_compute_losses(self, inputs, outputs):
         """Compute the reprojection and smoothness losses for a minibatch
         """
         losses = {}
         l1loss = 0
         for scale in range(4):
-            pred_norm = (outputs[('disp', scale)] - 0.5) * 2
-            pred_norm = F.normalize(pred_norm, dim=1)
-            pred_norm = F.interpolate(pred_norm, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            if not isIntegration:
-                l1loss = l1loss + torch.mean(torch.abs(pred_norm - inputs['normgt']))
-            else:
-                integrationloss, outrangeval = self.sfnormOptimizer.intergrationloss(pred_norm, inputs["K"], inputs["depthgt"])
-                l1loss = l1loss + integrationloss
+            predang = (outputs[('disp', scale)] - 0.5) * 2 * np.pi
+            predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+            integrationloss, hloss1, hloss2, vloss1, vloss2, houtnum, voutnum = self.sfnormOptimizer.intergrationloss_ang(predang, inputs["K"], inputs["depthgt"])
+            l1loss = l1loss + integrationloss
+            if scale == 0:
+                losses['hloss1'] = hloss1
+                losses['hloss2'] = hloss2
+                losses['vloss1'] = vloss1
+                losses['vloss2'] = vloss2
+                losses['houtnum'] = houtnum
+                losses['voutnum'] = voutnum
 
         l1loss = l1loss / 4
-        losses['norm_l1loss'] = l1loss
+        losses['ang_l1loss'] = l1loss
 
         return losses
 
@@ -366,37 +325,28 @@ class Trainer:
         print_string = "epoch {:>3} | batch {:>6} | examples/s: {:5.1f}\nloss_tot: {:.5f} | time elapsed: {} | time left: {}"
         print(print_string.format(self.epoch, batch_idx, samples_per_sec, loss_tot, sec_to_hm_str(time_sofar), sec_to_hm_str(training_time_left)))
 
-    def record_img(self, inputs, outputs):
+    def record_img(self, inputs, outputs, recoder='train'):
+        minang = - np.pi / 3 * 2
+        maxang = 2 * np.pi - np.pi / 3 * 2
         vind = 0
 
-        figrgb = tensor2rgb(inputs['color'], ind=vind)
+        vlscolor = F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
 
-        fignormc1gt = tensor2disp((inputs['normgt'][:, 0:1, :, :] + 1) / 2, vmax=1, ind=0)
-        fignormc1pred = tensor2disp(outputs[('disp', 0)][:, 0:1, :, :], vmax=1, ind=0)
+        predang = (outputs[('disp', 0)] - 0.5) * 2 * np.pi
+        predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+        normpred = self.sfnormOptimizer.ang2normal(predang, inputs['K'])
 
-        fignormc2gt = tensor2disp((inputs['normgt'][:, 1:2, :, :] + 1) / 2, vmax=1, ind=0)
-        fignormc2pred = tensor2disp(outputs[('disp', 0)][:, 1:2, :, :], vmax=1, ind=0)
+        figrgb = tensor2rgb(vlscolor, ind=vind)
+        fig_anghpred = tensor2disp(predang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
+        fig_angvpred = tensor2disp(predang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
+        fig_normpred = tensor2rgb((normpred + 1) / 2, ind=vind)
+        fig_depthgt = tensor2disp(inputs['depthgt'], vmax=40, ind=vind)
 
-        fignormc3gt = tensor2disp((inputs['normgt'][:, 2:3, :, :] + 1) / 2, vmax=1, ind=0)
-        fignormc3pred = tensor2disp(outputs[('disp', 0)][:, 2:3, :, :], vmax=1, ind=0)
+        figoview = np.concatenate([np.array(figrgb), np.array(fig_depthgt), np.array(fig_anghpred), np.array(fig_angvpred), np.array(fig_normpred)], axis=0)
 
-        fignormgt = tensor2rgb((inputs['normgt'] + 1) / 2, ind=0)
-        prednorm = (outputs[('disp', 0)] - 0.5) * 2
-        prednorm = prednorm / torch.norm(prednorm, dim=1, keepdim=True).expand([-1, 3, -1, -1])
-        fignormpred = tensor2rgb((prednorm + 1) / 2, ind=0)
+        self.writers[recoder].add_image('overview', (torch.from_numpy(figoview).float() / 255).permute([2, 0, 1]), self.step)
 
-        fignormc1view = np.concatenate([np.array(figrgb), np.array(fignormc1gt), np.array(fignormc1pred)], axis=0)
-        fignormc2view = np.concatenate([np.array(figrgb), np.array(fignormc2gt), np.array(fignormc2pred)], axis=0)
-        fignormc3view = np.concatenate([np.array(figrgb), np.array(fignormc3gt), np.array(fignormc3pred)], axis=0)
-        fignormview = np.concatenate([np.array(figrgb), np.array(fignormgt), np.array(fignormpred)], axis=0)
-
-        self.writers['train'].add_image('normc1view', (torch.from_numpy(fignormc1view).float() / 255).permute([2, 0, 1]), self.step)
-        self.writers['train'].add_image('normc2view', (torch.from_numpy(fignormc2view).float() / 255).permute([2, 0, 1]), self.step)
-        self.writers['train'].add_image('normc3view', (torch.from_numpy(fignormc3view).float() / 255).permute([2, 0, 1]), self.step)
-        self.writers['train'].add_image('normview', (torch.from_numpy(fignormview).float() / 255).permute([2, 0, 1]), self.step)
-
-
-    def log(self, mode, inputs, outputs, losses, writeImage=False):
+    def log(self, mode, losses):
         """Write an event to the tensorboard events file
         """
         writer = self.writers[mode]

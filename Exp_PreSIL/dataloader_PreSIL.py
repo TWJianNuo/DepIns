@@ -98,7 +98,7 @@ class PreSILDataset(data.Dataset):
 
         w, h = img.size
 
-        if not self.is_train:
+        if self.is_train:
             left = np.random.randint(w - self.width + 1)
             top = np.random.randint(h - self.height + 1)
         else:
@@ -113,7 +113,7 @@ class PreSILDataset(data.Dataset):
 
         w, h = img.size
 
-        if not self.is_train:
+        if self.is_train:
             left = np.random.randint(w - self.width + 1)
             top = np.random.randint(h - self.height + 1)
         else:

@@ -68,11 +68,11 @@ def evaluate(opt):
     depth_decoder.load_state_dict(torch.load(decoder_path))
 
     encoder.cuda()
-    # encoder.eval()
-    encoder.train()
     depth_decoder.cuda()
-    # depth_decoder.eval()
+    encoder.train()
     depth_decoder.train()
+    # depth_decoder.eval()
+    # encoder.eval()
 
     print("-> Computing predictions with size {}x{}".format(
         encoder_dict['width'], encoder_dict['height']))
@@ -83,7 +83,6 @@ def evaluate(opt):
     import matlab.engine
     eng = matlab.engine.start_matlab()
 
-    # count = np.random.randint(0,len(filenames))
     count = 0
 
     comps = filenames[count].split(' ')
@@ -126,57 +125,19 @@ def evaluate(opt):
     htheta_gtsize_act.requires_grad = True
     vtheta_gtsize_act.requires_grad = True
 
-
-    # optimizer = optim.Adam(list(encoder.parameters()) + list(depth_decoder.parameters()),  lr = 1e-5)
     optimizer = optim.Adam([htheta_gtsize_act] + [vtheta_gtsize_act], lr=1e-3)
-    # torch.nn.utils.clip_grad_value_([htheta_gtsize_act] + [vtheta_gtsize_act], clip_value = 10)
 
     loss_rec = list()
     for kk in range(200000):
-        if kk ==0:
-            htheta_gtsize = torch.sigmoid(htheta_gtsize_act) * 2 * np.pi
-            vtheta_gtsize = torch.sigmoid(vtheta_gtsize_act) * 2 * np.pi
-            optimizedDepth_torch = descriptor.vls_geompred_debug(
-                torch.from_numpy(gt_depth).unsqueeze(0).unsqueeze(0).cuda().float(), htheta_gtsize, vtheta_gtsize,
-                input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt, optround=10)
-            sel = (semidense_depth_torch > 0).float()
-            loss = torch.sum(torch.abs(semidense_depth_torch - optimizedDepth_torch) * sel) / torch.sum(sel)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
         htheta_gtsize = torch.sigmoid(htheta_gtsize_act) * 2 * np.pi
         vtheta_gtsize = torch.sigmoid(vtheta_gtsize_act) * 2 * np.pi
 
-        # output = depth_decoder(encoder(input_color))
-
-        # _, preddepth = disp_to_depth(output[("disp", 0)][:,2:3,:,:], opt.min_depth, opt.max_depth)
-        # preddepth = preddepth * STEREO_SCALE_FACTOR
-
-        # semantics = torch.from_numpy(data['semanLabel']).unsqueeze(0).float()
-
-        # preddepth_gtsize = F.interpolate(preddepth, [gtheight, gtwidth], mode='bilinear', align_corners=True)
-        # semantics_gtsize = F.interpolate(semantics, [gtheight, gtwidth], mode='nearest')
-
-
         optimizedDepth_torch = descriptor.vls_geompred(torch.from_numpy(gt_depth).unsqueeze(0).unsqueeze(0).cuda().float(), htheta_gtsize, vtheta_gtsize, input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt)
-        # optimizedDepth_torch = descriptor.vls_geompred(preddepth_gtsize, htheta_gtsize, vtheta_gtsize, input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt)
 
         sel = (semidense_depth_torch > 0).float()
         loss = torch.sum(torch.abs(semidense_depth_torch - optimizedDepth_torch) * sel) / torch.sum(sel)
         optimizer.zero_grad()
         loss.backward()
-        if torch.sum(torch.isnan(htheta_gtsize_act.grad)) + torch.sum(torch.isnan(htheta_gtsize_act.grad)) > 0:
-            htheta_gtsize = torch.sigmoid(htheta_gtsize_act) * 2 * np.pi
-            vtheta_gtsize = torch.sigmoid(vtheta_gtsize_act) * 2 * np.pi
-            optimizedDepth_torch = descriptor.vls_geompred_debug(
-                torch.from_numpy(gt_depth).unsqueeze(0).unsqueeze(0).cuda().float(), htheta_gtsize, vtheta_gtsize,
-                input_color_gtsize, gt_depth, eng=eng, instancemap=instance_gt, optround=50)
-            sel = (semidense_depth_torch > 0).float()
-            loss = torch.sum(torch.abs(semidense_depth_torch - optimizedDepth_torch) * sel) / torch.sum(sel)
-            optimizer.zero_grad()
-            loss.backward()
-            torch.sum(torch.isnan(htheta_gtsize_act.grad)) + torch.sum(torch.isnan(htheta_gtsize_act.grad))
 
         optimizer.step()
 

@@ -21,6 +21,8 @@ class KittiDataset(data.Dataset):
                  filenames,
                  height,
                  width,
+                 crph=365,
+                 crpw=1220,
                  is_train=False
                  ):
         super(KittiDataset, self).__init__()
@@ -50,8 +52,8 @@ class KittiDataset(data.Dataset):
 
         self.dirmapping = {'l': 'image_02', 'r': 'image_03'}
 
-        self.crph = 365
-        self.crpw = 1220
+        self.crph = crph
+        self.crpw = crpw
 
         self.resize = transforms.Resize((self.height, self.width), interpolation=self.interp)
 
@@ -94,7 +96,7 @@ class KittiDataset(data.Dataset):
 
         w, h = img.size
 
-        if not self.is_train:
+        if self.is_train:
             left = np.random.randint(w - self.crpw + 1)
             top = np.random.randint(h - self.crph + 1)
         else:
@@ -109,7 +111,7 @@ class KittiDataset(data.Dataset):
 
         w, h = img.size
 
-        if not self.is_train:
+        if self.is_train:
             left = np.random.randint(w - self.crpw + 1)
             top = np.random.randint(h - self.crph + 1)
         else:
