@@ -1187,9 +1187,12 @@ class SurfaceNormalOptimizer(nn.Module):
     def intergrationloss_ang(self, ang, intrinsic, depthMap):
         anglebound = 0.1
         protectmin = 1e-6
-        angw = 1/20
+        angw = 0
         sclw = 0
         vlossw = 1
+
+        # ang = ang.detach()
+        # ang.requires_grad = True
 
         angh = ang[:, 0, :, :]
         angv = ang[:, 1, :, :]
@@ -1248,23 +1251,36 @@ class SurfaceNormalOptimizer(nn.Module):
         gth = self.gth(depthMapl)
         indh = ((self.idh(vallidarmask) == 2) * (self.inth(1-inboundh) == 0)).float()
         # hloss = (torch.sum(torch.abs(gth - inth) * indh) + torch.sum(torch.abs(pred_angh) * (1 - inboundh) * vallidarmask) * angw) / (torch.sum(vallidarmask) + 1)
-        # hloss1 = torch.sum(torch.abs(gth - inth) * indh) / (torch.sum(vallidarmask) + 1)
-        # hloss2 = torch.sum(torch.abs(pred_angh) * (1 - inboundh) * vallidarmask) * angw / (torch.sum(vallidarmask) + 1)
-        hloss = (torch.sum(torch.abs(gth - inth) * inboundh * indh) + torch.sum(torch.abs(pred_angh) * (1-inboundh) * indh) * angw) / (torch.sum(indh) + 1)
+        hloss1 = torch.sum(torch.abs(gth - inth) * indh) / (torch.sum(indh) + 1)
+        hloss2 = torch.sum(torch.abs(pred_angh) * (1 - inboundh)) * angw / (torch.sum(1 - inboundh) + 1)
 
         intv = self.intv(logv)
         gtv = self.gtv(depthMapl)
         indv = ((self.idv(vallidarmask) == 2) * (self.intv(1-inboundv) == 0)).float()
         # vloss = (torch.sum(torch.abs(gtv - intv) * indv) * vlossw + torch.sum(torch.abs(pred_angv) * (1 - inboundv) * vallidarmask) * angw) / (torch.sum(vallidarmask) + 1)
-        # vloss1 = torch.sum(torch.abs(gtv - intv) * indv) * vlossw / (torch.sum(vallidarmask) + 1)
-        # vloss2 = torch.sum(torch.abs(pred_angv) * (1 - inboundv) * vallidarmask) * angw / (torch.sum(vallidarmask) + 1)
-        vloss = (torch.sum(torch.abs(gtv - intv) * indv * inboundv) + torch.sum(torch.abs(pred_angv) * (1-inboundh) * indv) * angw) / (torch.sum(indv) + 1)
+        vloss1 = torch.sum(torch.abs(gtv - intv) * indv) * vlossw / (torch.sum(indv) + 1)
+        vloss2 = torch.sum(torch.abs(pred_angv) * (1 - inboundv)) * angw / (torch.sum(1 - inboundh) + 1)
 
         scl_pixelwise = self.selfconh(logh) + self.selfconv(logv)
         scl = torch.mean(torch.abs(scl_pixelwise))
 
-        loss = hloss + vloss + scl * sclw
-        # loss = hloss1 + hloss2 + vloss1 + vloss2 + scl * sclw
+        # loss = hloss + vloss + scl * sclw
+        loss = hloss1 + hloss2 + vloss1 + vloss2 + scl * sclw
+
+        # hloss1.backward()
+        # torch.mean(torch.abs(ang.grad))
+        #
+        # hloss2.backward()
+        # torch.mean(torch.abs(ang.grad))
+        #
+        # vloss1.backward()
+        # torch.mean(torch.abs(ang.grad))
+        #
+        # vloss2.backward()
+        # torch.mean(torch.abs(ang.grad))
+        #
+        # loss.backward()
+        # torch.mean(torch.abs(ang.grad))
 
         # import random
         # ckx = random.randint(0, self.width)
@@ -1380,7 +1396,7 @@ class SurfaceNormalOptimizer(nn.Module):
         # loghrit = torch.log(torch.clamp(torch.abs(a3rit * b1rit - a1rit * b3rit), min=protectmin)) - torch.log(torch.clamp(torch.abs(a3rit * b2rit - a2rit * b3rit), min=protectmin))
         # loghrit = torch.clamp(loghrit, min=-10, max=10)
         #
-        # lossit = torch.abs(loghrit) * inboundhrit + torch.abs(anghit) * (1 - inboundhrit) * inboundw
+        # lossit = torch.abs(loghrit) * inboundhrit + torch.abs(anghit) * (1 - inboundhrit) * angw
         # lossit_sum = torch.sum(lossit)
         #
         # ckhind = torch.argmin(torch.abs(loghrit - gthrit) * inboundhrit + torch.abs(anghit) * (1 - inboundhrit))
@@ -1397,9 +1413,48 @@ class SurfaceNormalOptimizer(nn.Module):
         #
         # plt.figure()
         # plt.stem(anghit.detach().cpu().numpy()[inboundsel], np.abs(anghit.grad.detach().cpu().numpy())[inboundsel])
-
-        # return loss, hloss1, hloss2, vloss1, vloss2, torch.sum((1 - inboundh)), torch.sum((1 - inboundv))
-        return loss
+        #
+        # angvit = torch.linspace(start=-np.pi, end=np.pi, steps=1000, device="cuda")
+        # angvit.requires_grad = True
+        #
+        # gtvrit = torch.log(depthMap[ckz, 0, cky + 1, ckx]) - torch.log(depthMap[ckz, 0, cky, ckx])
+        # anggtvrit = angv[ckz, cky, ckx]
+        #
+        # u1rit = u1[ckz, cky, ckx]
+        # v1rit = v1[ckz, cky, ckx]
+        #
+        # u2rit = u2[ckz, cky, ckx]
+        # v2rit = v2[ckz, cky, ckx]
+        #
+        # u3rit = torch.sin(angvit)
+        # v3rit = -torch.cos(angvit)
+        #
+        # low_angvrit = torch.atan2(-u1rit, v1rit)
+        # high_angvrit = torch.atan2(u2rit, -v2rit)
+        # inboundvrit = ((angvit < (high_angvrit) - anglebound) * (angvit > (low_angvrit) + anglebound)).float()
+        #
+        # logvrit = torch.log(torch.clamp(torch.abs(u3rit * v1rit - u1rit * v3rit), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3rit * v2rit - u2rit * v3rit), min=protectmin))
+        # logvrit = torch.clamp(logvrit, min=-10, max=10)
+        #
+        # lossit = torch.abs(logvrit) * inboundvrit + torch.abs(angvit) * (1 - inboundvrit) * angw
+        # lossit_sum = torch.sum(lossit)
+        #
+        # ckvind = torch.argmin(torch.abs(logvrit - gtvrit) * inboundvrit + torch.abs(angvit) * (1 - inboundvrit))
+        # print("True angle: %f, Most cloest angle: %f" % (float(anggtvrit.detach().cpu().numpy()), float(angvit[ckvind].detach().cpu().numpy())))
+        #
+        # lossit_sum.backward()
+        # inboundsel = inboundvrit.detach().cpu().numpy() == 1
+        #
+        # plt.figure()
+        # plt.stem(angvit.detach().cpu().numpy()[inboundsel], lossit.detach().cpu().numpy()[inboundsel])
+        #
+        # plt.figure()
+        # plt.stem(angvit.detach().cpu().numpy(), np.abs(angvit.grad.detach().cpu().numpy()))
+        #
+        # plt.figure()
+        # plt.stem(angvit.detach().cpu().numpy()[inboundsel], np.abs(angvit.grad.detach().cpu().numpy())[inboundsel])
+        return loss, hloss1, hloss2, vloss1, vloss2, torch.sum((1 - inboundh)), torch.sum((1 - inboundv))
+        # return loss
 
     def ang2normal(self, ang, intrinsic):
         fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])

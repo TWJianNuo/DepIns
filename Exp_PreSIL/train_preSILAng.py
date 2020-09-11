@@ -220,6 +220,7 @@ class Trainer:
                 inputs[key] = ipt.to(self.device)
 
         inputs['anggt'] = self.sfnormOptimizer.depth2ang(inputs["depthgt"], inputs["K"], issharp=True)
+        self.sfnormOptimizer.intergrationloss_ang(inputs["anggt"], inputs["K"], inputs["depthgt"])
         # angseed = torch.zeros([self.opt.batch_size, 2, self.opt.height, self.opt.width], device="cuda", requires_grad=True)
         # angopter = optim.SGD([angseed], lr=1e5)
         # for i in range(9000):
