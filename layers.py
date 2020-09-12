@@ -1189,7 +1189,7 @@ class SurfaceNormalOptimizer(nn.Module):
         protectmin = 1e-6
         angw = 0
         sclw = 0
-        vlossw = 1
+        vlossw = 0.2
 
         # ang = ang.detach()
         # ang.requires_grad = True
