@@ -49,6 +49,7 @@ parser.add_argument("--max_depth",              type=float, default=100.0,      
 parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
 
+
 # OPTIMIZATION options
 parser.add_argument("--batch_size",             type=int,   default=12,                 help="batch size")
 parser.add_argument("--learning_rate",          type=float, default=1e-4,               help="learning rate")
@@ -56,6 +57,9 @@ parser.add_argument("--num_epochs",             type=int,   default=20,         
 parser.add_argument("--scheduler_step_size",    type=int,   default=15,                 help="step size of the scheduler")
 parser.add_argument("--load_weights_folder",    type=str,   default=None,               help="name of models to load")
 parser.add_argument("--num_workers",            type=int,   default=6,                  help="number of dataloader workers")
+parser.add_argument("--angw",                   type=float, default=1e-3)
+parser.add_argument("--vlossw",                 type=float, default=0.2)
+parser.add_argument("--sclw",                   type=float, default=0)
 
 # LOGGING options
 parser.add_argument("--log_frequency",          type=int,   default=250,                help="number of batches between each tensorboard log")
@@ -128,7 +132,7 @@ class Trainer:
 
         self.best_abs = 1e10
 
-        self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size).cuda()
+        self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size, angw=self.opt.angw, vlossw=self.opt.vlossw, sclw=self.opt.sclw).cuda()
 
     def set_dataset(self):
         """properly handle multiple dataset situation

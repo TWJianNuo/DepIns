@@ -957,14 +957,17 @@ class LocalThetaDesp(nn.Module):
         return recovered_depth
 
 class SurfaceNormalOptimizer(nn.Module):
-    def __init__(self, height, width, batch_size):
+    def __init__(self, height, width, batch_size, angw=1e-3, vlossw=0.2, sclw=0):
         super(SurfaceNormalOptimizer, self).__init__()
         # intrinsic: (batch_size, 4, 4)
         self.height = height
         self.width = width
         self.batch_size = batch_size
-        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        self.angw = angw
+        self.vlossw = vlossw
+        self.sclw = sclw
 
+        xx, yy = np.meshgrid(range(self.width), range(self.height), indexing='xy')
         self.xx = nn.Parameter(torch.from_numpy(np.copy(xx)).unsqueeze(0).repeat([self.batch_size, 1, 1]).float(), requires_grad=False)
         self.yy = nn.Parameter(torch.from_numpy(np.copy(yy)).unsqueeze(0).repeat([self.batch_size, 1, 1]).float(), requires_grad=False)
 
@@ -1187,9 +1190,9 @@ class SurfaceNormalOptimizer(nn.Module):
     def intergrationloss_ang(self, ang, intrinsic, depthMap):
         anglebound = 0.1
         protectmin = 1e-6
-        angw = 0
-        sclw = 0
-        vlossw = 0.2
+        vlossw = self.vlossw
+        angw = self.angw
+        sclw = self.sclw
 
         # ang = ang.detach()
         # ang.requires_grad = True
