@@ -221,28 +221,6 @@ class Trainer:
 
         inputs['anggt'] = self.sfnormOptimizer.depth2ang(inputs["depthgt"], inputs["K"], issharp=True)
         self.sfnormOptimizer.intergrationloss_ang(inputs["anggt"], inputs["K"], inputs["depthgt"])
-        # angseed = torch.zeros([self.opt.batch_size, 2, self.opt.height, self.opt.width], device="cuda", requires_grad=True)
-        # angopter = optim.SGD([angseed], lr=1e5)
-        # for i in range(9000):
-        #     angopted = torch.sigmoid(angseed)
-        #     angopted = (angopted - 0.5) * 2 * np.pi
-        #     angloss = self.sfnormOptimizer.intergrationloss_ang(angopted, inputs["K"], inputs["depthgt"])
-        #     angopter.zero_grad()
-        #     angloss.backward()
-        #     angopter.step()
-        #     print("Iteration: %d, loss: %f" % (i, angloss.detach().cpu().numpy()))
-        #
-        # vind = 0
-        # minang = - np.pi / 3 * 2
-        # maxang = 2 * np.pi - np.pi / 3 * 2
-        #
-        # tensor2disp((inputs['anggt'][:, 0:1, :, :] - minang), vmax=maxang, ind=vind).show()
-        # tensor2disp(angopted[:, 0:1, :, :] - minang, vmax=maxang, ind=vind).show()
-        #
-        # tensor2disp((inputs['anggt'][:, 1:2, :, :] - minang), vmax=maxang, ind=vind).show()
-        # tensor2disp(angopted[:, 1:2, :, :] - minang, vmax=maxang, ind=vind).show()
-        #
-        # tensor2disp(inputs["depthgt"] > 0, vmax=1, ind=vind).show()
 
         outputs = dict()
         losses = dict()

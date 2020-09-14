@@ -36,6 +36,7 @@ default_logpath = os.path.join(project_rootdir, 'tmp')
 parser = argparse.ArgumentParser(description='Train Dense Depth of PreSIL Synthetic Data')
 parser.add_argument("--data_path",              type=str,                               help="path to dataset")
 parser.add_argument("--gt_path",                type=str,                               help="path to kitti gt file")
+parser.add_argument("--val_gt_path",            type=str,                               help="path to validation gt file")
 parser.add_argument("--model_name",             type=str,                               help="name of the model")
 parser.add_argument("--split",                  type=str,                               help="train/val split to use")
 parser.add_argument("--log_dir",                type=str,   default=default_logpath,    help="path to log file")
@@ -57,7 +58,7 @@ parser.add_argument("--num_epochs",             type=int,   default=20,         
 parser.add_argument("--scheduler_step_size",    type=int,   default=15,                 help="step size of the scheduler")
 parser.add_argument("--load_weights_folder",    type=str,   default=None,               help="name of models to load")
 parser.add_argument("--num_workers",            type=int,   default=6,                  help="number of dataloader workers")
-parser.add_argument("--angw",                   type=float, default=1e-3)
+parser.add_argument("--angw",                   type=float, default=1e-6)
 parser.add_argument("--vlossw",                 type=float, default=0.2)
 parser.add_argument("--sclw",                   type=float, default=0)
 
@@ -145,11 +146,11 @@ class Trainer:
 
         train_dataset = KittiDataset(
             self.opt.data_path, self.opt.gt_path, train_filenames, self.opt.height, self.opt.width,
-            crph=self.opt.crph, crpw=self.opt.crpw, is_train=True,
+            crph=self.opt.crph, crpw=self.opt.crpw, is_train=True
         )
 
         val_dataset = KittiDataset(
-            self.opt.data_path, self.opt.gt_path, val_filenames, self.opt.height, self.opt.width,
+            self.opt.data_path, self.opt.val_gt_path, val_filenames, self.opt.height, self.opt.width,
             crph=self.opt.crph, crpw=self.opt.crpw, is_train=False
         )
 
@@ -184,7 +185,6 @@ class Trainer:
         self.start_time = time.time()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
-            self.save_model("weight_{}".format(self.epoch))
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -213,8 +213,8 @@ class Trainer:
             if self.step % 1 == 0:
                 self.log("train", losses)
 
-            # if self.step % 2000 == 0 and self.step > 1999:
-            #     self.val()
+            if self.step % 2000 == 0 and self.step > 1999:
+                self.val()
 
             self.step += 1
 
@@ -224,37 +224,6 @@ class Trainer:
         for key, ipt in inputs.items():
             if not key == 'tag':
                 inputs[key] = ipt.to(self.device)
-
-        # for i in range(1000):
-        #     outputs = dict()
-        #     losses = dict()
-        #
-        #     outputs.update(self.models['depth'](self.models['encoder'](inputs['color_aug'])))
-        #     losses.update(self.ang_compute_losses(inputs, outputs))
-        #
-        #     self.model_optimizer.zero_grad()
-        #     losses['ang_l1loss'].backward()
-        #     self.model_optimizer.step()
-        #
-        #     print("Iteration: %d, loss: %f" % (i, losses['ang_l1loss'].detach().cpu().numpy()))
-        #
-        # minang = - np.pi / 3 * 2
-        # maxang = 2 * np.pi - np.pi / 3 * 2
-        # vind = 0
-        #
-        # vlscolor = F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-        #
-        # predang = (outputs[('disp', 0)] - 0.5) * 2 * np.pi
-        # predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-        # normpred = self.sfnormOptimizer.ang2normal(predang, inputs['K'])
-        #
-        # figrgb = tensor2rgb(vlscolor, ind=vind)
-        # fig_anghpred = tensor2disp(predang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
-        # fig_angvpred = tensor2disp(predang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
-        # fig_normpred = tensor2rgb((normpred + 1) / 2, ind=vind)
-        #
-        # figoview = np.concatenate([np.array(figrgb), np.array(fig_anghpred), np.array(fig_angvpred), np.array(fig_normpred)], axis=0)
-        # pil.fromarray(figoview).show()
 
         outputs = dict()
         losses = dict()
@@ -278,14 +247,13 @@ class Trainer:
                     if not key == 'tag':
                         inputs[key] = ipt.to(self.device)
 
-                normgt = self.sfnormOptimizer.depth2norm(inputs["depthgt"], inputs["K"])
-
                 outputs = self.models['depth'](self.models['encoder'](inputs["color"]))
 
-                prednorm = (outputs[('disp', 0)] - 0.5) * 2
-                prednorm = prednorm / torch.norm(prednorm, dim=1, keepdim=True).expand([-1, 3, -1, -1])
+                predang = (outputs[('disp', 0)] - 0.5) * 2
+                predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+                evalloss = self.sfnormOptimizer.intergrationloss_ang_validation(predang, inputs["K"], inputs["depthgt"])
 
-                toterr = toterr + torch.mean(1 - torch.sum(prednorm * normgt, dim=1, keepdim=True))
+                toterr = toterr + evalloss
             del inputs, outputs
         mean_err = toterr / self.val_loader.__len__()
 
@@ -396,7 +364,8 @@ class Trainer:
             "Cannot find folder {}".format(self.opt.load_weights_folder)
         print("loading model from folder {}".format(self.opt.load_weights_folder))
 
-        for n in self.opt.models_to_load:
+        models_to_load = ['encoder', 'depth']
+        for n in models_to_load:
             print("Loading {} weights...".format(n))
             path = os.path.join(self.opt.load_weights_folder, "{}.pth".format(n))
             if n in self.models:

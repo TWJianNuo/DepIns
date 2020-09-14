@@ -1109,6 +1109,34 @@ class SurfaceNormalOptimizer(nn.Module):
         self.diffx_sharp.weight = nn.Parameter(weightsx, requires_grad=False)
         self.diffy_sharp.weight = nn.Parameter(weightsy, requires_grad=False)
 
+    def init_sparsegradconv(self, height, width, sigmah, sigmaw):
+        assert (np.mod(width, 2) == 1) and (np.mod(height, 2) == 1)
+        centerw = int((width - 1) / 2)
+        centerh = int((height - 1) / 2)
+
+        kernelpos = np.zeros([height, width], dtype=np.float32)
+        kernelneg = np.zeros([height, width], dtype=np.float32)
+        for i in range(height):
+            for j in range(width):
+                if j < centerw:
+                    kernelneg[i, j] = -np.exp(-(((i - centerh) / sigmah) ** 2 + ((j - centerw) / sigmaw) ** 2))
+                elif j > centerw:
+                    kernelpos[i, j] = np.exp(-(((i - centerh) / sigmah) ** 2 + ((j - centerw) / sigmaw) ** 2))
+        kernelneg = kernelneg / np.sum(np.abs(kernelneg)) / 2
+        kernelpos = kernelpos / np.sum(np.abs(kernelpos)) / 2
+
+        self.kernelnegh = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=[height, width], padding=[centerh, centerw], bias=False)
+        self.kernelposh = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=[height, width], padding=[centerh, centerw], bias=False)
+
+        self.kernelnegh.weight = nn.Parameter(torch.from_numpy(kernelneg).unsqueeze(0).unsqueeze(0), requires_grad=False)
+        self.kernelposh.weight = nn.Parameter(torch.from_numpy(kernelpos).unsqueeze(0).unsqueeze(0), requires_grad=False)
+
+        self.kernelnegv = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=[width, height], padding=[centerw, centerh], bias=False)
+        self.kernelposv = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=[width, height], padding=[centerw, centerh], bias=False)
+
+        self.kernelnegv.weight = nn.Parameter(torch.from_numpy(np.copy(kernelneg.T)).unsqueeze(0).unsqueeze(0), requires_grad=False)
+        self.kernelposv.weight = nn.Parameter(torch.from_numpy(np.copy(kernelpos.T)).unsqueeze(0).unsqueeze(0), requires_grad=False)
+
     def depth2norm(self, depthMap, intrinsic, issharp=True):
         depthMaps = depthMap.squeeze(1)
         fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
@@ -1194,9 +1222,6 @@ class SurfaceNormalOptimizer(nn.Module):
         angw = self.angw
         sclw = self.sclw
 
-        # ang = ang.detach()
-        # ang.requires_grad = True
-
         angh = ang[:, 0, :, :]
         angv = ang[:, 1, :, :]
 
@@ -1238,7 +1263,7 @@ class SurfaceNormalOptimizer(nn.Module):
         logh = torch.log(torch.clamp(torch.abs(a3 * b1 - a1 * b3), min=protectmin)) - torch.log(torch.clamp(torch.abs(a3 * b2 - a2 * b3), min=protectmin))
         logh = torch.clamp(logh, min=-10, max=10)
 
-        logv = torch.log(torch.abs(u2)) - torch.log(torch.abs(u1)) + torch.log(torch.clamp(torch.abs(u3 * v1 - u1 * v3), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3 * v2 - u2 * v3), min=protectmin))
+        logv = torch.log(torch.clamp(torch.abs(u3 * v1 - u1 * v3), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3 * v2 - u2 * v3), min=protectmin))
         logv = torch.clamp(logv, min=-10, max=10)
 
         logh = logh.unsqueeze(1)
@@ -1457,7 +1482,62 @@ class SurfaceNormalOptimizer(nn.Module):
         # plt.figure()
         # plt.stem(angvit.detach().cpu().numpy()[inboundsel], np.abs(angvit.grad.detach().cpu().numpy())[inboundsel])
         return loss, hloss1, hloss2, vloss1, vloss2, torch.sum((1 - inboundh)), torch.sum((1 - inboundv))
-        # return loss
+
+    def intergrationloss_ang_validation(self, ang, intrinsic, depthMap):
+        protectmin = 1e-6
+
+        angh = ang[:, 0, :, :]
+        angv = ang[:, 1, :, :]
+
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        a1 = ((self.yy - by) / fy)**2 + 1
+        b1 = -(self.xx - bx) / fx
+
+        a2 = ((self.yy - by) / fy)**2 + 1
+        b2 = -(self.xx + 1 - bx) / fx
+
+        a3 = torch.sin(angh)
+        b3 = -torch.cos(angh)
+
+        u1 = ((self.xx - bx) / fx)**2 + 1
+        v1 = -(self.yy - by) / fy
+
+        u2 = ((self.xx - bx) / fx)**2 + 1
+        v2 = -(self.yy + 1 - by) / fy
+
+        u3 = torch.sin(angv)
+        v3 = -torch.cos(angv)
+
+        depthMapl = torch.log(torch.clamp(depthMap, min=protectmin))
+
+        logh = torch.log(torch.clamp(torch.abs(a3 * b1 - a1 * b3), min=protectmin)) - torch.log(torch.clamp(torch.abs(a3 * b2 - a2 * b3), min=protectmin))
+        logh = torch.clamp(logh, min=-10, max=10)
+
+        logv = torch.log(torch.clamp(torch.abs(u3 * v1 - u1 * v3), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3 * v2 - u2 * v3), min=protectmin))
+        logv = torch.clamp(logv, min=-10, max=10)
+
+        logh = logh.unsqueeze(1)
+        logv = logv.unsqueeze(1)
+
+        vallidarmask = (depthMap > 0).float()
+
+        inth = self.inth(logh)
+        gth = self.gth(depthMapl)
+        indh = (self.idh(vallidarmask) == 2).float()
+        hloss = torch.sum(torch.abs(gth - inth) * indh) / (torch.sum(indh) + 1)
+
+        intv = self.intv(logv)
+        gtv = self.gtv(depthMapl)
+        indv = (self.idv(vallidarmask) == 2).float()
+        vloss = torch.sum(torch.abs(gtv - intv) * indv) / (torch.sum(indv) + 1)
+
+        loss = hloss + vloss
+
+        return loss
 
     def ang2normal(self, ang, intrinsic):
         fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])

@@ -4,7 +4,7 @@ import os
 import random
 import numpy as np
 import copy
-from PIL import Image
+from PIL import Image, ImageFile
 from kitti_utils import read_calib_file
 
 import torch.utils.data as data
@@ -14,6 +14,7 @@ from utils import *
 
 import time
 
+ImageFile.LOAD_TRUNCATED_IMAGES = True # This can prevent some weried error
 class KittiDataset(data.Dataset):
     def __init__(self,
                  data_path,
