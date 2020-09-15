@@ -182,7 +182,6 @@ for scale in range(3):
         gtdepthrecorder = gtdepthrecorder[gtdepthrecorder > 0]
         approxdepthrecorder = approxdepthrecorder[approxdepthrecorder > 0]
 
-        # compute_errors(gtdepthrecorder, approxdepthrecorder)
         err_recorder.append(compute_errors(gtdepthrecorder, approxdepthrecorder))
 
         print("Scale: %d, Frame: %d" % (scale, count))

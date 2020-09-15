@@ -1215,6 +1215,33 @@ class SurfaceNormalOptimizer(nn.Module):
 
         return ang
 
+    def ang2grad(self, ang, intrinsic, depthMap):
+        depthMaps = depthMap.squeeze(1)
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        angh = ang[:, 0, :, :]
+        angv = ang[:, 1, :, :]
+
+        depthMap_gradx_est = depthMaps / fx * torch.sin(angh) / ((((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh))
+        depthMap_grady_est = depthMaps / fy * torch.sin(angv) / ((((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv))
+
+        depthMap_gradx_est = depthMap_gradx_est.unsqueeze(1)
+        depthMap_grady_est = depthMap_grady_est.unsqueeze(1)
+
+        # # Check
+        # depthMap_gradx = self.diffx_sharp(depthMap).squeeze(1)
+        # depthMap_grady = self.diffy_sharp(depthMap).squeeze(1)
+        #
+        # tensor2grad(depthMap_gradx_est.unsqueeze(1), viewind=0, percentile=80).show()
+        # tensor2grad(depthMap_gradx.unsqueeze(1), viewind=0, percentile=80).show()
+        #
+        # tensor2grad(depthMap_grady_est.unsqueeze(1), viewind=0, percentile=80).show()
+        # tensor2grad(depthMap_grady.unsqueeze(1), viewind=0, percentile=80).show()
+        return depthMap_gradx_est, depthMap_grady_est
+
     def intergrationloss_ang(self, ang, intrinsic, depthMap):
         anglebound = 0.1
         protectmin = 1e-6
