@@ -220,8 +220,6 @@ class Trainer:
                 inputs[key] = ipt.to(self.device)
 
         inputs['anggt'] = self.sfnormOptimizer.depth2ang(inputs["depthgt"], inputs["K"], issharp=True)
-        # normgt = self.sfnormOptimizer.depth2norm(inputs["depthgt"], inputs["K"], issharp=True)
-        # anghgt, angvgt = self.sfnormOptimizer.normal2ang(normgt, inputs["K"])
 
         outputs = dict()
         losses = dict()
