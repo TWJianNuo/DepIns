@@ -58,9 +58,6 @@ parser.add_argument("--num_epochs",             type=int,   default=20,         
 parser.add_argument("--scheduler_step_size",    type=int,   default=15,                 help="step size of the scheduler")
 parser.add_argument("--load_weights_folder",    type=str,   default=None,               help="name of models to load")
 parser.add_argument("--num_workers",            type=int,   default=6,                  help="number of dataloader workers")
-parser.add_argument("--angw",                   type=float, default=1e-6)
-parser.add_argument("--vlossw",                 type=float, default=0.2)
-parser.add_argument("--sclw",                   type=float, default=0)
 
 # LOGGING options
 parser.add_argument("--log_frequency",          type=int,   default=250,                help="number of batches between each tensorboard log")

@@ -36,6 +36,7 @@ default_logpath = os.path.join(project_rootdir, 'tmp')
 parser = argparse.ArgumentParser(description='Train Dense Depth of PreSIL Synthetic Data')
 parser.add_argument("--data_path",              type=str,                               help="path to dataset")
 parser.add_argument("--gt_path",                type=str,                               help="path to kitti gt file")
+parser.add_argument("--gt_norm_path",           type=str,   default='None',             help="path to kitti gt file")
 parser.add_argument("--val_gt_path",            type=str,                               help="path to validation gt file")
 parser.add_argument("--model_name",             type=str,                               help="name of the model")
 parser.add_argument("--split",                  type=str,                               help="train/val split to use")
@@ -49,6 +50,7 @@ parser.add_argument("--min_depth",              type=float, default=0.1,        
 parser.add_argument("--max_depth",              type=float, default=100.0,              help="maximum depth")
 parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
+parser.add_argument("--gtnorm_suped",           action='store_true')
 
 
 # OPTIMIZATION options
@@ -140,18 +142,18 @@ class Trainer:
         """
 
         fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", self.opt.split, "{}_files.txt")
-        test_fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", self.opt.split, "val_files.txt")
+        test_fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", self.opt.split, "test_files.txt")
         train_filenames = readlines(fpath.format("train"))
         val_filenames = readlines(test_fpath)
 
         train_dataset = KittiDataset(
             self.opt.data_path, self.opt.gt_path, train_filenames, self.opt.height, self.opt.width,
-            crph=self.opt.crph, crpw=self.opt.crpw, is_train=True
+            crph=self.opt.crph, crpw=self.opt.crpw, is_train=True, gt_norm_path=self.opt.gt_norm_path
         )
 
         val_dataset = KittiDataset(
             self.opt.data_path, self.opt.val_gt_path, val_filenames, self.opt.height, self.opt.width,
-            crph=self.opt.crph, crpw=self.opt.crpw, is_train=False
+            crph=self.opt.crph, crpw=self.opt.crpw, is_train=False, gt_norm_path=self.opt.gt_norm_path
         )
 
         self.train_loader = DataLoader(
@@ -231,7 +233,7 @@ class Trainer:
         outputs.update(self.models['depth'](self.models['encoder'](inputs['color_aug'])))
 
         # Ang Branch
-        losses.update(self.ang_compute_losses(inputs, outputs))
+        losses.update(self.ang_compute_losses(inputs, outputs, not self.opt.gtnorm_suped))
 
         losses['totLoss'] = losses['ang_l1loss']
         return outputs, losses
@@ -249,8 +251,15 @@ class Trainer:
 
                 outputs = self.models['depth'](self.models['encoder'](inputs["color"]))
 
-                predang = (outputs[('disp', 0)] - 0.5) * 2
-                predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+                if not self.opt.gtnorm_suped:
+                    predang = (outputs[('disp', 0)] - 0.5) * 2 * np.pi
+                    predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+                else:
+                    prednorm = (outputs[('disp', 0)] - 0.5) * 2
+                    prednorm = F.normalize(prednorm, dim=1)
+                    prednorm = F.interpolate(prednorm, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+                    predang = self.sfnormOptimizer.normal2ang(prednorm, inputs['K'])
+
                 evalloss = self.sfnormOptimizer.intergrationloss_ang_validation(predang, inputs["K"], inputs["depthgt"])
 
                 toterr = toterr + evalloss
@@ -265,24 +274,34 @@ class Trainer:
         print("\nBest Performance: %f" % self.best_abs)
         self.set_train()
 
-    def ang_compute_losses(self, inputs, outputs):
+    def ang_compute_losses(self, inputs, outputs, isIntegrationLoss=True):
         """Compute the reprojection and smoothness losses for a minibatch
         """
         losses = {}
         l1loss = 0
+
+        if not isIntegrationLoss:
+            normmask = (torch.sum(inputs['normgt'] ** 2, dim=1, keepdim=True) > 0).float().expand([-1, 3, -1, -1])
+
         for scale in range(4):
-            predang = (outputs[('disp', scale)] - 0.5) * 2 * np.pi
-            predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-            integrationloss, hloss1, hloss2, vloss1, vloss2, houtnum, voutnum = self.sfnormOptimizer.intergrationloss_ang(predang, inputs["K"], inputs["depthgt"])
-            # integrationloss = self.sfnormOptimizer.intergrationloss_ang(predang, inputs["K"], inputs["depthgt"])
-            l1loss = l1loss + integrationloss
-            if scale == 0:
-                losses['hloss1'] = hloss1
-                losses['hloss2'] = hloss2
-                losses['vloss1'] = vloss1
-                losses['vloss2'] = vloss2
-                losses['houtnum'] = houtnum
-                losses['voutnum'] = voutnum
+            if isIntegrationLoss:
+                predang = (outputs[('disp', scale)] - 0.5) * 2 * np.pi
+                predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+                integrationloss, hloss1, hloss2, vloss1, vloss2, houtnum, voutnum = self.sfnormOptimizer.intergrationloss_ang(predang, inputs["K"], inputs["depthgt"])
+                l1loss = l1loss + integrationloss
+                if scale == 0:
+                    losses['hloss1'] = hloss1
+                    losses['hloss2'] = hloss2
+                    losses['vloss1'] = vloss1
+                    losses['vloss2'] = vloss2
+                    losses['houtnum'] = houtnum
+                    losses['voutnum'] = voutnum
+            else:
+                prednorm = (outputs[('disp', scale)] - 0.5) * 2
+                prednorm = F.normalize(prednorm, dim=1)
+                prednorm = F.interpolate(prednorm, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+
+                l1loss = l1loss + torch.sum(torch.abs(prednorm - inputs['normgt']) * normmask) / (torch.sum(normmask) + 1)
 
         l1loss = l1loss / 4
         losses['ang_l1loss'] = l1loss
@@ -304,18 +323,35 @@ class Trainer:
         vind = 0
 
         vlscolor = F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-
-        predang = (outputs[('disp', 0)] - 0.5) * 2 * np.pi
-        predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-        normpred = self.sfnormOptimizer.ang2normal(predang, inputs['K'])
-
         figrgb = tensor2rgb(vlscolor, ind=vind)
-        fig_anghpred = tensor2disp(predang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
-        fig_angvpred = tensor2disp(predang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
-        fig_normpred = tensor2rgb((normpred + 1) / 2, ind=vind)
         fig_depthgt = tensor2disp(inputs['depthgt'], vmax=40, ind=vind)
 
-        figoview = np.concatenate([np.array(figrgb), np.array(fig_depthgt), np.array(fig_anghpred), np.array(fig_angvpred), np.array(fig_normpred)], axis=0)
+        if not self.opt.gtnorm_suped:
+            predang = (outputs[('disp', 0)] - 0.5) * 2 * np.pi
+            predang = F.interpolate(predang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+            normpred = self.sfnormOptimizer.ang2normal(predang, inputs['K'])
+
+            fig_anghpred = tensor2disp(predang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
+            fig_angvpred = tensor2disp(predang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
+            fig_normpred = tensor2rgb((normpred + 1) / 2, ind=vind)
+
+            figoview = np.concatenate([np.array(figrgb), np.array(fig_depthgt), np.array(fig_anghpred), np.array(fig_angvpred), np.array(fig_normpred)], axis=0)
+        else:
+            normpred = (outputs[('disp', 0)] - 0.5) * 2
+            normpred = F.normalize(normpred, dim=1)
+            normpred = F.interpolate(normpred, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+            predang = self.sfnormOptimizer.normal2ang(normpred, inputs['K'])
+
+            fig_anghpred = tensor2disp(predang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
+            fig_angvpred = tensor2disp(predang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
+            fig_normpred = tensor2rgb((normpred + 1) / 2, ind=vind)
+
+            normmask = (torch.sum(inputs['normgt'] ** 2, dim=1, keepdim=True) > 0).float().expand([-1, 3, -1, -1])
+            vlsnorm = (inputs['normgt'] + 1) / 2
+            vlsnorm[normmask == 0] = 0
+            fignormgt = tensor2rgb(vlsnorm, ind=vind)
+
+            figoview = np.concatenate([np.array(figrgb), np.array(fig_depthgt), np.array(fig_anghpred), np.array(fig_angvpred), np.array(fig_normpred), np.array(fignormgt)], axis=0)
 
         self.writers[recoder].add_image('overview', (torch.from_numpy(figoview).float() / 255).permute([2, 0, 1]), self.step)
 

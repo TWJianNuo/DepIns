@@ -957,7 +957,7 @@ class LocalThetaDesp(nn.Module):
         return recovered_depth
 
 class SurfaceNormalOptimizer(nn.Module):
-    def __init__(self, height, width, batch_size, angw=1e-3, vlossw=0.2, sclw=0):
+    def __init__(self, height, width, batch_size, angw=1e-6, vlossw=0.2, sclw=0):
         super(SurfaceNormalOptimizer, self).__init__()
         # intrinsic: (batch_size, 4, 4)
         self.height = height
@@ -1137,6 +1137,15 @@ class SurfaceNormalOptimizer(nn.Module):
         self.kernelnegv.weight = nn.Parameter(torch.from_numpy(np.copy(kernelneg.T)).unsqueeze(0).unsqueeze(0), requires_grad=False)
         self.kernelposv.weight = nn.Parameter(torch.from_numpy(np.copy(kernelpos.T)).unsqueeze(0).unsqueeze(0), requires_grad=False)
 
+    def get_depth_numgrad(self, depthMap, issharp=True):
+        if issharp:
+            depthMap_gradx = self.diffx_sharp(depthMap)
+            depthMap_grady = self.diffy_sharp(depthMap)
+        else:
+            depthMap_gradx = self.diffx(depthMap)
+            depthMap_grady = self.diffy(depthMap)
+        return depthMap_gradx, depthMap_grady
+
     def depth2norm(self, depthMap, intrinsic, issharp=True):
         depthMaps = depthMap.squeeze(1)
         fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
@@ -1174,7 +1183,7 @@ class SurfaceNormalOptimizer(nn.Module):
 
         return surfnorm
 
-    def depth2ang(self, depthMap, intrinsic, issharp = True):
+    def depth2ang(self, depthMap, intrinsic, issharp=True):
         depthMaps = depthMap.squeeze(1)
         fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
         bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
@@ -1586,6 +1595,45 @@ class SurfaceNormalOptimizer(nn.Module):
         # tensor2rgb((self.depth2norm(depthMap, intrinsic) + 1) / 2, ind=0).show()
 
         return surfacenormal
+
+    def ang2dirs(self, ang, intrinsic):
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        angh = ang[:, 0, :, :]
+        angv = ang[:, 1, :, :]
+
+        normx = torch.stack([torch.cos(angh), (self.yy - by) / fy * torch.sin(angh), torch.sin(angh)], dim=1)
+        normy = torch.stack([(self.xx - bx) / fx * torch.sin(angv), torch.cos(angv), torch.sin(angv)], dim=1)
+
+        normx = F.normalize(normx, dim=1)
+        normy = F.normalize(normy, dim=1)
+
+        return normx, normy
+
+    def normal2ang(self, surfnorm, intrinsic):
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        surfnormx = torch.stack([surfnorm[:, 1, :, :] * (self.yy - by) / fy + surfnorm[:, 2, :, :], -(self.yy - by) / fy * surfnorm[:, 0, :, :], -surfnorm[:, 0, :, :]], dim=1)
+        surfnormy = torch.stack([-surfnorm[:, 1, :, :] * (self.xx - bx) / fx, (self.xx - bx) / fx * surfnorm[:, 0, :, :] + surfnorm[:, 2, :, :], -surfnorm[:, 1, :, :]], dim=1)
+
+        a3 = (self.yy - by) / fy * surfnormx[:, 1, :, :] + surfnormx[:, 2, :, :]
+        b3 = -surfnormx[:, 0, :, :]
+
+        u3 = surfnormy[:, 2, :, :] + (self.xx - bx) / fx * surfnormy[:, 0, :, :]
+        v3 = -surfnormy[:, 1, :, :]
+
+        pred_angh = torch.atan2(a3, -b3).unsqueeze(1)
+        pred_angv = torch.atan2(u3, -v3).unsqueeze(1)
+
+        predang = torch.cat([pred_angh, pred_angv], dim=1)
+
+        return predang
 
     def intergrationloss_surfacenormal(self, surfnorm, intrinsic, depthMap):
         anglebound = 0

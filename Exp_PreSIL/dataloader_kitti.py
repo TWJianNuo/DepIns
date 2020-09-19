@@ -5,7 +5,7 @@ import random
 import numpy as np
 import copy
 from PIL import Image, ImageFile
-from kitti_utils import read_calib_file
+from kitti_utils import read_calib_file, labels
 
 import torch.utils.data as data
 from torchvision import transforms
@@ -24,7 +24,9 @@ class KittiDataset(data.Dataset):
                  width,
                  crph=365,
                  crpw=1220,
-                 is_train=False
+                 is_train=False,
+                 gt_norm_path='None',
+                 semanticspred_path='None'
                  ):
         super(KittiDataset, self).__init__()
 
@@ -38,6 +40,16 @@ class KittiDataset(data.Dataset):
         self.to_tensor = transforms.ToTensor()
         self.interp = Image.ANTIALIAS
         self.img_ext = '.png'
+
+        if gt_norm_path is 'None':
+            self.gt_norm_path = None
+        else:
+            self.gt_norm_path = gt_norm_path
+
+        if semanticspred_path is 'None':
+            self.semanticspred_path = None
+        else:
+            self.semanticspred_path = semanticspred_path
 
         try:
             self.brightness = (0.8, 1.2)
@@ -72,10 +84,14 @@ class KittiDataset(data.Dataset):
         # Do random Crop
         cropped_color = self.rndcrop_color(inputs["color"], rndseed)
         cropped_depth, intrinsic = self.rndcrop_depth(inputs["depthgt"], rndseed, inputs['K'])
+        if 'normgt' in inputs:
+            cropped_norm = self.rndcrop_color(inputs["normgt"], rndseed)
+        if 'semanticspred' in inputs:
+            resized_semanticspred = inputs["semanticspred"].resize(inputs["color"].size, pil.NEAREST)
+            cropped_semanticspred = self.rndcrop_color(resized_semanticspred, rndseed)
 
         inputs["color"] = self.resize(cropped_color)
         inputs["depthgt"] = cropped_depth
-
 
         for k in list(inputs):
             f = inputs[k]
@@ -88,6 +104,24 @@ class KittiDataset(data.Dataset):
                 inputs[k] = torch.from_numpy(inputs[k]).unsqueeze(0)
                 inputs["K"] = torch.from_numpy(intrinsic.astype(np.float32))
                 inputs["K_scaled"] = torch.from_numpy((self.rescaleK @ intrinsic).astype(np.float32))
+
+            elif "normgt" in k:
+                cropped_normnp = np.array(cropped_norm)
+                norm_mask = np.sum(cropped_normnp, axis=2) == 0
+                norm_mask = np.stack([norm_mask, norm_mask, norm_mask], axis=2)
+
+                cropped_normnp = (cropped_normnp.astype(np.float32) / 255.0 - 0.5) * 2
+                cropped_normnp_norm = np.sqrt(np.sum(cropped_normnp ** 2, axis=2))
+                cropped_normnp = cropped_normnp / np.stack([cropped_normnp_norm, cropped_normnp_norm, cropped_normnp_norm], axis=2)
+                cropped_normnp[norm_mask] = 0
+
+                inputs[k] = torch.from_numpy(cropped_normnp).permute([2, 0, 1])
+
+            elif "semanticspred" in k:
+                cropped_semanticspred_copy = np.array(cropped_semanticspred.copy())
+                for l in np.unique(np.array(cropped_semanticspred_copy)):
+                    cropped_semanticspred_copy[cropped_semanticspred_copy == l] = labels[l].trainId
+                inputs[k] = torch.from_numpy(cropped_semanticspred_copy.astype(np.float32)).unsqueeze(0)
 
     def __len__(self):
         return len(self.filenames)
@@ -146,39 +180,42 @@ class KittiDataset(data.Dataset):
         return imgcropped, intrinsic_cropped
 
     def __getitem__(self, index):
-        try:
-            inputs = {}
+        inputs = {}
 
-            do_color_aug = self.is_train and random.random() > 0.5
-            do_flip = self.is_train and random.random() > 0.5
+        do_color_aug = self.is_train and random.random() > 0.5
+        do_flip = self.is_train and random.random() > 0.5
 
-            line = self.filenames[index].split()
+        line = self.filenames[index].split()
 
-            folder = line[0]
-            frame_index = int(line[1])
-            side = line[2]
+        folder = line[0]
+        frame_index = int(line[1])
+        side = line[2]
 
-            rndseed = int(time.time())
+        rndseed = int(time.time())
 
-            # RGB
-            inputs['color'] = self.get_color(folder, frame_index, side, do_flip)
+        # RGB
+        inputs['color'] = self.get_color(folder, frame_index, side, do_flip)
 
-            # Depth Map
-            inputs['depthgt'] = self.get_depthgt(folder, frame_index, side, do_flip)
+        # Depth Map
+        inputs['depthgt'] = self.get_depthgt(folder, frame_index, side, do_flip)
 
-            # intrinsic parameter
-            inputs['K'] = self.get_intrinsic(folder, side)
+        if self.gt_norm_path is not None:
+            inputs['normgt'] = self.get_normgt(folder, frame_index, side, do_flip)
 
-            if do_color_aug:
-                color_aug = transforms.ColorJitter.get_params(self.brightness, self.contrast, self.saturation, self.hue)
-            else:
-                color_aug = (lambda x: x)
+        if self.semanticspred_path is not None:
+            inputs['semanticspred'] = self.get_semanticspred(folder, frame_index, side, do_flip)
 
-            self.preprocess(inputs, color_aug, rndseed)
+        # intrinsic parameter
+        inputs['K'] = self.get_intrinsic(folder, side)
 
-            inputs['tag'] = self.initTag(index, do_flip)
-        except:
-            print(self.filenames[index])
+        if do_color_aug:
+            color_aug = transforms.ColorJitter.get_params(self.brightness, self.contrast, self.saturation, self.hue)
+        else:
+            color_aug = (lambda x: x)
+
+        self.preprocess(inputs, color_aug, rndseed)
+
+        inputs['tag'] = self.initTag(index, do_flip)
         return inputs
 
     def initTag(self, index, do_flip):
@@ -208,3 +245,15 @@ class KittiDataset(data.Dataset):
         K = np.eye(4)
         K[0:3, :] = cam2cam['P_rect_0{}'.format(self.dirmapping[side][-1])].reshape(3, 4)
         return K
+
+    def get_normgt(self, folder, frame_index, side, do_flip):
+        normgt = pil.open(os.path.join(self.gt_norm_path, folder, self.dirmapping[side], "{}.png".format(str(frame_index).zfill(10))))
+        if do_flip:
+            normgt = normgt.transpose(Image.FLIP_LEFT_RIGHT)
+        return normgt
+
+    def get_semanticspred(self, folder, frame_index, side, do_flip):
+        semanticspred = pil.open(os.path.join(self.semanticspred_path, folder, 'semantic_prediction', self.dirmapping[side], "{}.png".format(str(frame_index).zfill(10))))
+        if do_flip:
+            semanticspred = semanticspred.transpose(Image.FLIP_LEFT_RIGHT)
+        return semanticspred

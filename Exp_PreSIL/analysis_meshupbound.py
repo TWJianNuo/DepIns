@@ -126,6 +126,7 @@ def meshextractor_perscale(mesh_extractor, rgb, scale):
     triangles = base_mesh.faces
     xloc = base_mesh.verts_2d[:, 0] * w
     yloc = base_mesh.verts_2d[:, 1] * h
+
     return triangles, xloc, yloc
 
 semidense_depthfolder = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Data/kitti/semidense_gt'
@@ -142,14 +143,15 @@ for entry in entries:
     depthpath = os.path.join(semidense_depthfolder, seq, dirmapping[dir], "{}.png".format(frame.zfill(10)))
     if os.path.isfile(depthpath):
         valentries.append(entry)
-np.random.seed(0)
+# np.random.seed(0)
 np.random.shuffle(valentries)
 valentries = valentries[0:10]
 
 from tridepth.extractor import Mesh2DExtractor
 
-mesh_extractor = Mesh2DExtractor(canny_params={"denoise": False}, at_params={"filter_itr": 4, "error_thresh": 0.01}, min_edge_size=12)
+mesh_extractor = Mesh2DExtractor(canny_params={"denoise": False}, at_params={"filter_itr": 4, "error_thresh": 0.01}, min_edge_size=1.5)
 
+import cv2
 for scale in range(3):
     count = 0
     err_recorder = list()
@@ -160,6 +162,10 @@ for scale in range(3):
 
         rgb = pil.open(rgbpath)
         depth = np.array(pil.open(depthpath)).astype(np.float32) / 256.0
+
+        # edges = cv2.Canny(np.array(rgb), 100, 200)
+        # pil.fromarray(edges).show()
+        # rgb.show()
 
         w, h = rgb.size
 
@@ -174,10 +180,17 @@ for scale in range(3):
 
         triangles, xloc, yloc = meshextractor_perscale(mesh_extractor, rgb, scale)
 
+        # import matplotlib.tri as tri
+        # triang = tri.Triangulation(xloc, yloc, triangles)
+        # fig1, ax1 = plt.subplots()
+        # ax1.imshow(rgb)
+        # ax1.set_aspect('equal')
+        # ax1.triplot(triang, 'b-', lw=1)
+
         freeptrecorder = np.ones([h, w], dtype=np.bool)
         gtdepthrecorder = np.zeros(np.sum(depth > 0))
         approxdepthrecorder = np.zeros(np.sum(depth > 0))
-        compute_triangplaneapprox_err(triangles, xloc, yloc, h, w, freeptrecorder, depth, gtdepthrecorder, approxdepthrecorder, fx, fy, bx, by, True)
+        compute_triangplaneapprox_err(triangles, xloc, yloc, h, w, freeptrecorder, depth, gtdepthrecorder, approxdepthrecorder, fx, fy, bx, by, False)
 
         gtdepthrecorder = gtdepthrecorder[gtdepthrecorder > 0]
         approxdepthrecorder = approxdepthrecorder[approxdepthrecorder > 0]
