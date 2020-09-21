@@ -105,7 +105,7 @@ class Trainer:
         self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
-        self.models["depth"] = DepthDecoder(self.models["encoder"].num_ch_enc, num_output_channels=3)
+        self.models["depth"] = DepthDecoder(self.models["encoder"].num_ch_enc, num_output_channels=2)
         self.models["depth"].to(self.device)
         self.parameters_to_train += list(self.models["depth"].parameters())
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
