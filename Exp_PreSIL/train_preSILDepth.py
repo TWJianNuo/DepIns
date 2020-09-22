@@ -45,7 +45,7 @@ parser.add_argument("--min_depth",              type=float, default=0.1,        
 parser.add_argument("--max_depth",              type=float, default=100.0,              help="maximum depth")
 parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
-parser.add_argument("--as_lidar",                action="store_true")
+parser.add_argument("--as_lidar",               action="store_true")
 
 # OPTIMIZATION options
 parser.add_argument("--batch_size",             type=int,   default=12,                 help="batch size")
@@ -54,6 +54,10 @@ parser.add_argument("--num_epochs",             type=int,   default=20,         
 parser.add_argument("--scheduler_step_size",    type=int,   default=15,                 help="step size of the scheduler")
 parser.add_argument("--load_weights_folder",    type=str,   default=None,               help="name of models to load")
 parser.add_argument("--num_workers",            type=int,   default=6,                  help="number of dataloader workers")
+parser.add_argument("--isgt",                   type=float, default=1e-4)
+parser.add_argument("--gradconstrainw",         type=float, default=1e-4)
+parser.add_argument("--useselfdepth",           action="store_true")
+
 
 # LOGGING options
 parser.add_argument("--log_frequency",          type=int,   default=250,                help="number of batches between each tensorboard log")
@@ -126,6 +130,8 @@ class Trainer:
 
         self.best_absrel = 1e10
         self.best_a1 = -1e10
+
+        self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size).cuda()
 
     def set_dataset(self):
         """properly handle multiple dataset situation
@@ -203,7 +209,7 @@ class Trainer:
             if self.step % 100 == 0:
                 self.log_time(batch_idx, duration, losses["totLoss"])
 
-            if self.step % 100 == 0:
+            if self.step % 1 == 0:
                 self.log("train", inputs, outputs, losses, writeImage=False)
 
             if self.step % 2000 == 0 and self.step > 1999:
@@ -211,70 +217,66 @@ class Trainer:
 
             self.step += 1
 
-    def process_batch(self, inputs, isval = False):
+    def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
         """
         for key, ipt in inputs.items():
             if not key == 'tag':
                 inputs[key] = ipt.to(self.device)
 
+        inputs['anggt'] = self.sfnormOptimizer.depth2ang(inputs['depthgt'], inputs['K'])
+
         outputs = dict()
         losses = dict()
 
         outputs.update(self.models['depth'](self.models['encoder'](inputs['color_aug'])))
 
-        # Normal Branch
-        # losses.update(self.theta_compute_losses(inputs, outputs))
-
         # Depth Branch
         losses.update(self.depth_compute_losses(inputs, outputs))
 
         # Constrain Branch
-        # losses.update(self.constrain_compute_losses(inputs, outputs))
+        losses.update(self.constrain_compute_losses(inputs, outputs))
 
-        losses['totLoss'] = losses['depth_l1loss']
+        losses['totLoss'] = losses['depth_l1loss'] * 1e-4 + losses['l1constrain'] * self.opt.gradconstrainw
+        losses['totLoss'] = losses['l1constrain']
         return outputs, losses
 
     def constrain_compute_losses(self, inputs, outputs):
         losses = dict()
         l1constrain = 0
-        htheta_pred_detached = outputs['htheta_pred'].detach()
-        vtheta_pred_detached = outputs['vtheta_pred'].detach()
 
-        # htheta, vtheta = self.presil_localthetadesp.get_theta(inputs['pSIL_depth'])
-        # self.presil_localthetadesp.depth_localgeom_consistency(inputs['pSIL_depth'], htheta, vtheta)
-        for i in range(len(self.opt.scales)):
-            scaledDepth = F.interpolate(outputs[('depth', 0, i)] * self.STEREO_SCALE_FACTOR, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            l1constrain = l1constrain + self.localthetadespKitti_scaled.depth_localgeom_consistency(scaledDepth, htheta_pred_detached, vtheta_pred_detached, mask=self.thetalossmap)
-        l1constrain = l1constrain / len(self.opt.scales)
+        for scale in range(4):
+            _, pred_depth = disp_to_depth(outputs[('disp', scale)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
+            pred_depth = F.interpolate(pred_depth, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
+            if self.opt.useselfdepth:
+                depthMap_gradx_est, depthMap_grady_est = self.sfnormOptimizer.ang2grad(inputs['anggt'], inputs['K'], pred_depth)
+            else:
+                depthMap_gradx_est, depthMap_grady_est = self.sfnormOptimizer.ang2grad(inputs['anggt'], inputs['K'], inputs['depthgt'])
+            depthMap_gradx_num, depthMap_grady_num = self.sfnormOptimizer.get_depth_numgrad(pred_depth, issharp=False)
+            l1constrain = l1constrain + (torch.mean(torch.abs(depthMap_gradx_est - depthMap_gradx_num)) + torch.mean(torch.abs(depthMap_grady_est - depthMap_grady_num))) / 2
+            if scale == 0:
+                outputs['depthMap_gradx_est'] = depthMap_gradx_est
+                outputs['depthMap_grady_est'] = depthMap_grady_est
+                outputs['depthMap_gradx_num'] = depthMap_gradx_num
+                outputs['depthMap_grady_num'] = depthMap_grady_num
+        l1constrain = l1constrain / 4
         losses['l1constrain'] = l1constrain
         return losses
 
-    def theta_compute_losses(self, inputs, outputs):
-        losses = dict()
-        ltheta = 0
-        sclLoss = 0
-        for i in range(len(self.opt.scales)):
-            pred_theta = outputs[('disp', i)][:,0:2,:,:]
-            pred_theta = F.interpolate(pred_theta, [self.kittih, self.kittiw], mode='bilinear', align_corners=True)
-            pred_theta = pred_theta * float(np.pi) * 2
-            htheta_pred = pred_theta[:, 0:1, :, :]
-            vtheta_pred = pred_theta[:, 1:2, :, :]
-
-            inbl, outbl, scl = self.localthetadespKitti.inplacePath_loss(depthmap=inputs['depthgt'], htheta=htheta_pred, vtheta=vtheta_pred, balancew = self.opt.balancew)
-
-            if i == 0:
-                outputs['htheta_pred'] = outputs[('disp', i)][:, 0:1, :, :] * float(np.pi) * 2
-                outputs['vtheta_pred'] = outputs[('disp', i)][:, 1:2, :, :] * float(np.pi) * 2
-
-            ltheta = ltheta + inbl + outbl / 10
-            sclLoss = sclLoss + scl
-
-        ltheta = ltheta / 4
-        sclLoss = sclLoss / 4
-
-        losses['ltheta'] = ltheta
-        losses['sclLoss'] = sclLoss
+    def depth_compute_losses(self, inputs, outputs):
+        """Compute the reprojection and smoothness losses for a minibatch
+        """
+        losses = {}
+        l1loss = 0
+        selector_depth = (inputs['depthgt'] > 0).float()
+        for scale in range(4):
+            _, pred_depth = disp_to_depth(outputs[('disp', scale)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
+            pred_depth = F.interpolate(pred_depth, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
+            l1loss = l1loss + torch.sum(torch.abs(pred_depth - inputs['depthgt']) * selector_depth) / (torch.sum(selector_depth) + 1)
+            if scale == 0:
+                outputs['pred_depth'] = pred_depth
+        l1loss = l1loss / 4
+        losses['depth_l1loss'] = l1loss
 
         return losses
 
@@ -330,23 +332,6 @@ class Trainer:
 
         self.set_train()
 
-    def depth_compute_losses(self, inputs, outputs):
-        """Compute the reprojection and smoothness losses for a minibatch
-        """
-        losses = {}
-        l1loss = 0
-        selector_depth = (inputs['depthgt'] > 0).float()
-        for scale in range(4):
-            _, pred_depth = disp_to_depth(outputs[('disp', scale)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
-            pred_depth = F.interpolate(pred_depth, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            l1loss = l1loss + torch.sum(torch.abs(pred_depth - inputs['depthgt']) * selector_depth) / (torch.sum(selector_depth) + 1)
-            if scale == 0:
-                outputs['pred_depth'] = pred_depth
-        l1loss = l1loss / 4
-        losses['depth_l1loss'] = l1loss
-
-        return losses
-
     def log_time(self, batch_idx, duration, loss_tot):
         """Print a logging statement to the terminal
         """
@@ -366,7 +351,21 @@ class Trainer:
         depthgt[inputs['depthgt'] == 0] = 0
         figgt = tensor2disp(depthgt, vmax=0.35, ind=0)
         figcombined = np.concatenate([np.array(figrgb), np.array(figdisp), np.array(figgt)], axis=0)
-        self.writers['train'].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
+
+        gradx_gt, grady_gt = self.sfnormOptimizer.get_depth_numgrad(inputs['depthgt'], issharp=True)
+
+        figgradx_gt = tensor2grad(gradx_gt, pos_bar=0.08, neg_bar=-0.08)
+        figgradx_num = tensor2grad(outputs['depthMap_gradx_num'], pos_bar=0.08, neg_bar=-0.08)
+        figgradx_est = tensor2grad(outputs['depthMap_gradx_est'], pos_bar=0.08, neg_bar=-0.08)
+        figgradx = np.concatenate([np.array(figgradx_gt), np.array(figgradx_num), np.array(figgradx_est)], axis=0)
+
+        figgrady_gt = tensor2grad(grady_gt, pos_bar=0.08, neg_bar=-0.08)
+        figgrady_num = tensor2grad(outputs['depthMap_grady_num'], pos_bar=0.08, neg_bar=-0.08)
+        figgrady_est = tensor2grad(outputs['depthMap_grady_est'], pos_bar=0.08, neg_bar=-0.08)
+        figgrady = np.concatenate([np.array(figgrady_gt), np.array(figgrady_num), np.array(figgrady_est)], axis=0)
+
+        figoview = np.concatenate([np.array(figgradx), np.array(figgrady), np.array(figcombined)], axis=1)
+        self.writers['train'].add_image('overview', (torch.from_numpy(figoview).float() / 255).permute([2, 0, 1]), self.step)
 
     def log(self, mode, inputs, outputs, losses, writeImage=False):
         """Write an event to the tensorboard events file

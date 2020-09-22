@@ -205,13 +205,28 @@ class Trainer:
                 pred_ang[:, gth - self.crph:, gtw - self.crpw:] += pred_ang_cropsize[1]
                 pred_ang[:, :self.crph, gtw - self.crpw:] += pred_ang_cropsize[2]
                 pred_ang[:, gth - self.crph:, :self.crpw] += pred_ang_cropsize[3]
-
                 pred_ang = (pred_ang / weightstorch).unsqueeze(0)
 
                 prednorm = sfoptimizer.ang2normal(pred_ang, K)
 
                 gradanghx = diffx(pred_ang[:, 0:1, :, :])
                 gradanghy = diffy(pred_ang[:, 1:2, :, :])
+
+                outputs_depth = self.models['depth'](self.models['encoder_depth'](rgbstorch))
+                _, pred_depth_netsize = disp_to_depth(outputs_depth[("disp", 0)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
+                pred_depth_netsize = pred_depth_netsize * self.STEREO_SCALE_FACTOR
+                pred_depth_netsize = F.interpolate(pred_depth_netsize, [self.crph, self.crpw], mode='bilinear', align_corners=True)
+                pred_depth = torch.zeros([1, gth, gtw], device='cuda')
+
+                pred_depth[:, :self.crph, :self.crpw] += pred_depth_netsize[0]
+                pred_depth[:, gth - self.crph:, gtw - self.crpw:] += pred_depth_netsize[1]
+                pred_depth[:, :self.crph, gtw - self.crpw:] += pred_depth_netsize[2]
+                pred_depth[:, gth - self.crph:, :self.crpw] += pred_depth_netsize[3]
+                pred_depth = (pred_depth / weightstorch[0:1]).unsqueeze(0)
+
+                depth_ang = sfoptimizer.depth2ang(pred_depth, K)
+                gradanghx_depth = diffx(depth_ang[:, 0:1, :, :])
+                gradanghy_depth = diffy(depth_ang[:, 1:2, :, :])
 
                 # rgb.show()
                 # tensor2disp(torch.abs(gradanghx), vmax=0.2, ind=0).show()
@@ -225,9 +240,18 @@ class Trainer:
                 fig3 = tensor2disp(torch.abs(gradanghy), vmax=0.2, ind=0)
                 fig4 = tensor2disp(pred_ang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
                 fig5 = tensor2disp(pred_ang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
-                figcombined = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3), np.array(fig4), np.array(fig5)], axis=0)
 
-                pil.fromarray(figcombined).save(os.path.join(vlsfold, "{}_{}_{}.png".format(seq.split('/')[0], frame, dir)))
+                fig6 = tensor2disp(1/pred_depth, vmax=0.2, ind=0)
+                fig7 = tensor2disp(torch.abs(gradanghx_depth), vmax=0.2, ind=0)
+                fig8 = tensor2disp(torch.abs(gradanghy_depth), vmax=0.2, ind=0)
+                fig9 = tensor2disp(depth_ang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
+                fig10 = tensor2disp(depth_ang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
+                figcombinedl = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3), np.array(fig4), np.array(fig5)], axis=0)
+                figcombinedr = np.concatenate([np.array(fig6), np.array(fig7), np.array(fig8), np.array(fig9), np.array(fig10)], axis=0)
+
+                figcombined = pil.fromarray(np.concatenate([figcombinedl, figcombinedr], axis=1))
+
+                figcombined.save(os.path.join(vlsfold, "{}_{}_{}.png".format(seq.split('/')[0], frame, dir)))
 
                 print("{} finished".format(entry))
 

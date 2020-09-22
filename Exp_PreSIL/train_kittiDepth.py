@@ -133,7 +133,7 @@ class Trainer:
 
         self.STEREO_SCALE_FACTOR = 5.4
 
-        self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size, angw=self.opt.angw, vlossw=self.opt.vlossw, sclw=self.opt.sclw).cuda()
+        self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size).cuda()
 
     def set_dataset(self):
         """properly handle multiple dataset situation
@@ -185,6 +185,7 @@ class Trainer:
         self.start_time = time.time()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
+            self.save_model("weights_{}".format(self.epoch))
 
     def run_epoch(self):
         """Run a single epoch of training and validation
