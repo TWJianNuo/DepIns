@@ -174,9 +174,6 @@ class Trainer:
                 tensor2disp(pred_ang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind).show()
                 tensor2disp(1 / pred_depth, vmax=0.3, ind=vind).show()
 
-
-
-
                 depthmapnp = inputs['depthgt'][0, 0].cpu().numpy()
                 vallidarmask = depthmapnp > 0
                 xx, yy = np.meshgrid(range(gt_width), range(gt_height), indexing='xy')

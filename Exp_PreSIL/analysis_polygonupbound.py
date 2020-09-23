@@ -81,7 +81,7 @@ class Trainer:
 
         self.models["encoder_norm"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
         self.models["encoder_norm"].to(self.device)
-        self.models["norm"] = DepthDecoder(self.models["encoder_norm"].num_ch_enc, num_output_channels=3)
+        self.models["norm"] = DepthDecoder(self.models["encoder_norm"].num_ch_enc, num_output_channels=2)
         self.models["norm"].to(self.device)
 
         self.set_dataset()
@@ -168,93 +168,123 @@ class Trainer:
         diffy = diffy.cuda()
 
         vlsfold = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/vls_colinearity'
-        with torch.no_grad():
-            for entry in self.val_filenames:
-                seq, frame, dir = entry.split(' ')
 
-                rgbpath = os.path.join(rawdata_root, seq, dirmapping[dir], "data", "{}.png".format(frame.zfill(10)))
-                depthpath = os.path.join(semidense_depthfolder, seq, dirmapping[dir], "{}.png".format(frame.zfill(10)))
-                semanticspath = os.path.join(semantics_root, seq, 'semantic_prediction', dirmapping[dir], "{}.png".format(frame.zfill(10)))
+        for entry in self.val_filenames:
+            entry = self.val_filenames[10]
+            seq, frame, dir = entry.split(' ')
 
-                rgb = pil.open(rgbpath)
-                rgbnp = np.array(rgb)
-                # depth = np.array(pil.open(depthpath)).astype(np.float32) / 256.0
-                # semantics = np.array(pil.open(semanticspath))
+            rgbpath = os.path.join(rawdata_root, seq, dirmapping[dir], "data", "{}.png".format(frame.zfill(10)))
+            depthpath = os.path.join(semidense_depthfolder, seq, dirmapping[dir], "{}.png".format(frame.zfill(10)))
+            semanticspath = os.path.join(semantics_root, seq, 'semantic_prediction', dirmapping[dir], "{}.png".format(frame.zfill(10)))
 
-                from kitti_utils import read_calib_file
-                cam2cam = read_calib_file(os.path.join(rawdata_root, seq.split('/')[0], 'calib_cam_to_cam.txt'))
-                K = np.eye(4)
-                K[0:3, :] = cam2cam['P_rect_0{}'.format(dirmapping[dir][-1])].reshape(3, 4)
-                K = torch.from_numpy(K).float().unsqueeze(0).cuda()
+            rgb = pil.open(rgbpath)
+            rgbnp = np.array(rgb)
+            depth = np.array(pil.open(depthpath)).astype(np.float32) / 256.0
+            semantics = np.array(pil.open(semanticspath))
 
-                gtw, gth = rgb.size
+            from kitti_utils import read_calib_file
+            cam2cam = read_calib_file(os.path.join(rawdata_root, seq.split('/')[0], 'calib_cam_to_cam.txt'))
+            K = np.eye(4)
+            K[0:3, :] = cam2cam['P_rect_0{}'.format(dirmapping[dir][-1])].reshape(3, 4)
+            K = torch.from_numpy(K).float().unsqueeze(0).cuda()
 
-                sfoptimizer = SurfaceNormalOptimizer(height=gth, width=gtw, batch_size=1).cuda()
+            gtw, gth = rgb.size
 
-                rgbs, weights = self.getpredmask(rgbnp)
-                rgbstorch = torch.from_numpy(rgbs.astype(np.float32)).permute([0, 3, 1, 2]).cuda() / 255.0
-                rgbstorch = F.interpolate(rgbstorch, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-                weightstorch = torch.from_numpy(weights).float().unsqueeze(0).expand([3, -1, -1]).cuda()
+            sfoptimizer = SurfaceNormalOptimizer(height=gth, width=gtw, batch_size=1).cuda()
 
+            rgbs, weights = self.getpredmask(rgbnp)
+            rgbstorch = torch.from_numpy(rgbs.astype(np.float32)).permute([0, 3, 1, 2]).cuda() / 255.0
+            rgbstorch = F.interpolate(rgbstorch, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
+            weightstorch = torch.from_numpy(weights).float().unsqueeze(0).expand([2, -1, -1]).cuda()
+
+            with torch.no_grad():
                 outputs_norm = self.models['norm'](self.models['encoder_norm'](rgbstorch))
-                pred_ang_netsize = (outputs_norm[("disp", 0)] - 0.5) * 2 * np.pi
-                pred_ang_cropsize = F.interpolate(pred_ang_netsize, [self.crph, self.crpw], mode='bilinear', align_corners=True)
-                pred_ang = torch.zeros([3, gth, gtw], device='cuda')
-
-                pred_ang[:, :self.crph, :self.crpw] += pred_ang_cropsize[0]
-                pred_ang[:, gth - self.crph:, gtw - self.crpw:] += pred_ang_cropsize[1]
-                pred_ang[:, :self.crph, gtw - self.crpw:] += pred_ang_cropsize[2]
-                pred_ang[:, gth - self.crph:, :self.crpw] += pred_ang_cropsize[3]
-                pred_ang = (pred_ang / weightstorch).unsqueeze(0)
-
-                prednorm = sfoptimizer.ang2normal(pred_ang, K)
-
-                gradanghx = diffx(pred_ang[:, 0:1, :, :])
-                gradanghy = diffy(pred_ang[:, 1:2, :, :])
-
                 outputs_depth = self.models['depth'](self.models['encoder_depth'](rgbstorch))
-                _, pred_depth_netsize = disp_to_depth(outputs_depth[("disp", 0)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
-                pred_depth_netsize = pred_depth_netsize * self.STEREO_SCALE_FACTOR
-                pred_depth_netsize = F.interpolate(pred_depth_netsize, [self.crph, self.crpw], mode='bilinear', align_corners=True)
-                pred_depth = torch.zeros([1, gth, gtw], device='cuda')
 
-                pred_depth[:, :self.crph, :self.crpw] += pred_depth_netsize[0]
-                pred_depth[:, gth - self.crph:, gtw - self.crpw:] += pred_depth_netsize[1]
-                pred_depth[:, :self.crph, gtw - self.crpw:] += pred_depth_netsize[2]
-                pred_depth[:, gth - self.crph:, :self.crpw] += pred_depth_netsize[3]
-                pred_depth = (pred_depth / weightstorch[0:1]).unsqueeze(0)
+            pred_ang_netsize = (outputs_norm[("disp", 0)] - 0.5) * 2 * np.pi
+            pred_ang_cropsize = F.interpolate(pred_ang_netsize, [self.crph, self.crpw], mode='bilinear', align_corners=True)
+            pred_ang = torch.zeros([2, gth, gtw], device='cuda')
 
-                depth_ang = sfoptimizer.depth2ang(pred_depth, K)
-                gradanghx_depth = diffx(depth_ang[:, 0:1, :, :])
-                gradanghy_depth = diffy(depth_ang[:, 1:2, :, :])
+            pred_ang[:, :self.crph, :self.crpw] += pred_ang_cropsize[0]
+            pred_ang[:, gth - self.crph:, gtw - self.crpw:] += pred_ang_cropsize[1]
+            pred_ang[:, :self.crph, gtw - self.crpw:] += pred_ang_cropsize[2]
+            pred_ang[:, gth - self.crph:, :self.crpw] += pred_ang_cropsize[3]
+            pred_ang = (pred_ang / weightstorch).unsqueeze(0)
 
-                # rgb.show()
-                # tensor2disp(torch.abs(gradanghx), vmax=0.2, ind=0).show()
-                # tensor2disp(torch.abs(gradanghy), vmax=0.2, ind=0).show()
-                # tensor2disp(pred_ang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind).show()
-                # tensor2disp(pred_ang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind).show()
-                # tensor2rgb((prednorm + 1) / 2, ind=0).show()
+            prednorm = sfoptimizer.ang2normal(pred_ang, K)
 
-                fig1 = rgb
-                fig2 = tensor2disp(torch.abs(gradanghx), vmax=0.2, ind=0)
-                fig3 = tensor2disp(torch.abs(gradanghy), vmax=0.2, ind=0)
-                fig4 = tensor2disp(pred_ang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
-                fig5 = tensor2disp(pred_ang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
+            gradanghx = diffx(pred_ang[:, 0:1, :, :])
+            gradanghy = diffy(pred_ang[:, 1:2, :, :])
 
-                fig6 = tensor2disp(1/pred_depth, vmax=0.2, ind=0)
-                fig7 = tensor2disp(torch.abs(gradanghx_depth), vmax=0.2, ind=0)
-                fig8 = tensor2disp(torch.abs(gradanghy_depth), vmax=0.2, ind=0)
-                fig9 = tensor2disp(depth_ang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
-                fig10 = tensor2disp(depth_ang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
-                figcombinedl = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3), np.array(fig4), np.array(fig5)], axis=0)
-                figcombinedr = np.concatenate([np.array(fig6), np.array(fig7), np.array(fig8), np.array(fig9), np.array(fig10)], axis=0)
+            _, pred_depth_netsize = disp_to_depth(outputs_depth[("disp", 0)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
+            pred_depth_netsize = pred_depth_netsize * self.STEREO_SCALE_FACTOR
+            pred_depth_netsize = F.interpolate(pred_depth_netsize, [self.crph, self.crpw], mode='bilinear', align_corners=True)
+            pred_depth = torch.zeros([1, gth, gtw], device='cuda')
 
-                figcombined = pil.fromarray(np.concatenate([figcombinedl, figcombinedr], axis=1))
+            pred_depth[:, :self.crph, :self.crpw] += pred_depth_netsize[0]
+            pred_depth[:, gth - self.crph:, gtw - self.crpw:] += pred_depth_netsize[1]
+            pred_depth[:, :self.crph, gtw - self.crpw:] += pred_depth_netsize[2]
+            pred_depth[:, gth - self.crph:, :self.crpw] += pred_depth_netsize[3]
+            pred_depth = (pred_depth / weightstorch[0:1]).unsqueeze(0)
 
-                figcombined.save(os.path.join(vlsfold, "{}_{}_{}.png".format(seq.split('/')[0], frame, dir)))
+            depth_ang = sfoptimizer.depth2ang(pred_depth, K)
+            gradanghx_depth = diffx(depth_ang[:, 0:1, :, :])
+            gradanghy_depth = diffy(depth_ang[:, 1:2, :, :])
 
-                print("{} finished".format(entry))
+            # rgb.show()
+            # tensor2disp(torch.abs(gradanghx), vmax=0.2, ind=0).show()
+            # tensor2disp(torch.abs(gradanghy), vmax=0.2, ind=0).show()
+            # tensor2disp(pred_ang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind).show()
+            # tensor2disp(pred_ang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind).show()
+            # tensor2rgb((prednorm + 1) / 2, ind=0).show()
 
+            fig1 = rgb
+            fig2 = tensor2disp(torch.abs(gradanghx), vmax=0.2, ind=0)
+            fig3 = tensor2disp(torch.abs(gradanghy), vmax=0.2, ind=0)
+            fig4 = tensor2disp(pred_ang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
+            fig5 = tensor2disp(pred_ang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
+
+            fig6 = tensor2disp(1/pred_depth, vmax=0.2, ind=0)
+            fig7 = tensor2disp(torch.abs(gradanghx_depth), vmax=0.2, ind=0)
+            fig8 = tensor2disp(torch.abs(gradanghy_depth), vmax=0.2, ind=0)
+            fig9 = tensor2disp(depth_ang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind)
+            fig10 = tensor2disp(depth_ang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind)
+            figcombinedl = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3), np.array(fig4), np.array(fig5)], axis=0)
+            figcombinedr = np.concatenate([np.array(fig6), np.array(fig7), np.array(fig8), np.array(fig9), np.array(fig10)], axis=0)
+
+            figcombined = pil.fromarray(np.concatenate([figcombinedl, figcombinedr], axis=1))
+
+            figcombined.save(os.path.join(vlsfold, "{}_{}_{}.png".format(seq.split('/')[0], frame, dir)))
+
+            print("{} finished".format(entry))
+
+            drange = 100
+            # depthseed = pred_depth.detach() / drange
+            # depthseed = -torch.log((1 / depthseed) - 1)
+            depthseed = torch.zeros([1, 1, gth, gtw], device="cuda")
+            depthseed.requires_grad = True
+
+            adapter = optim.Adam([depthseed], lr=1e-3)
+            depthgt = torch.from_numpy(depth).float().unsqueeze(0).unsqueeze(0).cuda()
+            gradxgt, gradygt = sfoptimizer.ang2grad(pred_ang, K, depthgt)
+            selector = (depthgt > 0).float()
+            for itnum in range(5000):
+                depthtoopt = torch.sigmoid(depthseed) * drange
+                l1loss = torch.sum(torch.abs(depthgt - depthtoopt) * selector) / torch.sum(selector)
+
+                depthtoopt_gradx, depthtoopt_grady = sfoptimizer.get_depth_numgrad(depthtoopt, issharp=False)
+                l1loss_grad = torch.sum(torch.abs(gradxgt - depthtoopt_gradx) * selector) / torch.sum(selector) + torch.sum(torch.abs(gradxgt - depthtoopt_grady) * selector) / torch.sum(selector)
+
+                loss = l1loss + l1loss_grad
+
+                adapter.zero_grad()
+                loss.backward()
+                adapter.step()
+
+                print("Iteration %d, loss: %f" % (itnum, float(loss.detach().cpu().numpy())))
+
+            tensor2disp(depthtoopt, ind=0, vmax=30).show()
+            tensor2disp(depthgt, ind=0, vmax=30).show()
     def load_model(self):
         """Load model(s) from disk
         """
