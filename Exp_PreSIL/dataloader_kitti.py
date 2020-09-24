@@ -213,7 +213,6 @@ class KittiDataset(data.Dataset):
         do_color_aug = self.is_train and random.random() > 0.5
         do_flip = self.is_train and random.random() > 0.5
 
-        index = self.filenames.index('2011_10_03/2011_10_03_drive_0034_sync 714 l')
         line = self.filenames[index].split()
 
         folder = line[0]

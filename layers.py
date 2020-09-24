@@ -954,9 +954,9 @@ class LocalThetaDesp(nn.Module):
 
         return recovered_depth
 
-class GradConsistLoss(nn.Module):
+class ConsistLoss(nn.Module):
     def __init__(self):
-        super(GradConsistLoss, self).__init__()
+        super(ConsistLoss, self).__init__()
         weightsl = torch.Tensor([[0., 0., 0.],
                                 [-1., 1., 0.],
                                 [0., 0., 0.]]).unsqueeze(0).unsqueeze(0)
@@ -984,7 +984,7 @@ class GradConsistLoss(nn.Module):
         self.diffyu.weight = nn.Parameter(weightsu, requires_grad=False)
         self.diffyd.weight = nn.Parameter(weightsd, requires_grad=False)
 
-    def forward(self, depth, gradx, grady, w):
+    def grad_consistloss(self, depth, gradx, grady, w):
         consistl = torch.abs(self.diffxl(depth) - gradx)
         consistr = torch.abs(self.diffxr(depth) - gradx)
         consistu = torch.abs(self.diffyu(depth) - grady)
@@ -995,6 +995,17 @@ class GradConsistLoss(nn.Module):
         # tensor2grad(self.diffxl(depth) * w, pos_bar=0.1, neg_bar=-0.1).show()
         # tensor2grad(grady * w, pos_bar=0.2, neg_bar=-0.2).show()
         # tensor2grad(self.diffyu(depth) * w, pos_bar=0.2, neg_bar=-0.2).show()
+        return consistloss
+
+    def linearity_consistloss(self, ang, w):
+        angh = ang[:, 0].unsqueeze(1)
+        angv = ang[:, 1].unsqueeze(1)
+        consistl = torch.abs(self.diffxl(angh))
+        consistr = torch.abs(self.diffxr(angh))
+        consistu = torch.abs(self.diffyu(angv))
+        consistd = torch.abs(self.diffyd(angv))
+
+        consistloss = torch.sum((consistl + consistr + consistu + consistd) * w) / (torch.sum(w) + 1)
         return consistloss
 
 class RGBWeightComputer(nn.Module):

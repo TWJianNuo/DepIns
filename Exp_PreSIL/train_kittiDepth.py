@@ -137,7 +137,7 @@ class Trainer:
         self.STEREO_SCALE_FACTOR = 5.4
 
         self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size).cuda()
-        self.gradloss = GradConsistLoss().cuda()
+        self.gradloss = ConsistLoss().cuda()
         self.rgbw = RGBWeightComputer().cuda()
     def set_dataset(self):
         """properly handle multiple dataset situation
@@ -271,7 +271,7 @@ class Trainer:
         w = self.rgbw(F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)) * inputs['semanticsregularmask'] * (outputs[('depth', 0)] < 40).float()
         for scale in range(4):
             gradx_est, grady_est = self.sfnormOptimizer.ang2grad(torch.cat([inputs['angh'], inputs['angv']], dim=1), inputs['K'], outputs[('depth', scale)])
-            l1loss = l1loss + self.gradloss(outputs[('depth', scale)], gradx_est, grady_est, w)
+            l1loss = l1loss + self.gradloss.grad_consistloss(outputs[('depth', scale)], gradx_est, grady_est, w)
 
             if scale == 0:
                 outputs['gradx_depth'] = self.gradloss.diffxl(outputs[('depth', scale)])

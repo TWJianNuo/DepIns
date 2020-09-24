@@ -226,6 +226,13 @@ class Trainer:
 
         inputs['anggt'] = self.sfnormOptimizer.depth2ang(inputs['depthgt'], inputs['K'])
 
+        depthtoopt = torch.clone(inputs['depthgt'])
+        depthtoopt[:, :, ::2] = 0
+        depthtoopt.requires_grad = True
+        optimizer = optim.Adam([depthtoopt], lr=1e-3)
+        for i in range(100):
+            a = 1
+
         outputs = dict()
         losses = dict()
 
