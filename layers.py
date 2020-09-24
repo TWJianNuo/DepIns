@@ -665,7 +665,6 @@ class LocalThetaDesp(nn.Module):
         self.opt_depth_copyks_h = torch.nn.Conv2d(1, int(2 * optimize_width), [1, int(2 * optimize_width + 1)], padding=[0, optimize_width], bias=False)
         self.opt_depth_copyks_h.weight = torch.nn.Parameter(opt_depth_copyks_h.unsqueeze(1).unsqueeze(2), requires_grad=False)
 
-
     def cleaned_path_loss(self, depthmap, htheta, vtheta):
         depthmapl = torch.log(torch.clamp(depthmap, min = 1e-3))
         inboundh = (htheta < self.upperboundh) * (htheta > self.lowerboundh)
@@ -723,7 +722,6 @@ class LocalThetaDesp(nn.Module):
         ratiov = ratiov.unsqueeze(1)
         ratiovl = ratiovl.unsqueeze(1)
         return ratioh, ratiohl, ratiov, ratiovl
-
 
     def depth_localgeom_consistency(self, depthmap, htheta, vtheta, rgb, isdebias=False):
         if isdebias:
@@ -955,6 +953,75 @@ class LocalThetaDesp(nn.Module):
         # eng.zlim(zlim, nargout=0)
 
         return recovered_depth
+
+class GradConsistLoss(nn.Module):
+    def __init__(self):
+        super(GradConsistLoss, self).__init__()
+        weightsl = torch.Tensor([[0., 0., 0.],
+                                [-1., 1., 0.],
+                                [0., 0., 0.]]).unsqueeze(0).unsqueeze(0)
+
+        weightsr = torch.Tensor([[0., 0., 0.],
+                                [0., -1., 1.],
+                                [0., 0., 0.]]).unsqueeze(0).unsqueeze(0)
+
+
+        weightsu = torch.Tensor([[0., 0., 0.],
+                                 [0., -1., 0.],
+                                 [0., 1., 0.]]).unsqueeze(0).unsqueeze(0)
+        weightsd = torch.Tensor([[0., -1., 0.],
+                                 [0., 1., 0.],
+                                 [0., 0., 0.]]).unsqueeze(0).unsqueeze(0)
+
+        self.diffxl = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+        self.diffxr = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+
+        self.diffyu = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+        self.diffyd = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+
+        self.diffxl.weight = nn.Parameter(weightsl, requires_grad=False)
+        self.diffxr.weight = nn.Parameter(weightsr, requires_grad=False)
+        self.diffyu.weight = nn.Parameter(weightsu, requires_grad=False)
+        self.diffyd.weight = nn.Parameter(weightsd, requires_grad=False)
+
+    def forward(self, depth, gradx, grady, w):
+        consistl = torch.abs(self.diffxl(depth) - gradx)
+        consistr = torch.abs(self.diffxr(depth) - gradx)
+        consistu = torch.abs(self.diffyu(depth) - grady)
+        consistd = torch.abs(self.diffyd(depth) - grady)
+
+        consistloss = torch.sum((consistl + consistr + consistu + consistd) * w) / (torch.sum(w) + 1)
+        # tensor2grad(gradx * w, pos_bar=0.1, neg_bar=-0.1).show()
+        # tensor2grad(self.diffxl(depth) * w, pos_bar=0.1, neg_bar=-0.1).show()
+        # tensor2grad(grady * w, pos_bar=0.2, neg_bar=-0.2).show()
+        # tensor2grad(self.diffyu(depth) * w, pos_bar=0.2, neg_bar=-0.2).show()
+        return consistloss
+
+class RGBWeightComputer(nn.Module):
+    def __init__(self):
+        super(RGBWeightComputer, self).__init__()
+        rgbgradkx = np.array([[-1, 0, 1],
+                              [-2, 0, 2],
+                              [-1, 0, 1]])
+        rgbgradkx = rgbgradkx / 4 / 2
+        self.rgbgradkx = nn.Conv2d(in_channels=3, out_channels=1, kernel_size=3, stride=1, padding=1, bias=False)
+        self.rgbgradkx.weight = nn.Parameter(torch.from_numpy(rgbgradkx).float().unsqueeze(0).unsqueeze(0).expand([-1, 3, -1, -1]), requires_grad = False)
+        self.rgbgradkx = self.rgbgradkx.cuda()
+
+        rgbgradky = np.array([[-1, -2, -1],
+                              [0, 0, 0],
+                              [1, 2, 1]])
+        rgbgradky = rgbgradky / 4 / 2
+        self.rgbgradky = nn.Conv2d(in_channels=3, out_channels=1, kernel_size=3, stride=1, padding=1, bias=False)
+        self.rgbgradky.weight = nn.Parameter(torch.from_numpy(rgbgradky).float().unsqueeze(0).unsqueeze(0).expand([-1, 3, -1, -1]), requires_grad = False)
+        self.rgbgradky = self.rgbgradky.cuda()
+
+    def forward(self, rgb):
+        rgb_grad = torch.mean(torch.abs(self.rgbgradkx(rgb)) + torch.abs(self.rgbgradky(rgb)), dim=1, keepdim=True)
+        rgb_gradw = torch.exp(-rgb_grad * 2)
+        rgb_gradw[rgb_gradw < 0.5] = 0
+
+        return rgb_gradw
 
 class SurfaceNormalOptimizer(nn.Module):
     def __init__(self, height, width, batch_size, angw=1e-6, vlossw=0.2, sclw=0):

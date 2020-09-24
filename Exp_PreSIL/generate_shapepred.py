@@ -199,7 +199,7 @@ class Trainer:
         angvfoldnamemapping = {'rgbs': 'angv', 'rgbsflipped': 'angv_flipped'}
         gth, gtw = inputs[wmapping[inputname]].shape
         with torch.no_grad():
-            outputs_ang = self.models['norm'](self.models['encoder_norm'](inputs['rgbs']))
+            outputs_ang = self.models['norm'](self.models['encoder_norm'](inputs[inputname]))
 
             pred_ang_netsize = outputs_ang[("disp", 0)]
             pred_ang_cropsize = F.interpolate(pred_ang_netsize, [self.crph, self.crpw], mode='bilinear', align_corners=True)

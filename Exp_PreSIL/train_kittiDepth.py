@@ -36,6 +36,8 @@ default_logpath = os.path.join(project_rootdir, 'tmp')
 parser = argparse.ArgumentParser(description='Train Dense Depth of PreSIL Synthetic Data')
 parser.add_argument("--data_path",              type=str,                               help="path to dataset")
 parser.add_argument("--gt_path",                type=str,                               help="path to kitti gt file")
+parser.add_argument("--predang_path",           type=str,                               help="path to kitti gt file")
+parser.add_argument("--semanticspred_path",     type=str,   default='None',             help="path to kitti semantics prediction file")
 parser.add_argument("--val_gt_path",            type=str,                               help="path to validation gt file")
 parser.add_argument("--model_name",             type=str,                               help="name of the model")
 parser.add_argument("--split",                  type=str,                               help="train/val split to use")
@@ -49,6 +51,7 @@ parser.add_argument("--min_depth",              type=float, default=0.1,        
 parser.add_argument("--max_depth",              type=float, default=100.0,              help="maximum depth")
 parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
+parser.add_argument("--gradlossw",              type=float,   default=1)
 
 
 # OPTIMIZATION options
@@ -134,7 +137,8 @@ class Trainer:
         self.STEREO_SCALE_FACTOR = 5.4
 
         self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size).cuda()
-
+        self.gradloss = GradConsistLoss().cuda()
+        self.rgbw = RGBWeightComputer().cuda()
     def set_dataset(self):
         """properly handle multiple dataset situation
         """
@@ -146,12 +150,14 @@ class Trainer:
 
         train_dataset = KittiDataset(
             self.opt.data_path, self.opt.gt_path, train_filenames, self.opt.height, self.opt.width,
-            crph=self.opt.crph, crpw=self.opt.crpw, is_train=True
+            crph=self.opt.crph, crpw=self.opt.crpw, is_train=True, predang_path=self.opt.predang_path,
+            semanticspred_path=self.opt.semanticspred_path
         )
 
         val_dataset = KittiDataset(
             self.opt.data_path, self.opt.val_gt_path, val_filenames, self.opt.height, self.opt.width,
-            crph=self.opt.crph, crpw=self.opt.crpw, is_train=False
+            crph=self.opt.crph, crpw=self.opt.crpw, is_train=False, predang_path=self.opt.predang_path,
+            semanticspred_path=self.opt.semanticspred_path
         )
 
         self.train_loader = DataLoader(
@@ -234,8 +240,50 @@ class Trainer:
         # Depth Branch
         losses.update(self.depth_compute_losses(inputs, outputs))
 
-        losses['totLoss'] = losses['depth_l1loss']
+        # Constrain Branch
+        losses.update(self.constrain_compute_losses(inputs, outputs))
+
+        losses['totLoss'] = losses['depth_l1loss'] + losses['grad_l1loss'] * self.opt.gradlossw
         return outputs, losses
+
+    def depth_compute_losses(self, inputs, outputs):
+        """Compute the reprojection and smoothness losses for a minibatch
+        """
+        losses = {}
+        l1loss = 0
+
+        vallidarmask = (inputs['depthgt'] > 0).float()
+        for scale in range(4):
+            scaled_disp, pred_depth = disp_to_depth(outputs[('disp', scale)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
+            pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+            pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
+            l1loss = l1loss + torch.sum(torch.abs(pred_depth - inputs['depthgt']) * vallidarmask) / (torch.sum(vallidarmask) + 1)
+            outputs[('depth', scale)] = pred_depth
+        l1loss = l1loss / 4
+        losses['depth_l1loss'] = l1loss
+
+        return losses
+
+    def constrain_compute_losses(self, inputs, outputs):
+        losses = {}
+        l1loss = 0
+
+        w = self.rgbw(F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)) * inputs['semanticsregularmask']
+        for scale in range(4):
+            gradx_est, grady_est = self.sfnormOptimizer.ang2grad(torch.cat([inputs['angh'], inputs['angv']], dim=1), inputs['K'], outputs[('depth', scale)])
+            l1loss = l1loss + self.gradloss(outputs[('depth', scale)], gradx_est, grady_est, w)
+
+            if scale == 0:
+                outputs['gradx_depth'] = self.gradloss.diffxl(outputs[('depth', scale)])
+                outputs['grady_depth'] = self.gradloss.diffyu(outputs[('depth', scale)])
+                outputs['gradx_est'] = gradx_est
+                outputs['grady_est'] = grady_est
+                outputs['w'] = w
+
+        l1loss = l1loss / 4
+        losses['grad_l1loss'] = l1loss
+
+        return losses
 
     def val(self):
         """Validate the model on a single minibatch
@@ -297,24 +345,6 @@ class Trainer:
 
         self.set_train()
 
-    def depth_compute_losses(self, inputs, outputs):
-        """Compute the reprojection and smoothness losses for a minibatch
-        """
-        losses = {}
-        l1loss = 0
-
-        vallidarmask = (inputs['depthgt'] > 0).float()
-        for scale in range(4):
-            scaled_disp, pred_depth = disp_to_depth(outputs[('disp', scale)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
-            pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-            pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
-            l1loss = l1loss + torch.sum(torch.abs(pred_depth - inputs['depthgt']) * vallidarmask) / (torch.sum(vallidarmask) + 1)
-
-        l1loss = l1loss / 4
-        losses['depth_l1loss'] = l1loss
-
-        return losses
-
     def log_time(self, batch_idx, duration, loss_tot):
         """Print a logging statement to the terminal
         """
@@ -325,6 +355,8 @@ class Trainer:
         print(print_string.format(self.epoch, batch_idx, samples_per_sec, loss_tot, sec_to_hm_str(time_sofar), sec_to_hm_str(training_time_left)))
 
     def record_img(self, inputs, outputs, recoder='train'):
+        minang = - np.pi / 3 * 2
+        maxang = 2 * np.pi - np.pi / 3 * 2
         vind = 0
 
         vlscolor = F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
@@ -335,9 +367,22 @@ class Trainer:
         fig_unscaled_disp = tensor2disp(unscaled_disp, vmax=0.1, ind=vind)
         fig_depthgt = tensor2disp(inputs['depthgt'], vmax=40, ind=vind)
 
-        figoview = np.concatenate([np.array(figrgb), np.array(fig_unscaled_disp), np.array(fig_depthgt)], axis=0)
+        fig_gradxdepth = tensor2grad(outputs['gradx_depth'], pos_bar=0.1, neg_bar=0.1)
+        fig_gradxest = tensor2grad(outputs['gradx_est'], pos_bar=0.1, neg_bar=0.1)
+        fig_gradydepth = tensor2grad(outputs['grady_depth'], pos_bar=0.1, neg_bar=0.1)
+        fig_gradyest = tensor2grad(outputs['grady_est'], pos_bar=0.1, neg_bar=0.1)
+        fig_angh = tensor2disp(inputs['angh'] - minang, vmax=maxang, ind=vind)
+        fig_angv = tensor2disp(inputs['angv'] - minang, vmax=maxang, ind=vind)
 
-        self.writers[recoder].add_image('overview', (torch.from_numpy(figoview).float() / 255).permute([2, 0, 1]), self.step)
+        figw = tensor2disp(outputs['w'], vmax=1, ind=vind)
+
+        figoview = np.concatenate([np.array(figrgb), np.array(fig_unscaled_disp), np.array(figw)], axis=0)
+        figanghoview = np.concatenate([np.array(fig_angh), np.array(fig_gradxest), np.array(fig_gradxdepth)], axis=0)
+        figangvoview = np.concatenate([np.array(fig_angv), np.array(fig_gradyest), np.array(fig_gradydepth)], axis=0)
+
+        figcombined = np.concatenate([figoview, figanghoview, figangvoview], axis=1)
+
+        self.writers[recoder].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
 
     def log(self, mode, losses):
         """Write an event to the tensorboard events file

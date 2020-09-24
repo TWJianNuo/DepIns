@@ -15,7 +15,8 @@ from Exp_PreSIL.dataloader_kitti import KittiDataset
 
 import networks
 
-
+import matlab
+import matlab.engine
 from layers import *
 from networks import *
 
@@ -40,6 +41,31 @@ parser.add_argument("--max_depth",                  type=float, default=100.0,  
 parser.add_argument("--batch_size",                 type=int,   default=1,                 help="batch size")
 parser.add_argument("--load_weights_folder_depth",  type=str,   default=None,               help="name of models to load")
 parser.add_argument("--load_weights_folder_norm",   type=str,   default=None,               help="name of models to load")
+
+def cvtptsnp2ptsmat(pts3d):
+    mx = matlab.double(pts3d[:, 0].tolist())
+    my = matlab.double(pts3d[:, 1].tolist())
+    mz = matlab.double(pts3d[:, 2].tolist())
+
+    return mx, my, mz
+
+def get_pts3d(depthnp, k):
+    fx = k[0, 0]
+    bx = k[0, 2]
+    fy = k[1, 1]
+    by = k[1, 2]
+
+    h, w = depthnp.shape
+    selector = depthnp > 0
+    xx, yy = np.meshgrid(range(w), range(h), indexing='xy')
+
+    xxs = xx[selector]
+    yys = yy[selector]
+    ds = depthnp[selector]
+
+    pts3d = np.stack([(xxs - bx) / fx * ds, (yys - by) / fy * ds, ds], axis=1)
+
+    return pts3d
 
 def compute_errors(gt, pred):
     """Computation of error metrics between predicted and ground truth depths
@@ -258,9 +284,8 @@ class Trainer:
 
             print("{} finished".format(entry))
 
+            gradconsistl = GradConsistLoss().cuda()
             drange = 100
-            # depthseed = pred_depth.detach() / drange
-            # depthseed = -torch.log((1 / depthseed) - 1)
             depthseed = torch.zeros([1, 1, gth, gtw], device="cuda")
             depthseed.requires_grad = True
 
@@ -268,12 +293,11 @@ class Trainer:
             depthgt = torch.from_numpy(depth).float().unsqueeze(0).unsqueeze(0).cuda()
             gradxgt, gradygt = sfoptimizer.ang2grad(pred_ang, K, depthgt)
             selector = (depthgt > 0).float()
-            for itnum in range(5000):
+            for itnum in range(50000):
                 depthtoopt = torch.sigmoid(depthseed) * drange
                 l1loss = torch.sum(torch.abs(depthgt - depthtoopt) * selector) / torch.sum(selector)
 
-                depthtoopt_gradx, depthtoopt_grady = sfoptimizer.get_depth_numgrad(depthtoopt, issharp=False)
-                l1loss_grad = torch.sum(torch.abs(gradxgt - depthtoopt_gradx) * selector) / torch.sum(selector) + torch.sum(torch.abs(gradxgt - depthtoopt_grady) * selector) / torch.sum(selector)
+                l1loss_grad = gradconsistl(depthtoopt, gradxgt, gradygt, selector)
 
                 loss = l1loss + l1loss_grad
 
@@ -281,10 +305,41 @@ class Trainer:
                 loss.backward()
                 adapter.step()
 
-                print("Iteration %d, loss: %f" % (itnum, float(loss.detach().cpu().numpy())))
+                print("Iteration %d, l1loss: %f, gradloss: %f" % (itnum, float(loss.detach().cpu().numpy()), float(l1loss_grad.detach().cpu().numpy())))
 
-            tensor2disp(depthtoopt, ind=0, vmax=30).show()
-            tensor2disp(depthgt, ind=0, vmax=30).show()
+            depthgtnp = depthgt[0,0].cpu().numpy()
+            knp = K[0].cpu().numpy()
+
+            depthtooptnp = depthtoopt[0,0].detach().cpu().numpy()
+            depthtooptnp[np.abs(depthtooptnp - 50) < 1e-1] = 0
+
+            pts3dgtnp = get_pts3d(depthgtnp, knp)
+            pts3doptnp = get_pts3d(depthtooptnp, knp)
+
+            eng = matlab.engine.start_matlab()
+            mxgt, mygt, mzgt = cvtptsnp2ptsmat(pts3dgtnp)
+            mxopt, myopt, mzopt = cvtptsnp2ptsmat(pts3doptnp)
+
+            eng.eval('figure()', nargout=0)
+            eng.scatter3(mxgt, mygt, mzgt, 1, 'filled', 'b', nargout=0)
+            eng.eval('axis equal', nargout=0)
+            eng.eval('view([-0.8776428603168487, -77.08878403430946])', nargout=0)
+            eng.eval('campos([-3.4855 -136.9395 -574.6724])', nargout=0)
+            eng.eval('camzoom(2)', nargout=0)
+
+            eng.eval('figure()', nargout=0)
+            eng.scatter3(mxopt, myopt, mzopt, 1, 'filled', 'b', nargout=0)
+            eng.eval('axis equal', nargout=0)
+            eng.eval('view([0 -80])', nargout=0)
+            eng.eval('camzoom(2)', nargout=0)
+            eng.eval('campos[-3.4855 -136.9395 -574.6724]', nargout=0)
+
+            tensor2disp(torch.from_numpy(depthtooptnp).unsqueeze(0).unsqueeze(0), ind=0, vmax=30).show()
+            tensor2disp(torch.from_numpy(depthgtnp).unsqueeze(0).unsqueeze(0), ind=0, vmax=30).show()
+
+
+
+
     def load_model(self):
         """Load model(s) from disk
         """

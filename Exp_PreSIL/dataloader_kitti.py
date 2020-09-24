@@ -26,7 +26,8 @@ class KittiDataset(data.Dataset):
                  crpw=1220,
                  is_train=False,
                  gt_norm_path='None',
-                 semanticspred_path='None'
+                 semanticspred_path='None',
+                 predang_path='None'
                  ):
         super(KittiDataset, self).__init__()
 
@@ -50,6 +51,12 @@ class KittiDataset(data.Dataset):
             self.semanticspred_path = None
         else:
             self.semanticspred_path = semanticspred_path
+            self.regularsemanticstype = [0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+
+        if predang_path is 'None':
+            self.predang_path = None
+        else:
+            self.predang_path = predang_path
 
         try:
             self.brightness = (0.8, 1.2)
@@ -89,6 +96,10 @@ class KittiDataset(data.Dataset):
         if 'semanticspred' in inputs:
             resized_semanticspred = inputs["semanticspred"].resize(inputs["color"].size, pil.NEAREST)
             cropped_semanticspred = self.rndcrop_color(resized_semanticspred, rndseed)
+        if 'angh' in inputs and 'angv' in inputs:
+            cropped_angh = self.rndcrop_color(inputs['angh'], rndseed)
+            cropped_angv = self.rndcrop_color(inputs['angv'], rndseed)
+
 
         inputs["color"] = self.resize(cropped_color)
         inputs["depthgt"] = cropped_depth
@@ -119,9 +130,26 @@ class KittiDataset(data.Dataset):
 
             elif "semanticspred" in k:
                 cropped_semanticspred_copy = np.array(cropped_semanticspred.copy())
+                semanticsregularmask = np.zeros_like(cropped_semanticspred, dtype=np.float32)
                 for l in np.unique(np.array(cropped_semanticspred_copy)):
                     cropped_semanticspred_copy[cropped_semanticspred_copy == l] = labels[l].trainId
                 inputs[k] = torch.from_numpy(cropped_semanticspred_copy.astype(np.float32)).unsqueeze(0)
+
+                for l in self.regularsemanticstype:
+                    semanticsregularmask[cropped_semanticspred_copy == l] = 1
+                inputs['semanticsregularmask'] = torch.from_numpy(semanticsregularmask).unsqueeze(0)
+
+            elif 'angh' in k:
+                cropped_anghnp = np.array(cropped_angh).astype(np.float32)
+                cropped_anghnp = (cropped_anghnp / 255.0 / 255.0 - 0.5) * 2 * np.pi
+                inputs[k] = torch.from_numpy(cropped_anghnp).unsqueeze(0)
+
+            elif 'angv' in k:
+                cropped_angvnp = np.array(cropped_angv).astype(np.float32)
+                cropped_angvnp = (cropped_angvnp / 255.0 / 255.0 - 0.5) * 2 * np.pi
+                inputs[k] = torch.from_numpy(cropped_angvnp).unsqueeze(0)
+
+
 
     def __len__(self):
         return len(self.filenames)
@@ -185,6 +213,8 @@ class KittiDataset(data.Dataset):
         do_color_aug = self.is_train and random.random() > 0.5
         do_flip = self.is_train and random.random() > 0.5
 
+        index = self.filenames.index('2011_09_29/2011_09_29_drive_0004_sync 222 l')
+
         line = self.filenames[index].split()
 
         folder = line[0]
@@ -204,6 +234,9 @@ class KittiDataset(data.Dataset):
 
         if self.semanticspred_path is not None:
             inputs['semanticspred'] = self.get_semanticspred(folder, frame_index, side, do_flip)
+
+        if self.predang_path is not None:
+            inputs.update(self.get_angpred(folder, frame_index, side, do_flip))
 
         # intrinsic parameter
         inputs['K'] = self.get_intrinsic(folder, side)
@@ -257,3 +290,19 @@ class KittiDataset(data.Dataset):
         if do_flip:
             semanticspred = semanticspred.transpose(Image.FLIP_LEFT_RIGHT)
         return semanticspred
+
+    def get_angpred(self, folder, frame_index, side, do_flip):
+        inputs = dict()
+        if do_flip:
+            angh = pil.open(os.path.join(self.predang_path, "angh_flipped", folder, self.dirmapping[side], str(frame_index).zfill(10) + '.png'))
+        else:
+            angh = pil.open(os.path.join(self.predang_path, "angh", folder, self.dirmapping[side], str(frame_index).zfill(10) + '.png'))
+
+        if do_flip:
+            angv = pil.open(os.path.join(self.predang_path, "angv_flipped", folder, self.dirmapping[side], str(frame_index).zfill(10) + '.png'))
+        else:
+            angv = pil.open(os.path.join(self.predang_path, "angv", folder, self.dirmapping[side], str(frame_index).zfill(10) + '.png'))
+
+        inputs['angh'] = angh
+        inputs['angv'] = angv
+        return inputs
