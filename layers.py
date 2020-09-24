@@ -985,7 +985,7 @@ class ConsistLoss(nn.Module):
         self.diffyd.weight = nn.Parameter(weightsd, requires_grad=False)
 
     def grad_consistloss(self, depth, gradx, grady, w):
-        if torch.abs(gradx).max() == 1e4 or torch.abs(grady).max() == 1e4:
+        if torch.abs(gradx).max() >= 9e5 or torch.abs(grady).max() >= 9e5:
             return 0
         else:
             consistl = torch.abs(self.diffxl(depth) - gradx)
