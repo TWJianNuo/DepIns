@@ -268,7 +268,7 @@ class Trainer:
         losses = {}
         l1loss = 0
 
-        w = self.rgbw(F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)) * inputs['semanticsregularmask']
+        w = self.rgbw(F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)) * inputs['semanticsregularmask'] * (outputs[('depth', 0)] < 40).float()
         for scale in range(4):
             gradx_est, grady_est = self.sfnormOptimizer.ang2grad(torch.cat([inputs['angh'], inputs['angv']], dim=1), inputs['K'], outputs[('depth', scale)])
             l1loss = l1loss + self.gradloss(outputs[('depth', scale)], gradx_est, grady_est, w)
@@ -381,7 +381,6 @@ class Trainer:
         figangvoview = np.concatenate([np.array(fig_angv), np.array(fig_gradyest), np.array(fig_gradydepth)], axis=0)
 
         figcombined = np.concatenate([figoview, figanghoview, figangvoview], axis=1)
-
         self.writers[recoder].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
 
     def log(self, mode, losses):

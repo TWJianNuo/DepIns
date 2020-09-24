@@ -51,7 +51,7 @@ class KittiDataset(data.Dataset):
             self.semanticspred_path = None
         else:
             self.semanticspred_path = semanticspred_path
-            self.regularsemanticstype = [0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+            self.regularsemanticstype = [0, 1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18]
 
         if predang_path is 'None':
             self.predang_path = None
@@ -213,8 +213,7 @@ class KittiDataset(data.Dataset):
         do_color_aug = self.is_train and random.random() > 0.5
         do_flip = self.is_train and random.random() > 0.5
 
-        index = self.filenames.index('2011_09_29/2011_09_29_drive_0004_sync 222 l')
-
+        index = self.filenames.index('2011_10_03/2011_10_03_drive_0034_sync 714 l')
         line = self.filenames[index].split()
 
         folder = line[0]

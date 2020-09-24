@@ -21,15 +21,15 @@ import cv2
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True # This can prevent some weried error
 
-default_logpath = os.path.join(project_rootdir, 'tmp')
 parser = argparse.ArgumentParser(description='Train Dense Depth of PreSIL Synthetic Data')
 parser.add_argument("--data_path",                  type=str,                               help="path to dataset")
-parser.add_argument("--output_path",                 type=str,                               help="path to dataset")
+parser.add_argument("--output_path",                type=str,                               help="path to dataset")
 parser.add_argument("--num_layers",                 type=int,   default=18,                 help="number of resnet layers", choices=[18, 34, 50, 101, 152])
 parser.add_argument("--height",                     type=int,   default=320,                help="input image height")
 parser.add_argument("--width",                      type=int,   default=1024,               help="input image width")
 parser.add_argument("--crph",                       type=int,   default=365,                help="cropped image height")
 parser.add_argument("--crpw",                       type=int,   default=1220,               help="cropped image width")
+parser.add_argument("--split",                      type=str,   default='None',             help="set split file")
 
 
 # OPTIMIZATION options
@@ -137,6 +137,15 @@ class ShapepredDataset(data.Dataset):
 
         return rgbs, weights
 
+def get_entry_from_path(imgpath):
+    comps = imgpath.split('/')
+    if comps[-3] == 'image_02':
+        direct = 'l'
+    else:
+        direct = 'r'
+    entry = comps[-5] + '/' + comps[-4] + ' ' + comps[-1].split('.')[0] + ' ' + direct
+    return entry
+
 class Trainer:
     def __init__(self, options):
         self.opt = options
@@ -163,28 +172,23 @@ class Trainer:
 
         os.makedirs(self.opt.output_path, exist_ok=True)
         self.dirmapping = {'l': 'image_02', 'r': 'image_03'}
+
     def set_dataset(self):
         """properly handle multiple dataset situation
         """
-
-        def get_entry_from_path(imgpath):
-            comps = imgpath.split('/')
-            if comps[-3] == 'image_02':
-                direct = 'l'
-            else:
-                direct = 'r'
-            entry = comps[-5] + '/' + comps[-4] + ' ' + comps[-1].split('.')[0] + ' ' + direct
-            return entry
-
-        import glob
-        dates = [f.path for f in os.scandir(self.opt.data_path) if f.is_dir()]
-        entries = list()
-        for date in dates:
-            seqs = [f.path for f in os.scandir(date) if f.is_dir()]
-            for seq in seqs:
-                imgFolder = os.path.join(seq, 'image_02/data')
-                for imgpath in glob.glob(imgFolder + '/*.png'):
-                    entries.append(get_entry_from_path(imgpath))
+        if self.opt.split is 'None':
+            import glob
+            entries = list()
+            dates = [f.path for f in os.scandir(self.opt.data_path) if f.is_dir()]
+            for date in dates:
+                seqs = [f.path for f in os.scandir(date) if f.is_dir()]
+                for seq in seqs:
+                    imgpaths = glob.glob(os.path.join(seq, 'image_02/data') + '/*.png') + glob.glob(os.path.join(seq, 'image_03/data') + '/*.png')
+                    for imgpath in imgpaths:
+                        entries.append(get_entry_from_path(imgpath))
+        else:
+            fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", self.opt.split, "{}_files.txt")
+            entries = readlines(fpath.format("train")) + readlines(fpath.format("val")) + readlines(fpath.format("test"))
         self.shapepreddataset = ShapepredDataset(data_path=self.opt.data_path, filenames=entries, height=self.opt.height, width=self.opt.width)
 
     def set_eval(self):
