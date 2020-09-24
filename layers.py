@@ -985,17 +985,20 @@ class ConsistLoss(nn.Module):
         self.diffyd.weight = nn.Parameter(weightsd, requires_grad=False)
 
     def grad_consistloss(self, depth, gradx, grady, w):
-        consistl = torch.abs(self.diffxl(depth) - gradx)
-        consistr = torch.abs(self.diffxr(depth) - gradx)
-        consistu = torch.abs(self.diffyu(depth) - grady)
-        consistd = torch.abs(self.diffyd(depth) - grady)
+        if torch.abs(gradx).max() == 1e4 or torch.abs(grady).max() == 1e4:
+            return 0
+        else:
+            consistl = torch.abs(self.diffxl(depth) - gradx)
+            consistr = torch.abs(self.diffxr(depth) - gradx)
+            consistu = torch.abs(self.diffyu(depth) - grady)
+            consistd = torch.abs(self.diffyd(depth) - grady)
 
-        consistloss = torch.sum((consistl + consistr + consistu + consistd) * w) / (torch.sum(w) + 1)
-        # tensor2grad(gradx * w, pos_bar=0.1, neg_bar=-0.1).show()
-        # tensor2grad(self.diffxl(depth) * w, pos_bar=0.1, neg_bar=-0.1).show()
-        # tensor2grad(grady * w, pos_bar=0.2, neg_bar=-0.2).show()
-        # tensor2grad(self.diffyu(depth) * w, pos_bar=0.2, neg_bar=-0.2).show()
-        return consistloss
+            consistloss = torch.sum((consistl + consistr + consistu + consistd) * w) / (torch.sum(w) + 1)
+            # tensor2grad(gradx * w, pos_bar=0.1, neg_bar=-0.1).show()
+            # tensor2grad(self.diffxl(depth) * w, pos_bar=0.1, neg_bar=-0.1).show()
+            # tensor2grad(grady * w, pos_bar=0.2, neg_bar=-0.2).show()
+            # tensor2grad(self.diffyu(depth) * w, pos_bar=0.2, neg_bar=-0.2).show()
+            return consistloss
 
     def linearity_consistloss(self, ang, w):
         angh = ang[:, 0].unsqueeze(1)
