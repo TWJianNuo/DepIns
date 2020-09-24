@@ -1315,8 +1315,8 @@ class SurfaceNormalOptimizer(nn.Module):
         depthMap_gradx_est = depthMaps / fx * torch.sin(angh) / ((((self.yy - by) / fy) ** 2 + 1) * torch.cos(angh) - (self.xx - bx) / fx * torch.sin(angh))
         depthMap_grady_est = depthMaps / fy * torch.sin(angv) / ((((self.xx - bx) / fx) ** 2 + 1) * torch.cos(angv) - (self.yy - by) / fy * torch.sin(angv))
 
-        depthMap_gradx_est = depthMap_gradx_est.unsqueeze(1)
-        depthMap_grady_est = depthMap_grady_est.unsqueeze(1)
+        depthMap_gradx_est = depthMap_gradx_est.unsqueeze(1).clamp(min=-1e4, max=1e4)
+        depthMap_grady_est = depthMap_grady_est.unsqueeze(1).clamp(min=-1e4, max=1e4)
 
         # # Check
         # depthMap_gradx = self.diffx_sharp(depthMap).squeeze(1)
