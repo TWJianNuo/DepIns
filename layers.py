@@ -1000,20 +1000,21 @@ class ConsistLoss(nn.Module):
             # tensor2grad(self.diffyu(depth) * w, pos_bar=0.2, neg_bar=-0.2).show()
             return consistloss
 
-    def linearity_consistloss(self, ang, w):
-        angh = ang[:, 0].unsqueeze(1)
-        angv = ang[:, 1].unsqueeze(1)
-        consistl = torch.abs(self.diffxl(angh))
-        consistr = torch.abs(self.diffxr(angh))
-        consistu = torch.abs(self.diffyu(angv))
-        consistd = torch.abs(self.diffyd(angv))
+    def linearity_consistloss(self, depthMap, anghw, angvw):
+        depthMapl = torch.log(depthMap)
+        gradxl = self.diffxl(depthMapl).squeeze(1)
+        gradxr = self.diffxr(depthMapl).squeeze(1)
+        gradyu = self.diffyu(depthMapl).squeeze(1)
+        gradyd = self.diffyd(depthMapl).squeeze(1)
 
-        consistloss = torch.sum((consistl + consistr + consistu + consistd) * w) / (torch.sum(w) + 1)
-        return consistloss
+        colinearityloss = (torch.sum(torch.abs(gradxl - gradxr) * anghw) / (torch.sum(anghw) + 1) + torch.sum(torch.abs(gradyu - gradyd) * angvw) / (torch.sum(angvw) + 1)) / 2
+        # tensor2disp(anghw, vmax=1, ind=0).show()
+        # tensor2disp(angvw, vmax=1, ind=0).show()
+        return colinearityloss
 
-class RGBWeightComputer(nn.Module):
+class ImageWeightComputer(nn.Module):
     def __init__(self):
-        super(RGBWeightComputer, self).__init__()
+        super(ImageWeightComputer, self).__init__()
         rgbgradkx = np.array([[-1, 0, 1],
                               [-2, 0, 2],
                               [-1, 0, 1]])
@@ -1030,12 +1031,47 @@ class RGBWeightComputer(nn.Module):
         self.rgbgradky.weight = nn.Parameter(torch.from_numpy(rgbgradky).float().unsqueeze(0).unsqueeze(0).expand([-1, 3, -1, -1]), requires_grad = False)
         self.rgbgradky = self.rgbgradky.cuda()
 
-    def forward(self, rgb):
+        anggradkx = np.array([[-1, 0, 1],
+                              [-2, 0, 2],
+                              [-1, 0, 1]])
+        anggradkx = anggradkx / 4 / 2
+        self.anggradkx = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1, bias=False)
+        self.anggradkx.weight = nn.Parameter(torch.from_numpy(anggradkx).float().unsqueeze(0).unsqueeze(0), requires_grad = False)
+        self.anggradkx = self.anggradkx.cuda()
+
+        anggradky = np.array([[-1, -2, -1],
+                              [0, 0, 0],
+                              [1, 2, 1]])
+        anggradky = anggradky / 4 / 2
+        self.anggradky = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=3, stride=1, padding=1, bias=False)
+        self.anggradky.weight = nn.Parameter(torch.from_numpy(anggradky).float().unsqueeze(0).unsqueeze(0), requires_grad = False)
+        self.anggradky = self.anggradky.cuda()
+
+    def rgbgradw(self, rgb):
         rgb_grad = torch.mean(torch.abs(self.rgbgradkx(rgb)) + torch.abs(self.rgbgradky(rgb)), dim=1, keepdim=True)
         rgb_gradw = torch.exp(-rgb_grad * 2)
         rgb_gradw[rgb_gradw < 0.5] = 0
 
         return rgb_gradw
+
+    def anggradw(self, angh, angv):
+        anghgrad = torch.abs(self.anggradkx(angh)) + torch.abs(self.anggradky(angh))
+        anghw = torch.exp(-anghgrad * 20)
+        anghw[anghw < 0.5] = 0
+        # fig, ax = plt.subplots()
+        # im = ax.imshow(anghw[0,0,:,:].detach().cpu().numpy())
+        # fig.colorbar(im)
+        # tensor2disp(anghw, vmax=1, ind=0).show()
+
+        angvgrad = torch.abs(self.anggradkx(angv)) + torch.abs(self.anggradky(angv))
+        angvw = torch.exp(-angvgrad * 20)
+        angvw[angvw < 0.5] = 0
+        # fig, ax = plt.subplots()
+        # im = ax.imshow(angvw[0,0,:,:].detach().cpu().numpy())
+        # fig.colorbar(im)
+        # tensor2disp(angvw, vmax=1, ind=0).show()
+        return anghw, angvw
+
 
 class SurfaceNormalOptimizer(nn.Module):
     def __init__(self, height, width, batch_size, angw=1e-6, vlossw=0.2, sclw=0):
@@ -1304,6 +1340,15 @@ class SurfaceNormalOptimizer(nn.Module):
         # tensor2disp(angv + np.pi, vmax=2*np.pi, ind=0).show()
 
         return ang
+
+    def colinearityloss(self, depthMap, w):
+        gradxl = self.sharpxl(depthMap).squeeze(1)
+        gradxr = self.sharpxr(depthMap).squeeze(1)
+        gradyu = self.sharpyu(depthMap).squeeze(1)
+        gradyd = self.sharpyd(depthMap).squeeze(1)
+
+        colinearityloss = torch.sum((torch.abs(gradxl - gradxr) + torch.abs(gradyu - gradyd)) * w) / torch.sum(w)
+        return colinearityloss
 
     def ang2grad(self, ang, intrinsic, depthMap):
         depthMaps = depthMap.squeeze(1)

@@ -138,7 +138,7 @@ class Trainer:
 
         self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size).cuda()
         self.gradloss = ConsistLoss().cuda()
-        self.rgbw = RGBWeightComputer().cuda()
+        self.imgw = ImageWeightComputer().cuda()
     def set_dataset(self):
         """properly handle multiple dataset situation
         """
@@ -268,7 +268,7 @@ class Trainer:
         losses = {}
         l1loss = 0
 
-        w = self.rgbw(F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)) * inputs['semanticsregularmask'] * (outputs[('depth', 0)] < 40).float()
+        w = self.imgw.rgbgradw(F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)) * inputs['semanticsregularmask'] * (outputs[('depth', 0)] < 40).float()
         for scale in range(4):
             gradx_est, grady_est = self.sfnormOptimizer.ang2grad(torch.cat([inputs['angh'], inputs['angv']], dim=1), inputs['K'], outputs[('depth', scale)])
             l1loss = l1loss + self.gradloss.grad_consistloss(outputs[('depth', scale)], gradx_est, grady_est, w)

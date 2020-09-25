@@ -81,6 +81,7 @@ class KittiDataset(data.Dataset):
         self.rescaleK[0, 0] = self.width / self.crpw
         self.rescaleK[1, 1] = self.height / self.crph
 
+
     def preprocess(self, inputs, color_aug, rndseed):
         """Resize colour images to the required scales and augment if required
 
@@ -148,8 +149,6 @@ class KittiDataset(data.Dataset):
                 cropped_angvnp = np.array(cropped_angv).astype(np.float32)
                 cropped_angvnp = (cropped_angvnp / 255.0 / 255.0 - 0.5) * 2 * np.pi
                 inputs[k] = torch.from_numpy(cropped_angvnp).unsqueeze(0)
-
-
 
     def __len__(self):
         return len(self.filenames)
