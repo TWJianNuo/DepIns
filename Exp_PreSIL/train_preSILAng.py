@@ -220,6 +220,11 @@ class Trainer:
                 inputs[key] = ipt.to(self.device)
 
         inputs['anggt'] = self.sfnormOptimizer.depth2ang(inputs["depthgt"], inputs["K"], issharp=True)
+        # self.sfnormOptimizer.depth2ang_log(inputs["depthgt"], inputs["K"])
+
+        testd = torch.rand_like(inputs["depthgt"]) * 5
+        # self.sfnormOptimizer.init_scaledindex(depthmap=inputs["depthgt"], ang=inputs['anggt'], intrinisic=inputs['K'])
+        self.sfnormOptimizer.init_scaledindex(depthmap=testd, ang=self.sfnormOptimizer.depth2ang_log(testd, inputs["K"]), intrinisic=inputs['K'])
 
         outputs = dict()
         losses = dict()

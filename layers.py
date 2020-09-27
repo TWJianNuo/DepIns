@@ -1095,7 +1095,220 @@ class SurfaceNormalOptimizer(nn.Module):
         self.ones = nn.Parameter(torch.ones([self.batch_size, 1, self.height * self.width]), requires_grad=False)
         self.init_gradconv()
         self.init_integration_kernel()
+        # self.init_scaledindex()
 
+        self.xxdict = dict()
+        self.yydict = dict()
+        self.ccdict = dict()
+        for i in range(1, 4):
+            cuh = int(self.height / (2 ** i))
+            cuw = int(self.width / (2 ** i))
+
+            cx = int(0 + 2 ** i / 2)
+            cy = int(0 + 2 ** i / 2)
+
+            cxx, cyy = np.meshgrid(range(cuw), range(cuh), indexing='xy')
+
+            cxx = cxx * (2**i) + cx
+            cyy = cyy * (2**i) + cy
+
+            cxxt = nn.Parameter(torch.from_numpy(np.copy(cxx)).unsqueeze(0).repeat([self.batch_size, 1, 1]).long(), requires_grad=False)
+            cyyt = nn.Parameter(torch.from_numpy(np.copy(cyy)).unsqueeze(0).repeat([self.batch_size, 1, 1]).long(), requires_grad=False)
+            ccct = nn.Parameter(torch.zeros([self.batch_size, cuh, cuw], dtype=torch.long), requires_grad=False)
+
+            self.xxdict["scale_{}".format(i)] = cxxt
+            self.yydict["scale_{}".format(i)] = cyyt
+            self.ccdict["scale_{}".format(i)] = ccct
+
+    def init_scaledindex(self, depthmap, ang, intrinisic):
+
+        self.intpathx1 = dict()
+        self.intpathy1 = dict()
+        self.intpathx2 = dict()
+        self.intpathy2 = dict()
+        self.intpaths1 = dict()
+        self.intpaths2 = dict()
+
+        log = self.ang2log(intrinsic=intrinisic, ang=ang)
+        depthmaps = depthmap.squeeze(1)
+        depthmapl = torch.log(depthmaps)
+        depthreocver = torch.zeros([self.batch_size, self.height, self.width], device='cuda')
+        depthreocvergt = torch.zeros([self.batch_size, self.height, self.width], device='cuda')
+        for i in range(1, 4):
+            i = 3
+            for m in range(0, int(2 ** i)):
+                for n in range(0, int(2 ** i)):
+                    if m == 0 and n == 0:
+                        continue
+                    if np.mod(m, 2) == 1:
+                        mm = int(-(m+1)/2)
+                    else:
+                        mm = int(m/2)
+                    if np.mod(n, 2) == 1:
+                        nn = int(-(n+1)/2)
+                    else:
+                        nn = int(n/2)
+
+                    if nn < 0:
+                        logx1 = nn
+                        logy1 = mm
+                        ch1 = 0
+                        depthx1 = nn + 1
+                        depthy1 = mm
+                        sign1 = -1
+                    elif nn > 0:
+                        logx1 = nn - 1
+                        logy1 = mm
+                        ch1 = 0
+                        depthx1 = nn - 1
+                        depthy1 = mm
+                        sign1 = 1
+
+                    if mm > 0:
+                        logx2 = nn
+                        logy2 = mm - 1
+                        ch2 = 1
+                        depthx2 = nn
+                        depthy2 = mm - 1
+                        sign2 = 1
+                    elif mm < 0:
+                        logx2 = nn
+                        logy2 = mm
+                        ch2 = 1
+                        depthx2 = nn
+                        depthy2 = mm + 1
+                        sign2 = -1
+
+                    if nn == 0:
+                        logx1 = logx2
+                        logy1 = logy2
+                        ch1 = ch2
+                        depthx1 = depthx2
+                        depthy1 = depthy2
+                        sign1 = sign2
+
+                    if mm == 0:
+                        logx2 = logx1
+                        logy2 = logy1
+                        ch2 = ch1
+                        depthx2 = depthx1
+                        depthy2 = depthy1
+                        sign2 = sign1
+
+                    # if mm == 0 and nn < 0:
+                    #     logx1 = nn
+                    #     logy1 = mm
+                    #     logx2 = nn
+                    #     logy2 = mm
+                    #     ch1 = 0
+                    #     ch2 = 0
+                    #     depthx1 = nn + 1
+                    #     depthy1 = mm
+                    #     depthx2 = nn + 1
+                    #     depthy2 = mm
+                    #     sign1 = -1
+                    #     sign2 = -1
+                    # elif mm == 0 and nn > 0:
+                    #     logx1 = nn - 1
+                    #     logy1 = mm
+                    #     logx2 = nn - 1
+                    #     logy2 = mm
+                    #     ch1 = 0
+                    #     ch2 = 0
+                    #     depthx1 = nn - 1
+                    #     depthy1 = mm
+                    #     depthx2 = nn - 1
+                    #     depthy2 = mm
+                    #     sign1 = 1
+                    #     sign2 = 1
+                    # elif nn == 0 and mm < 0:
+                    #     logx1 = nn
+                    #     logy1 = mm
+                    #     logx2 = nn
+                    #     logy2 = mm
+                    #     ch1 = 1
+                    #     ch2 = 1
+                    #     depthx1 = nn
+                    #     depthy1 = mm + 1
+                    #     depthx2 = nn
+                    #     depthy2 = mm + 1
+                    #     sign1 = -1
+                    #     sign2 = -1
+                    # elif nn == 0 and mm > 0:
+                    #     logx1 = nn
+                    #     logy1 = mm - 1
+                    #     logx2 = nn
+                    #     logy2 = mm - 1
+                    #     ch1 = 1
+                    #     ch2 = 1
+                    #     depthx1 = nn
+                    #     depthy1 = mm - 1
+                    #     depthx2 = nn
+                    #     depthy2 = mm - 1
+                    #     sign1 = 1
+                    #     sign2 = 1
+                    # elif nn < 0 and mm > 0:
+                    #     logx1 = nn
+                    #     logy1 = mm
+                    #     logx2 = nn
+                    #     logy2 = mm
+                    #     ch1 = 0
+                    #     ch2 = 1
+                    #     depthx1 = nn + 1
+                    #     depthy1 = mm
+                    #     depthx2 = nn
+                    #     depthy2 = mm + 1
+                    #     sign1 = -1
+                    #     sign2 = -1
+                    # elif nn < 0 and mm < 0:
+                    #     logx1 = nn
+                    #     logy1 = mm
+                    #     logx2 = nn
+                    #     logy2 = mm
+                    #     ch1 = 0
+                    #     ch2 = 1
+                    #     depthx1 = nn + 1
+                    #     depthy1 = mm
+                    #     depthx2 = nn
+                    #     depthy2 = mm + 1
+                    #     sign1 = -1
+                    #     sign2 = -1
+                    # else:
+                    #     continue
+
+                    xx = self.xxdict["scale_{}".format(i)]
+                    yy = self.yydict["scale_{}".format(i)]
+                    cc = self.ccdict["scale_{}".format(i)]
+
+                    depthreocver[:, yy + mm, xx + nn] = (depthmapl[:, yy + depthy1, xx + depthx1] + sign1 * log[:, cc + ch1, yy + logy1, xx + logx1] +
+                                                         depthmapl[:, yy + depthy2, xx + depthx2] + sign2 * log[:, cc + ch2, yy + logy2, xx + logx2]) / 2
+
+                    import random
+                    rckidx = np.random.randint(0, xx.shape[1])
+                    rckidy = np.random.randint(0, yy.shape[1])
+
+                    ckcc = np.random.randint(0, self.batch_size)
+                    ckxx = xx[ckcc, rckidy, rckidx]
+                    ckyy = yy[ckcc, rckidy, rckidx]
+
+                    torch.log(depthmaps[ckcc, ckyy, ckxx + 1]) - torch.log(depthmaps[ckcc, ckyy, ckxx])
+                    log[ckcc, 0, ckyy, ckxx]
+
+                    targetdl = depthmapl[ckcc, ckyy + mm, ckxx + nn]
+
+                    sourcedl1 = depthmapl[ckcc, ckyy + depthy1, ckxx + depthx1]
+                    linklog1 = log[ckcc, ch1, ckyy + logy1, ckxx + logx1]
+                    ck1 = torch.abs(torch.exp(targetdl) - torch.exp(sourcedl1 + linklog1 * sign1))
+                    ckk1 = torch.abs(torch.log(depthmap[ckcc, 0, ckyy + mm, ckxx + nn] / depthmap[ckcc, 0, ckyy + depthy1, ckxx + depthx1]) - linklog1 * sign1)
+
+                    sourcedl2 = depthmapl[ckcc, ckyy + depthy2, ckxx + depthx2]
+                    linklog2 = log[ckcc, ch2, ckyy + logy2, ckxx + logx2]
+                    ck2 = torch.abs(torch.exp(targetdl) - torch.exp(sourcedl2 + linklog2 * sign2))
+                    ckk2 = torch.abs(torch.log(depthmap[ckcc, 0, ckyy + mm, ckxx + nn] / depthmap[ckcc, 0, ckyy + depthy2, ckxx + depthx2]) - linklog2 * sign2)
+
+                    print("Err analysis:(%f, %f)" % (float(ckk1.detach().cpu().numpy()), float(ckk2.detach().cpu().numpy())))
+
+            a = 1
     def init_integration_kernel(self):
         inth = torch.Tensor(
             [[0, 1, 0, 0, 0],
@@ -1338,7 +1551,83 @@ class SurfaceNormalOptimizer(nn.Module):
 
         # tensor2disp(angh + np.pi, vmax=2*np.pi, ind=0).show()
         # tensor2disp(angv + np.pi, vmax=2*np.pi, ind=0).show()
+        return ang
 
+    def ang2log(self, intrinsic, ang):
+        protectmin = 1e-6
+
+        angh = ang[:, 0, :, :]
+        angv = ang[:, 1, :, :]
+
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        a1 = ((self.yy - by) / fy)**2 + 1
+        b1 = -(self.xx - bx) / fx
+
+        a2 = ((self.yy - by) / fy)**2 + 1
+        b2 = -(self.xx + 1 - bx) / fx
+
+        a3 = torch.sin(angh)
+        b3 = -torch.cos(angh)
+
+        u1 = ((self.xx - bx) / fx)**2 + 1
+        v1 = -(self.yy - by) / fy
+
+        u2 = ((self.xx - bx) / fx)**2 + 1
+        v2 = -(self.yy + 1 - by) / fy
+
+        u3 = torch.sin(angv)
+        v3 = -torch.cos(angv)
+
+        logh = torch.log(torch.clamp(torch.abs(a3 * b1 - a1 * b3), min=protectmin)) - torch.log(torch.clamp(torch.abs(a3 * b2 - a2 * b3), min=protectmin))
+        logh = torch.clamp(logh, min=-10, max=10)
+
+        logv = torch.log(torch.clamp(torch.abs(u3 * v1 - u1 * v3), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3 * v2 - u2 * v3), min=protectmin))
+        logv = torch.clamp(logv, min=-10, max=10)
+
+        return torch.stack([logh, logv], dim=1)
+
+    def depth2ang_log(self, depthMap, intrinsic):
+        depthMaps = depthMap.squeeze(1)
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        p2dhx = (self.xx - bx) / fx * depthMaps
+        p2dhy = (((self.yy - by) / fy) ** 2 + 1) * depthMaps
+
+        p2dvx = (self.yy - by) / fy * depthMaps
+        p2dvy = (((self.xx - bx) / fx) ** 2 + 1) * depthMaps
+
+        angh = torch.atan2(self.diffx_sharp(p2dhy.unsqueeze(1)), self.diffx_sharp(p2dhx.unsqueeze(1)))
+        angv = torch.atan2(self.diffy_sharp(p2dvy.unsqueeze(1)), self.diffy_sharp(p2dvx.unsqueeze(1)))
+
+        ang = torch.cat([angh, angv], dim=1)
+
+        # ang2 = self.depth2ang(depthMap, intrinsic, True)
+        # tensor2disp(angh + np.pi, vmax=np.pi * 2, ind=0).show()
+        # tensor2disp(ang2[:,0:1,:,:] + np.pi, vmax=np.pi * 2, ind=0).show()
+        # tensor2disp(angv + np.pi, vmax=np.pi * 2, ind=0).show()
+        # tensor2disp(ang2[:,1:2,:,:] + np.pi, vmax=np.pi * 2, ind=0).show()
+        #
+        # log = self.ang2log(intrinsic, ang)
+        # logh = log[:, 0, :, :]
+        # logv = log[:, 1, :, :]
+        #
+        # import random
+        # ckx = random.randint(0, self.width)
+        # cky = random.randint(0, self.height)
+        # ckz = random.randint(0, self.batch_size - 1)
+        #
+        # ckhgtl = torch.log(depthMap[ckz, 0, cky, ckx + 1]) - torch.log(depthMap[ckz, 0, cky, ckx])
+        # ckhestl = logh[ckz, cky, ckx]
+        #
+        # ckvgtl = torch.log(depthMap[ckz, 0, cky + 1, ckx]) - torch.log(depthMap[ckz, 0, cky, ckx])
+        # ckvestl = logv[ckz, cky, ckx]
         return ang
 
     def colinearityloss(self, depthMap, w):
@@ -1366,15 +1655,15 @@ class SurfaceNormalOptimizer(nn.Module):
         depthMap_gradx_est = depthMap_gradx_est.unsqueeze(1).clamp(min=-1e6, max=1e6)
         depthMap_grady_est = depthMap_grady_est.unsqueeze(1).clamp(min=-1e6, max=1e6)
 
-        # # Check
-        # depthMap_gradx = self.diffx_sharp(depthMap).squeeze(1)
-        # depthMap_grady = self.diffy_sharp(depthMap).squeeze(1)
+        # Check
+        # depthMap_gradx = self.diffx_sharp(depthMap)
+        # depthMap_grady = self.diffy_sharp(depthMap)
         #
-        # tensor2grad(depthMap_gradx_est.unsqueeze(1), viewind=0, percentile=80).show()
-        # tensor2grad(depthMap_gradx.unsqueeze(1), viewind=0, percentile=80).show()
+        # tensor2grad(depthMap_gradx_est, viewind=0, percentile=80).show()
+        # tensor2grad(depthMap_gradx, viewind=0, percentile=80).show()
         #
-        # tensor2grad(depthMap_grady_est.unsqueeze(1), viewind=0, percentile=80).show()
-        # tensor2grad(depthMap_grady.unsqueeze(1), viewind=0, percentile=80).show()
+        # tensor2grad(depthMap_grady_est, viewind=0, percentile=80).show()
+        # tensor2grad(depthMap_grady, viewind=0, percentile=80).show()
         return depthMap_gradx_est, depthMap_grady_est
 
     def intergrationloss_ang(self, ang, intrinsic, depthMap):
@@ -1471,7 +1760,7 @@ class SurfaceNormalOptimizer(nn.Module):
         #
         # loss.backward()
         # torch.mean(torch.abs(ang.grad))
-
+        #
         # import random
         # ckx = random.randint(0, self.width)
         # cky = random.randint(0, self.height)
