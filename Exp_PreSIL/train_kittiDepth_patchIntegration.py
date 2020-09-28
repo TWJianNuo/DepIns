@@ -52,6 +52,9 @@ parser.add_argument("--max_depth",              type=float, default=100.0,      
 parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
 parser.add_argument("--iscombine",              action='store_true')
+parser.add_argument("--inplaceAng",             action='store_true')
+parser.add_argument("--load_angweights_folder", type=str,                               help="path to kitti gt file")
+
 
 
 
@@ -111,6 +114,17 @@ class Trainer:
         self.parameters_to_train += list(self.models["depth"].parameters())
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1)
+
+        if self.opt.inplaceAng:
+            self.angmodels = {}
+            self.angmodels["angencoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
+            self.angmodels["angdecoder"] = DepthDecoder(self.angmodels["angencoder"].num_ch_enc, num_output_channels=2)
+            self.angmodels["angencoder"].to(self.device)
+            self.angmodels["angdecoder"].to(self.device)
+            self.load_angmodel()
+            for m in self.angmodels.values():
+                m.eval()
+
 
         print("Training model named:\t", self.opt.model_name)
         print("Models and tensorboard events files are saved to:\t", self.opt.log_dir)
@@ -234,6 +248,13 @@ class Trainer:
             if not key == 'tag':
                 inputs[key] = ipt.to(self.device)
 
+        if self.opt.inplaceAng:
+            with torch.no_grad():
+                angact = self.angmodels["angdecoder"](self.angmodels["angencoder"](inputs['color']))
+                ang_crpsize = (F.interpolate(angact['disp', 0], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True) - 0.5) * np.pi * 2
+                inputs['angh'] = ang_crpsize[:, 0, :, :].unsqueeze(1)
+                inputs['angv'] = ang_crpsize[:, 1, :, :].unsqueeze(1)
+
         outputs = dict()
         losses = dict()
 
@@ -346,6 +367,12 @@ class Trainer:
                     if not key == 'tag':
                         inputs[key] = ipt.to(self.device)
 
+                if self.opt.inplaceAng:
+                    angact = self.angmodels["angdecoder"](self.angmodels["angencoder"](inputs['color']))
+                    ang_crpsize = (F.interpolate(angact['disp', 0], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True) - 0.5) * np.pi * 2
+                    inputs['angh'] = ang_crpsize[:, 0, :, :].unsqueeze(1)
+                    inputs['angv'] = ang_crpsize[:, 1, :, :].unsqueeze(1)
+
                 ang = torch.cat([inputs['angh'], inputs['angv']], dim=1)
                 ang = F.interpolate(ang, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
                 inputs['ang_netsize'] = ang
@@ -372,7 +399,7 @@ class Trainer:
                     gt_height, gt_width = gt_depth.shape
                     cur_pred_depth = pred_depth[i:i+1,:,:,:]
                     cur_pred_depth = F.interpolate(cur_pred_depth, [gt_height,gt_width], mode='bilinear', align_corners=True)
-                    cur_pred_depth = cur_pred_depth[0,0,:,:].cpu().numpy()
+                    cur_pred_depth = cur_pred_depth[0,0,:,:].detach().cpu().numpy()
 
                     mask = np.logical_and(gt_depth > self.MIN_DEPTH, gt_depth < self.MAX_DEPTH)
                     crop = np.array([0.40810811 * gt_height, 0.99189189 * gt_height,
@@ -518,6 +545,27 @@ class Trainer:
             self.model_optimizer.load_state_dict(optimizer_dict)
         else:
             print("Cannot find Adam weights so Adam is randomly initialized")
+
+    def load_angmodel(self):
+        """Load model(s) from disk
+        """
+        self.opt.load_angweights_folder = os.path.expanduser(self.opt.load_angweights_folder)
+
+        assert os.path.isdir(self.opt.load_angweights_folder), \
+            "Cannot find folder {}".format(self.opt.load_angweights_folder)
+        print("loading model from folder {}".format(self.opt.load_angweights_folder))
+
+        models_to_load = ['angencoder', 'angdecoder']
+        pthmapping = {'angencoder': 'encoder', 'angdecoder': 'depth'}
+        for n in models_to_load:
+            path = os.path.join(self.opt.load_angweights_folder, "{}.pth".format(pthmapping[n]))
+            if os.path.isfile(path) and n in self.angmodels:
+                print("Loading {} weights...".format(n))
+                model_dict = self.angmodels[n].state_dict()
+                pretrained_dict = torch.load(path)
+                pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+                model_dict.update(pretrained_dict)
+                self.angmodels[n].load_state_dict(model_dict)
 
     def set_requires_grad(self, nets, requires_grad=False):
         """Set requies_grad=Fasle for all the networks to avoid unnecessary computations
