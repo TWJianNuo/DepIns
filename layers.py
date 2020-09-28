@@ -1203,8 +1203,9 @@ class SurfaceNormalOptimizer(nn.Module):
 
         for path in intpaths:
             logx1, logy1, ch1, depthx1, depthy1, sign1, logx2, logy2, ch2, depthx2, depthy2, sign2, mm, nn = path
-            depthmapr[:, yy + mm, xx + nn] = (depthmapr[:, yy + depthy1, xx + depthx1] + sign1 * log[:, cc + ch1, yy + logy1, xx + logx1] +
-                                              depthmapr[:, yy + depthy2, xx + depthx2] + sign2 * log[:, cc + ch2, yy + logy2, xx + logx2]) / 2
+            tmpgradnode = depthmapr.clone()
+            depthmapr[:, yy + mm, xx + nn] = (tmpgradnode[:, yy + depthy1, xx + depthx1] + sign1 * log[:, cc + ch1, yy + logy1, xx + logx1] +
+                                              tmpgradnode[:, yy + depthy2, xx + depthx2] + sign2 * log[:, cc + ch2, yy + logy2, xx + logx2]) / 2
 
         depthmapr = torch.exp(depthmapr).unsqueeze(1)
         # tensor2disp(depthmaplow, vmax=40, ind=0).show()

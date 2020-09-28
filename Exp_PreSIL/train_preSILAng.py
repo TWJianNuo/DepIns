@@ -221,19 +221,11 @@ class Trainer:
 
         inputs['anggt'] = self.sfnormOptimizer.depth2ang_log(inputs["depthgt"], inputs["K"])
 
-        # self.sfnormOptimizer.init_patchIntPath_debug(depthmap=inputs["depthgt"], ang=inputs['anggt'], intrinsic=inputs['K'])
-        # testd = torch.rand_like(inputs["depthgt"]) * 5
-        # self.sfnormOptimizer.init_scaledindex(depthmap=testd, ang=self.sfnormOptimizer.depth2ang_log(testd, inputs["K"]), intrinisic=inputs['K'])
-
-        scale = 3
-        xx = self.sfnormOptimizer.xxdict["scale_{}".format(scale)]
-        yy = self.sfnormOptimizer.yydict["scale_{}".format(scale)]
-        depthgtlow = inputs["depthgt"][:, :, yy[0], xx[0]]
-        depthgtrecover = self.sfnormOptimizer.patchIntegration(depthmaplow=depthgtlow, intrinsic=inputs["K"], scale=scale, ang=inputs['anggt'])
-
-        tensor2disp(depthgtlow, vmax=40, ind=0).show()
-        tensor2disp(depthgtrecover, vmax=40, ind=0).show()
-        tensor2disp(inputs["depthgt"], vmax=40, ind=0).show()
+        # scale = 3
+        # xx = self.sfnormOptimizer.xxdict["scale_{}".format(scale)]
+        # yy = self.sfnormOptimizer.yydict["scale_{}".format(scale)]
+        # depthgtlow = inputs["depthgt"][:, :, yy[0], xx[0]]
+        # depthgtrecover = self.sfnormOptimizer.patchIntegration(depthmaplow=depthgtlow, intrinsic=inputs["K"], scale=scale, ang=inputs['anggt'])
 
         outputs = dict()
         losses = dict()
