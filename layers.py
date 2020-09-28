@@ -1095,8 +1095,10 @@ class SurfaceNormalOptimizer(nn.Module):
         self.ones = nn.Parameter(torch.ones([self.batch_size, 1, self.height * self.width]), requires_grad=False)
         self.init_gradconv()
         self.init_integration_kernel()
-        # self.init_scaledindex()
+        self.init_scalIndex()
+        self.init_patchIntPath()
 
+    def init_scalIndex(self):
         self.xxdict = dict()
         self.yydict = dict()
         self.ccdict = dict()
@@ -1120,22 +1122,10 @@ class SurfaceNormalOptimizer(nn.Module):
             self.yydict["scale_{}".format(i)] = cyyt
             self.ccdict["scale_{}".format(i)] = ccct
 
-    def init_scaledindex(self, depthmap, ang, intrinisic):
-
-        self.intpathx1 = dict()
-        self.intpathy1 = dict()
-        self.intpathx2 = dict()
-        self.intpathy2 = dict()
-        self.intpaths1 = dict()
-        self.intpaths2 = dict()
-
-        log = self.ang2log(intrinsic=intrinisic, ang=ang)
-        depthmaps = depthmap.squeeze(1)
-        depthmapl = torch.log(depthmaps)
-        depthreocver = torch.zeros([self.batch_size, self.height, self.width], device='cuda')
-        depthreocvergt = torch.zeros([self.batch_size, self.height, self.width], device='cuda')
+    def init_patchIntPath(self):
+        self.patchIntPath = dict()
         for i in range(1, 4):
-            i = 3
+            intpath = list()
             for m in range(0, int(2 ** i)):
                 for n in range(0, int(2 ** i)):
                     if m == 0 and n == 0:
@@ -1195,94 +1185,104 @@ class SurfaceNormalOptimizer(nn.Module):
                         depthy2 = depthy1
                         sign2 = sign1
 
-                    # if mm == 0 and nn < 0:
-                    #     logx1 = nn
-                    #     logy1 = mm
-                    #     logx2 = nn
-                    #     logy2 = mm
-                    #     ch1 = 0
-                    #     ch2 = 0
-                    #     depthx1 = nn + 1
-                    #     depthy1 = mm
-                    #     depthx2 = nn + 1
-                    #     depthy2 = mm
-                    #     sign1 = -1
-                    #     sign2 = -1
-                    # elif mm == 0 and nn > 0:
-                    #     logx1 = nn - 1
-                    #     logy1 = mm
-                    #     logx2 = nn - 1
-                    #     logy2 = mm
-                    #     ch1 = 0
-                    #     ch2 = 0
-                    #     depthx1 = nn - 1
-                    #     depthy1 = mm
-                    #     depthx2 = nn - 1
-                    #     depthy2 = mm
-                    #     sign1 = 1
-                    #     sign2 = 1
-                    # elif nn == 0 and mm < 0:
-                    #     logx1 = nn
-                    #     logy1 = mm
-                    #     logx2 = nn
-                    #     logy2 = mm
-                    #     ch1 = 1
-                    #     ch2 = 1
-                    #     depthx1 = nn
-                    #     depthy1 = mm + 1
-                    #     depthx2 = nn
-                    #     depthy2 = mm + 1
-                    #     sign1 = -1
-                    #     sign2 = -1
-                    # elif nn == 0 and mm > 0:
-                    #     logx1 = nn
-                    #     logy1 = mm - 1
-                    #     logx2 = nn
-                    #     logy2 = mm - 1
-                    #     ch1 = 1
-                    #     ch2 = 1
-                    #     depthx1 = nn
-                    #     depthy1 = mm - 1
-                    #     depthx2 = nn
-                    #     depthy2 = mm - 1
-                    #     sign1 = 1
-                    #     sign2 = 1
-                    # elif nn < 0 and mm > 0:
-                    #     logx1 = nn
-                    #     logy1 = mm
-                    #     logx2 = nn
-                    #     logy2 = mm
-                    #     ch1 = 0
-                    #     ch2 = 1
-                    #     depthx1 = nn + 1
-                    #     depthy1 = mm
-                    #     depthx2 = nn
-                    #     depthy2 = mm + 1
-                    #     sign1 = -1
-                    #     sign2 = -1
-                    # elif nn < 0 and mm < 0:
-                    #     logx1 = nn
-                    #     logy1 = mm
-                    #     logx2 = nn
-                    #     logy2 = mm
-                    #     ch1 = 0
-                    #     ch2 = 1
-                    #     depthx1 = nn + 1
-                    #     depthy1 = mm
-                    #     depthx2 = nn
-                    #     depthy2 = mm + 1
-                    #     sign1 = -1
-                    #     sign2 = -1
-                    # else:
-                    #     continue
+                    intpath.append((logx1, logy1, ch1, depthx1, depthy1, sign1, logx2, logy2, ch2, depthx2, depthy2, sign2, mm, nn))
+                    self.patchIntPath['scale_{}'.format(i)] = intpath
 
-                    xx = self.xxdict["scale_{}".format(i)]
-                    yy = self.yydict["scale_{}".format(i)]
-                    cc = self.ccdict["scale_{}".format(i)]
+    def patchIntegration(self, depthmaplow, ang, intrinsic, scale):
+        log = self.ang2log(intrinsic=intrinsic, ang=ang)
+        depthmaplowl = torch.log(depthmaplow.squeeze(1))
+        _, lh, lw = depthmaplowl.shape
+        assert (lh == self.height / (2 ** scale)) and (lw == self.width / (2 ** scale)), print("Resolution and scale are not cooresponded")
 
-                    depthreocver[:, yy + mm, xx + nn] = (depthmapl[:, yy + depthy1, xx + depthx1] + sign1 * log[:, cc + ch1, yy + logy1, xx + logx1] +
-                                                         depthmapl[:, yy + depthy2, xx + depthx2] + sign2 * log[:, cc + ch2, yy + logy2, xx + logx2]) / 2
+        xx = self.xxdict["scale_{}".format(scale)]
+        yy = self.yydict["scale_{}".format(scale)]
+        cc = self.ccdict["scale_{}".format(scale)]
+        intpaths = self.patchIntPath['scale_{}'.format(scale)]
+        depthmapr = torch.zeros([self.batch_size, self.height, self.width], device="cuda")
+        depthmapr[:, yy[0], xx[0]] = depthmaplowl
 
+        for path in intpaths:
+            logx1, logy1, ch1, depthx1, depthy1, sign1, logx2, logy2, ch2, depthx2, depthy2, sign2, mm, nn = path
+            depthmapr[:, yy + mm, xx + nn] = (depthmapr[:, yy + depthy1, xx + depthx1] + sign1 * log[:, cc + ch1, yy + logy1, xx + logx1] +
+                                              depthmapr[:, yy + depthy2, xx + depthx2] + sign2 * log[:, cc + ch2, yy + logy2, xx + logx2]) / 2
+
+        depthmapr = torch.exp(depthmapr).unsqueeze(1)
+        # tensor2disp(depthmaplow, vmax=40, ind=0).show()
+        # tensor2disp(depthmapr, vmax=40, ind=0).show()
+        return depthmapr
+
+    def init_patchIntPath_debug(self, depthmap, ang, intrinsic):
+        log = self.ang2log(intrinsic=intrinsic, ang=ang)
+        depthmaps = depthmap.squeeze(1)
+        depthmapl = torch.log(depthmaps)
+        depthreocver = torch.zeros([self.batch_size, self.height, self.width], device='cuda')
+
+        for i in range(1, 4):
+            xx = self.xxdict["scale_{}".format(i)]
+            yy = self.yydict["scale_{}".format(i)]
+            cc = self.ccdict["scale_{}".format(i)]
+            for m in range(0, int(2 ** i)):
+                for n in range(0, int(2 ** i)):
+                    if m == 0 and n == 0:
+                        depthreocver[:, yy, xx] = depthmapl[:, yy, xx]
+                        continue
+                    if np.mod(m, 2) == 1:
+                        mm = int(-(m+1)/2)
+                    else:
+                        mm = int(m/2)
+                    if np.mod(n, 2) == 1:
+                        nn = int(-(n+1)/2)
+                    else:
+                        nn = int(n/2)
+
+                    if nn < 0:
+                        logx1 = nn
+                        logy1 = mm
+                        ch1 = 0
+                        depthx1 = nn + 1
+                        depthy1 = mm
+                        sign1 = -1
+                    elif nn > 0:
+                        logx1 = nn - 1
+                        logy1 = mm
+                        ch1 = 0
+                        depthx1 = nn - 1
+                        depthy1 = mm
+                        sign1 = 1
+
+                    if mm > 0:
+                        logx2 = nn
+                        logy2 = mm - 1
+                        ch2 = 1
+                        depthx2 = nn
+                        depthy2 = mm - 1
+                        sign2 = 1
+                    elif mm < 0:
+                        logx2 = nn
+                        logy2 = mm
+                        ch2 = 1
+                        depthx2 = nn
+                        depthy2 = mm + 1
+                        sign2 = -1
+
+                    if nn == 0:
+                        logx1 = logx2
+                        logy1 = logy2
+                        ch1 = ch2
+                        depthx1 = depthx2
+                        depthy1 = depthy2
+                        sign1 = sign2
+
+                    if mm == 0:
+                        logx2 = logx1
+                        logy2 = logy1
+                        ch2 = ch1
+                        depthx2 = depthx1
+                        depthy2 = depthy1
+                        sign2 = sign1
+
+                    depthreocver[:, yy + mm, xx + nn] = (depthreocver[:, yy + depthy1, xx + depthx1] + sign1 * log[:, cc + ch1, yy + logy1, xx + logx1] +
+                                                         depthreocver[:, yy + depthy2, xx + depthx2] + sign2 * log[:, cc + ch2, yy + logy2, xx + logx2]) / 2
                     import random
                     rckidx = np.random.randint(0, xx.shape[1])
                     rckidy = np.random.randint(0, yy.shape[1])
@@ -1306,9 +1306,13 @@ class SurfaceNormalOptimizer(nn.Module):
                     ck2 = torch.abs(torch.exp(targetdl) - torch.exp(sourcedl2 + linklog2 * sign2))
                     ckk2 = torch.abs(torch.log(depthmap[ckcc, 0, ckyy + mm, ckxx + nn] / depthmap[ckcc, 0, ckyy + depthy2, ckxx + depthx2]) - linklog2 * sign2)
 
-                    print("Err analysis:(%f, %f)" % (float(ckk1.detach().cpu().numpy()), float(ckk2.detach().cpu().numpy())))
+                    # print("Err analysis:(%f, %f)" % (float(ckk1.detach().cpu().numpy()), float(ckk2.detach().cpu().numpy())))
+                    if i == 3:
+                        print((logx1, logy1, ch1, depthx1, depthy1, sign1, logx2, logy2, ch2, depthx2, depthy2, sign2, mm, nn))
 
-            a = 1
+            err = torch.abs(depthreocver - depthmapl)
+            tensor2disp(torch.exp(depthmapl).unsqueeze(1), vmax=40, ind=0).show()
+
     def init_integration_kernel(self):
         inth = torch.Tensor(
             [[0, 1, 0, 0, 0],
