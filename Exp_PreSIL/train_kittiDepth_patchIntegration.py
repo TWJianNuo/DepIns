@@ -266,7 +266,7 @@ class Trainer:
 
         encoded_features = self.models['encoder'](combined_inputs)
         outputs.update(self.models['depth'](encoded_features))
-        outputs.update(self.models['confidence'](encoded_features))
+        # outputs.update(self.models['confidence'](encoded_features))
 
         # Depth Branch
         if not self.opt.iscombine:
@@ -308,8 +308,8 @@ class Trainer:
 
         ang = inputs['ang_netsize']
 
-        confidence = outputs['confidence'] / torch.sum(outputs['confidence'], dim=1, keepdim=True).expand([-1, 4, -1, -1])
-        confidence = F.interpolate(confidence, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+        # confidence = outputs['confidence'] / torch.sum(outputs['confidence'], dim=1, keepdim=True).expand([-1, 4, -1, -1])
+        # confidence = F.interpolate(confidence, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
 
         vallidarmask = (inputs['depthgt'] > 0).float()
         combined_pred_depth = torch.zeros([self.opt.batch_size, 1, self.opt.crph, self.opt.crpw], device='cuda', dtype=torch.float32)
@@ -323,7 +323,8 @@ class Trainer:
             pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
             outputs[('depth', scale)] = pred_depth
 
-            combined_pred_depth = combined_pred_depth + confidence[:, scale, :, :].unsqueeze(1) * pred_depth
+            # combined_pred_depth = combined_pred_depth + confidence[:, scale, :, :].unsqueeze(1) * pred_depth
+            combined_pred_depth = combined_pred_depth + pred_depth
 
         outputs['combined_pred_depth'] = combined_pred_depth
         l1loss = l1loss + torch.sum(torch.abs(combined_pred_depth - inputs['depthgt']) * vallidarmask) / (torch.sum(vallidarmask) + 1)
@@ -385,7 +386,7 @@ class Trainer:
 
                 encoded_features = self.models['encoder'](combined_inputs)
                 outputs.update(self.models['depth'](encoded_features))
-                outputs.update(self.models['confidence'](encoded_features))
+                # outputs.update(self.models['confidence'](encoded_features))
 
                 if not self.opt.iscombine:
                     losses.update(self.depth_compute_losses(inputs, outputs))
@@ -468,16 +469,17 @@ class Trainer:
         figdisp2 = tensor2disp(1 / outputs[('depth', 2)], vmax=0.3, ind=vind)
         figdisp3 = tensor2disp(1 / outputs[('depth', 3)], vmax=0.3, ind=vind)
 
-        confidence_cropsize = F.interpolate(outputs['confidence'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-        figconf0 = tensor2disp(confidence_cropsize[:, 0, :, :].unsqueeze(1), vmax=1, ind=vind)
-        figconf1 = tensor2disp(confidence_cropsize[:, 1, :, :].unsqueeze(1), vmax=1, ind=vind)
-        figconf2 = tensor2disp(confidence_cropsize[:, 2, :, :].unsqueeze(1), vmax=1, ind=vind)
-        figconf3 = tensor2disp(confidence_cropsize[:, 3, :, :].unsqueeze(1), vmax=1, ind=vind)
+        # confidence_cropsize = F.interpolate(outputs['confidence'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+        # figconf0 = tensor2disp(confidence_cropsize[:, 0, :, :].unsqueeze(1), vmax=1, ind=vind)
+        # figconf1 = tensor2disp(confidence_cropsize[:, 1, :, :].unsqueeze(1), vmax=1, ind=vind)
+        # figconf2 = tensor2disp(confidence_cropsize[:, 2, :, :].unsqueeze(1), vmax=1, ind=vind)
+        # figconf3 = tensor2disp(confidence_cropsize[:, 3, :, :].unsqueeze(1), vmax=1, ind=vind)
 
         figleft = np.concatenate([np.array(figrgb), np.array(fig_angh), np.array(fig_angv), np.array(fig_disp)], axis=0)
         figmiddle = np.concatenate([np.array(figdisp0), np.array(figdisp1), np.array(figdisp2), np.array(figdisp3)], axis=0)
-        figright = np.concatenate([np.array(figconf0), np.array(figconf1), np.array(figconf2), np.array(figconf3)], axis=0)
-        figcombined = np.concatenate([np.array(figleft), np.array(figmiddle), np.array(figright)], axis=1)
+        figcombined = np.concatenate([np.array(figleft), np.array(figmiddle)], axis=1)
+        # figright = np.concatenate([np.array(figconf0), np.array(figconf1), np.array(figconf2), np.array(figconf3)], axis=0)
+        # figcombined = np.concatenate([np.array(figleft), np.array(figmiddle), np.array(figright)], axis=1)
 
         self.writers[recoder].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
 
