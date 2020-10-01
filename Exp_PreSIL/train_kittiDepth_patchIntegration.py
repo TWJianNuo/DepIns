@@ -109,8 +109,6 @@ class Trainer:
         self.parameters_to_train += list(self.models["encoder"].parameters())
         self.models["depth"] = DepthDecoder(self.models["encoder"].num_ch_enc, num_output_channels=1)
         self.models["depth"].to(self.device)
-        self.models["confidence"] = ConfidenceDecoder(self.models["encoder"].num_ch_enc, num_output_channels=4)
-        self.models["confidence"].to(self.device)
         self.parameters_to_train += list(self.models["depth"].parameters())
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1)
@@ -155,6 +153,8 @@ class Trainer:
 
         self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size).cuda()
         self.sfnormOptimizer_predsize = SurfaceNormalOptimizer(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size).cuda()
+
+        self.finalconv = nn.Conv2d(in_channels=4, out_channels=1, bias=True, padding=1, kernel_size=3).cuda()
     def set_dataset(self):
         """properly handle multiple dataset situation
         """
@@ -304,30 +304,28 @@ class Trainer:
         """Compute the reprojection and smoothness losses for a minibatch
         """
         losses = {}
-        l1loss = 0
 
         ang = inputs['ang_netsize']
 
-        # confidence = outputs['confidence'] / torch.sum(outputs['confidence'], dim=1, keepdim=True).expand([-1, 4, -1, -1])
-        # confidence = F.interpolate(confidence, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-
         vallidarmask = (inputs['depthgt'] > 0).float()
-        combined_pred_depth = torch.zeros([self.opt.batch_size, 1, self.opt.crph, self.opt.crpw], device='cuda', dtype=torch.float32)
+        cattedoutput = list()
         for scale in range(4):
-            scaled_disp, pred_depth = disp_to_depth(outputs[('disp', scale)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
-            pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
-
             if scale != 0:
-                pred_depth = self.sfnormOptimizer_predsize.patchIntegration(depthmaplow=pred_depth, intrinsic=inputs['K_scaled'], ang=ang, scale=scale)
+                scaleactivation = self.sfnormOptimizer_predsize.patchIntegration(depthmaplow=outputs['disp', scale], intrinsic=inputs['K_scaled'], ang=ang, scale=scale)
+            else:
+                scaleactivation = outputs['disp', scale]
+            outputs['activation_{}'.format(scale)] = scaleactivation
+            cattedoutput.append(scaleactivation)
 
-            pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-            outputs[('depth', scale)] = pred_depth
+        cattedoutput = torch.cat(cattedoutput, dim=1)
+        combinedactivation = torch.sigmoid(self.finalconv(cattedoutput))
 
-            # combined_pred_depth = combined_pred_depth + confidence[:, scale, :, :].unsqueeze(1) * pred_depth
-            combined_pred_depth = combined_pred_depth + pred_depth
+        _, pred_depth = disp_to_depth(combinedactivation, self.opt.min_depth, self.opt.max_depth)
+        pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
+        pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+        outputs['pred_depth'] = pred_depth
 
-        outputs['combined_pred_depth'] = combined_pred_depth
-        l1loss = l1loss + torch.sum(torch.abs(combined_pred_depth - inputs['depthgt']) * vallidarmask) / (torch.sum(vallidarmask) + 1)
+        l1loss = torch.sum(torch.abs(pred_depth - inputs['depthgt']) * vallidarmask) / (torch.sum(vallidarmask) + 1)
         losses['depth_l1loss'] = l1loss
 
         return losses
@@ -378,7 +376,7 @@ class Trainer:
                 ang = F.interpolate(ang, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
                 inputs['ang_netsize'] = ang
                 inputs['ang_netsize_normalized'] = (ang + np.pi) / np.pi / 2
-                combined_inputs = torch.cat([inputs['color_aug'], inputs['ang_netsize_normalized']], dim=1)
+                combined_inputs = torch.cat([inputs['color'], inputs['ang_netsize_normalized']], dim=1)
                 combined_inputs = combined_inputs.cuda()
 
                 outputs = dict()
@@ -386,14 +384,13 @@ class Trainer:
 
                 encoded_features = self.models['encoder'](combined_inputs)
                 outputs.update(self.models['depth'](encoded_features))
-                # outputs.update(self.models['confidence'](encoded_features))
 
                 if not self.opt.iscombine:
                     losses.update(self.depth_compute_losses(inputs, outputs))
                 else:
                     losses.update(self.depth_compute_losses_combined(inputs, outputs))
 
-                pred_depth = outputs['combined_pred_depth']
+                pred_depth = outputs['pred_depth']
 
                 for i in range(combined_inputs.shape[0]):
                     gt_depth = inputs['depthgt'][i, 0, :, :].cpu().numpy()
@@ -462,24 +459,16 @@ class Trainer:
         figrgb = tensor2rgb(vlscolor, ind=vind)
         fig_angh = tensor2disp(inputs['angh'] - minang, vmax=maxang, ind=vind)
         fig_angv = tensor2disp(inputs['angv'] - minang, vmax=maxang, ind=vind)
-        fig_disp = tensor2disp(1 / outputs['combined_pred_depth'], vmax=0.3, ind=vind)
+        fig_disp = tensor2disp(1 / outputs['pred_depth'], vmax=0.3, ind=vind)
 
-        figdisp0 = tensor2disp(1 / outputs[('depth', 0)], vmax=0.3, ind=vind)
-        figdisp1 = tensor2disp(1 / outputs[('depth', 1)], vmax=0.3, ind=vind)
-        figdisp2 = tensor2disp(1 / outputs[('depth', 2)], vmax=0.3, ind=vind)
-        figdisp3 = tensor2disp(1 / outputs[('depth', 3)], vmax=0.3, ind=vind)
-
-        # confidence_cropsize = F.interpolate(outputs['confidence'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-        # figconf0 = tensor2disp(confidence_cropsize[:, 0, :, :].unsqueeze(1), vmax=1, ind=vind)
-        # figconf1 = tensor2disp(confidence_cropsize[:, 1, :, :].unsqueeze(1), vmax=1, ind=vind)
-        # figconf2 = tensor2disp(confidence_cropsize[:, 2, :, :].unsqueeze(1), vmax=1, ind=vind)
-        # figconf3 = tensor2disp(confidence_cropsize[:, 3, :, :].unsqueeze(1), vmax=1, ind=vind)
+        figdisp0 = tensor2disp(outputs['activation_{}'.format(0)], percentile=90, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
+        figdisp1 = tensor2disp(outputs['activation_{}'.format(1)], percentile=90, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
+        figdisp2 = tensor2disp(outputs['activation_{}'.format(2)], percentile=90, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
+        figdisp3 = tensor2disp(outputs['activation_{}'.format(3)], percentile=90, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
 
         figleft = np.concatenate([np.array(figrgb), np.array(fig_angh), np.array(fig_angv), np.array(fig_disp)], axis=0)
         figmiddle = np.concatenate([np.array(figdisp0), np.array(figdisp1), np.array(figdisp2), np.array(figdisp3)], axis=0)
         figcombined = np.concatenate([np.array(figleft), np.array(figmiddle)], axis=1)
-        # figright = np.concatenate([np.array(figconf0), np.array(figconf1), np.array(figconf2), np.array(figconf3)], axis=0)
-        # figcombined = np.concatenate([np.array(figleft), np.array(figmiddle), np.array(figright)], axis=1)
 
         self.writers[recoder].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
 
