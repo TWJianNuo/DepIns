@@ -266,7 +266,6 @@ class Trainer:
 
         encoded_features = self.models['encoder'](combined_inputs)
         outputs.update(self.models['depth'](encoded_features))
-        # outputs.update(self.models['confidence'](encoded_features))
 
         # Depth Branch
         if not self.opt.iscombine:
@@ -275,6 +274,7 @@ class Trainer:
             losses.update(self.depth_compute_losses_combined(inputs, outputs))
 
         losses['totLoss'] = losses['depth_l1loss']
+
         return outputs, losses
 
     def depth_compute_losses(self, inputs, outputs):
@@ -310,18 +310,19 @@ class Trainer:
         vallidarmask = (inputs['depthgt'] > 0).float()
         cattedoutput = list()
         for scale in range(4):
+            _, unscaleDepth = disp_to_depth(outputs['disp', scale], self.opt.min_depth, self.opt.max_depth)
+            unscaleDepth = unscaleDepth * self.STEREO_SCALE_FACTOR
             if scale != 0:
-                scaleactivation = self.sfnormOptimizer_predsize.patchIntegration(depthmaplow=outputs['disp', scale], intrinsic=inputs['K_scaled'], ang=ang, scale=scale)
+                scaledDeopth = self.sfnormOptimizer_predsize.patchIntegration(depthmaplow=unscaleDepth, intrinsic=inputs['K_scaled'], ang=ang, scale=scale)
             else:
-                scaleactivation = outputs['disp', scale]
-            outputs['activation_{}'.format(scale)] = scaleactivation
-            cattedoutput.append(scaleactivation)
+                scaledDeopth = unscaleDepth
+
+            outputs['scaledDeopth_{}'.format(scale)] = scaledDeopth
+            cattedoutput.append(scaledDeopth)
 
         cattedoutput = torch.cat(cattedoutput, dim=1)
-        combinedactivation = torch.sigmoid(self.finalconv(cattedoutput))
+        pred_depth = self.finalconv(cattedoutput)
 
-        _, pred_depth = disp_to_depth(combinedactivation, self.opt.min_depth, self.opt.max_depth)
-        pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
         pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
         outputs['pred_depth'] = pred_depth
 
@@ -461,10 +462,10 @@ class Trainer:
         fig_angv = tensor2disp(inputs['angv'] - minang, vmax=maxang, ind=vind)
         fig_disp = tensor2disp(1 / outputs['pred_depth'], vmax=0.3, ind=vind)
 
-        figdisp0 = tensor2disp(outputs['activation_{}'.format(0)], percentile=90, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
-        figdisp1 = tensor2disp(outputs['activation_{}'.format(1)], percentile=90, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
-        figdisp2 = tensor2disp(outputs['activation_{}'.format(2)], percentile=90, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
-        figdisp3 = tensor2disp(outputs['activation_{}'.format(3)], percentile=90, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
+        figdisp0 = tensor2disp(1/outputs['scaledDeopth_{}'.format(0)], percentile=95, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
+        figdisp1 = tensor2disp(1/outputs['scaledDeopth_{}'.format(1)], percentile=95, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
+        figdisp2 = tensor2disp(1/outputs['scaledDeopth_{}'.format(2)], percentile=95, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
+        figdisp3 = tensor2disp(1/outputs['scaledDeopth_{}'.format(3)], percentile=95, ind=vind).resize([self.opt.crpw, self.opt.crph], pil.ANTIALIAS)
 
         figleft = np.concatenate([np.array(figrgb), np.array(fig_angh), np.array(fig_angv), np.array(fig_disp)], axis=0)
         figmiddle = np.concatenate([np.array(figdisp0), np.array(figdisp1), np.array(figdisp2), np.array(figdisp3)], axis=0)
@@ -494,7 +495,6 @@ class Trainer:
         """Save model weights to disk
         """
         save_folder = os.path.join(self.log_path, "models", "{}".format(keyword))
-        # save_folder = os.path.join(self.log_path, "models", "weights_{}".format(self.step))
         if not os.path.exists(save_folder):
             os.makedirs(save_folder)
 
