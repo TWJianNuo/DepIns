@@ -1595,6 +1595,123 @@ class SurfaceNormalOptimizer(nn.Module):
 
         return torch.stack([logh, logv], dim=1)
 
+    def ang2err(self, angpred, intrinsic, depthMap, errpred):
+        protectmin = 1e-6
+
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        errangacth = errpred[:, 0, :, :]
+        errangactv = errpred[:, 1, :, :]
+
+        errangh_min = 0
+        errangh_max = torch.atan2(fx, torch.ones_like(fx)) - protectmin
+
+        errangh = errangacth * (errangh_max - errangh_min) + errangh_min
+        errlogh = -torch.log(1 - torch.tan(errangh) / fx)
+        errlogh = errlogh.unsqueeze(1)
+
+        errangv_min = 0
+        errangv_max = torch.atan2(fy, torch.ones_like(fy)) - protectmin
+
+        errangv = errangactv * (errangv_max - errangv_min) + errangv_min
+        errlogv = -torch.log(1 - torch.tan(errangv) / fy)
+        errlogv = errlogv.unsqueeze(1)
+
+        angh = angpred[:, 0, :, :]
+        angv = angpred[:, 1, :, :]
+
+        a1 = ((self.yy - by) / fy)**2 + 1
+        b1 = -(self.xx - bx) / fx
+
+        a2 = ((self.yy - by) / fy)**2 + 1
+        b2 = -(self.xx + 1 - bx) / fx
+
+        a3 = torch.sin(angh)
+        b3 = -torch.cos(angh)
+
+        u1 = ((self.xx - bx) / fx)**2 + 1
+        v1 = -(self.yy - by) / fy
+
+        u2 = ((self.xx - bx) / fx)**2 + 1
+        v2 = -(self.yy + 1 - by) / fy
+
+        u3 = torch.sin(angv)
+        v3 = -torch.cos(angv)
+
+        depthMapl = torch.log(torch.clamp(depthMap, min=protectmin))
+
+        logh = torch.log(torch.clamp(torch.abs(a3 * b1 - a1 * b3), min=protectmin)) - torch.log(torch.clamp(torch.abs(a3 * b2 - a2 * b3), min=protectmin))
+        logh = torch.clamp(logh, min=-10, max=10)
+
+        logv = torch.log(torch.clamp(torch.abs(u3 * v1 - u1 * v3), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3 * v2 - u2 * v3), min=protectmin))
+        logv = torch.clamp(logv, min=-10, max=10)
+
+        logh = logh.unsqueeze(1)
+        logv = logv.unsqueeze(1)
+
+        vallidarmask = (depthMap > 0).float()
+
+        indh = (self.idh(vallidarmask) == 2).float()
+        indv = (self.idv(vallidarmask) == 2).float()
+
+        inth = self.inth(logh)
+        gth = self.gth(depthMapl)
+        gtherr = torch.abs(inth - gth)
+        estherr = self.inth(errlogh)
+
+        intv = self.intv(logv)
+        gtv = self.gtv(depthMapl)
+        gtverr = torch.abs(intv - gtv)
+        estverr = self.intv(errlogv)
+
+        loss = torch.sum(torch.abs(gtherr - estherr) * indh) / torch.sum(indh) + \
+               torch.sum(torch.abs(gtverr - estverr) * indv) / torch.sum(indv)
+
+        loss = loss / 2
+
+        # # check
+        # log = self.ang2log(intrinsic=intrinsic, ang=angpred)
+        #
+        # fxnp = float(intrinsic[0, 0, 0].detach().cpu().numpy())
+        # actnp = np.linspace(0, 1, 10000)
+        # angminnp = 0
+        # angmaxnp = float(torch.atan2(fx, torch.ones_like(fx))[0, 0, 0].detach().cpu().numpy()) - protectmin
+        # actthtahnp = actnp * (angmaxnp - angminnp) + angminnp
+        # loghnp = -np.log(1 - np.tan(actthtahnp) / fxnp)
+        #
+        # loghprednp = np.abs(log[:, 0, :, :].detach().cpu().numpy().flatten())
+        # hist, bin_edges = np.histogram(loghprednp, loghnp)
+        # hist = hist / np.sum(hist)
+        # f, (ax1, ax2) = plt.subplots(1, 2)
+        # ax1.plot(actnp, loghnp)
+        # ax1.set_xlabel('Sigmoid Activation value')
+        # ax1.set_ylabel('Sigmoid Activation corresponded Log value')
+        # ax2.plot(actnp[:-1], hist)
+        # ax2.set_xlabel('Pred log value mapped Sigmoid Activation')
+        # ax2.set_ylabel('Probability Density')
+        #
+        # fynp = float(intrinsic[0, 1, 1].detach().cpu().numpy())
+        # actnp = np.linspace(0, 1, 10000)
+        # angminnp = 0
+        # angmaxnp = float(torch.atan2(fy, torch.ones_like(fy))[0, 0, 0].detach().cpu().numpy()) - protectmin
+        # actthtahnp = actnp * (angmaxnp - angminnp) + angminnp
+        # logvnp = -np.log(1 - np.tan(actthtahnp) / fynp)
+        #
+        # logvprednp = np.abs(log[:, 1, :, :].detach().cpu().numpy().flatten())
+        # hist, bin_edges = np.histogram(logvprednp, logvnp)
+        # hist = hist / np.sum(hist)
+        # f, (ax1, ax2) = plt.subplots(1, 2)
+        # ax1.plot(actnp, loghnp)
+        # ax1.set_xlabel('Sigmoid Activation value')
+        # ax1.set_ylabel('Sigmoid Activation corresponded Log value')
+        # ax2.plot(actnp[:-1], hist)
+        # ax2.set_xlabel('Pred log value mapped Sigmoid Activation')
+        # ax2.set_ylabel('Probability Density')
+        return loss
+
     def depth2ang_log(self, depthMap, intrinsic):
         depthMaps = depthMap.squeeze(1)
         fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
