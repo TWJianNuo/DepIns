@@ -51,8 +51,7 @@ parser.add_argument("--min_depth",              type=float, default=0.1,        
 parser.add_argument("--max_depth",              type=float, default=100.0,              help="maximum depth")
 parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
-parser.add_argument("--gradlossw",              type=float,   default=1)
-
+parser.add_argument("--load_angweights_folder", type=str,                               help="path to kitti gt file")
 
 # OPTIMIZATION options
 parser.add_argument("--batch_size",             type=int,   default=12,                 help="batch size")
@@ -65,6 +64,9 @@ parser.add_argument("--num_workers",            type=int,   default=6,          
 # LOGGING options
 parser.add_argument("--log_frequency",          type=int,   default=250,                help="number of batches between each tensorboard log")
 parser.add_argument("--save_frequency",         type=int,   default=1,                  help="number of epochs between each save")
+
+
+# For simplicity, we reuse code from "train_kittiDepth_patchIntegration.py". Thus, angmodels means pretrained depth models.
 
 def compute_errors(gt, pred):
     """Computation of error metrics between predicted and ground truth depths
@@ -100,7 +102,7 @@ class Trainer:
 
         self.device = "cuda"
 
-        self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
+        self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True, num_input_channels=4)
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
         self.models["depth"] = DepthDecoder(self.models["encoder"].num_ch_enc, num_output_channels=2)
@@ -108,6 +110,15 @@ class Trainer:
         self.parameters_to_train += list(self.models["depth"].parameters())
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1)
+
+        self.angmodels = {}
+        self.angmodels["angencoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
+        self.angmodels["angdecoder"] = DepthDecoder(self.angmodels["angencoder"].num_ch_enc, num_output_channels=1)
+        self.angmodels["angencoder"].to(self.device)
+        self.angmodels["angdecoder"].to(self.device)
+        self.load_angmodel()
+        for m in self.angmodels.values():
+            m.eval()
 
         print("Training model named:\t", self.opt.model_name)
         print("Models and tensorboard events files are saved to:\t", self.opt.log_dir)
@@ -137,8 +148,6 @@ class Trainer:
         self.STEREO_SCALE_FACTOR = 5.4
 
         self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size).cuda()
-        self.gradloss = ConsistLoss().cuda()
-        self.imgw = ImageWeightComputer().cuda()
     def set_dataset(self):
         """properly handle multiple dataset situation
         """
@@ -220,8 +229,8 @@ class Trainer:
             if self.step % 1 == 0:
                 self.log("train", losses)
 
-            # if self.step % 2000 == 0 and self.step > 1999:
-            #     self.val()
+            if self.step % 2000 == 0 and self.step > 1999:
+                self.val()
 
             self.step += 1
 
@@ -232,10 +241,17 @@ class Trainer:
             if not key == 'tag':
                 inputs[key] = ipt.to(self.device)
 
+        with torch.no_grad():
+            depthact = self.angmodels["angdecoder"](self.angmodels["angencoder"](inputs['color']))
+            inputs['depthact'] = depthact['disp', 0]
+
         outputs = dict()
         losses = dict()
 
-        outputs.update(self.models['depth'](self.models['encoder'](inputs['color_aug'])))
+        combined_inputs = torch.cat([inputs['color_aug'], inputs['depthact']], dim=1)
+
+        encoded_features = self.models['encoder'](combined_inputs)
+        outputs.update(self.models['depth'](encoded_features))
 
         # Noise Branch
         losses.update(self.noise_compute_losses(inputs, outputs))
@@ -248,74 +264,50 @@ class Trainer:
         losses = {}
         l1loss = 0
 
-        angpred = torch.cat([inputs['angh'], inputs['angv']], dim=1)
+        _, depthpred = disp_to_depth(inputs['depthact'], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
+        depthpred = depthpred * self.STEREO_SCALE_FACTOR
+        depthpred = F.interpolate(depthpred, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
         for scale in range(4):
             errpred = F.interpolate(outputs[('disp', scale)], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-            l1loss = l1loss + self.sfnormOptimizer.ang2err(angpred=angpred, intrinsic=inputs['K'], depthMap=inputs['depthgt'], errpred=errpred)
+            l1loss = l1loss + self.sfnormOptimizer.depth2err_loss(depthpred=depthpred, intrinsic=inputs['K'], depthMap=inputs['depthgt'], errpred=errpred)
 
         l1loss = l1loss / 4
         losses['noise_l1loss'] = l1loss
-
+        outputs['depthpred'] = depthpred
         return losses
 
     def val(self):
         """Validate the model on a single minibatch
         """
         count = 0
+        tot_loss = 0
         self.set_eval()
-        errors = list()
         with torch.no_grad():
             for batch_idx, inputs in enumerate(self.val_loader):
-                input_color = inputs['color'].cuda()
-                outputs = self.models['depth'](self.models['encoder'](input_color))
-                _, pred_depth = disp_to_depth(outputs[("disp", 0)], self.opt.min_depth, self.opt.max_depth)
-                pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
-                for i in range(input_color.shape[0]):
-                    gt_depth = inputs['depthgt'][i, 0, :, :].numpy()
-                    gt_height, gt_width = gt_depth.shape
-                    cur_pred_depth = pred_depth[i:i+1,:,:,:]
-                    cur_pred_depth = F.interpolate(cur_pred_depth, [gt_height,gt_width], mode='bilinear', align_corners=True)
-                    cur_pred_depth = cur_pred_depth[0,0,:,:].cpu().numpy()
+                for key, ipt in inputs.items():
+                    if not key == 'tag':
+                        inputs[key] = ipt.to(self.device)
 
-                    mask = np.logical_and(gt_depth > self.MIN_DEPTH, gt_depth < self.MAX_DEPTH)
-                    crop = np.array([0.40810811 * gt_height, 0.99189189 * gt_height,
-                                     0.03594771 * gt_width, 0.96405229 * gt_width]).astype(np.int32)
-                    crop_mask = np.zeros(mask.shape)
-                    crop_mask[crop[0]:crop[1], crop[2]:crop[3]] = 1
-                    mask = np.logical_and(mask, crop_mask)
+                losses = dict()
+                depthact = self.angmodels["angdecoder"](self.angmodels["angencoder"](inputs['color']))
+                inputs['depthact'] = depthact['disp', 0]
+                combined_inputs = torch.cat([inputs['color'], inputs['depthact']], dim=1)
 
-                    cur_pred_depth = cur_pred_depth[mask]
-                    gt_depth = gt_depth[mask]
+                outputs = self.models['depth'](self.models['encoder'](combined_inputs))
+                losses.update(self.noise_compute_losses(inputs, outputs))
 
-                    cur_pred_depth[cur_pred_depth < self.MIN_DEPTH] = self.MIN_DEPTH
-                    cur_pred_depth[cur_pred_depth > self.MAX_DEPTH] = self.MAX_DEPTH
-
-                    errors.append(compute_errors(gt_depth, cur_pred_depth))
-                    count = count + 1
+                tot_loss = tot_loss + float(losses["noise_l1loss"].detach().cpu().numpy())
+                count = count + 1
             del inputs, outputs
-        mean_errors = np.array(errors).mean(0)
+        mean_error = tot_loss / count
 
-        if mean_errors[0] < self.minabsrel:
-            self.minabsrel_perform = mean_errors
-            self.minabsrel = mean_errors[0]
+        if mean_error < self.minabsrel:
+            self.minabsrel = mean_error
             self.save_model("best_absrel_models")
-        if mean_errors[4] > self.maxa1:
-            self.maxa1_perform = mean_errors
-            self.maxa1 = mean_errors[4]
-            self.save_model("best_a1_models")
 
-        print("\nCurrent Performance:")
-        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
-        print(("&{: 8.3f}  " * 7).format(*mean_errors.tolist()) + "\\\\")
+        print("\nCurrent Performance: %f" % mean_error)
 
-        print("\nBest Absolute Relative Performance:")
-        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
-        print(("&{: 8.3f}  " * 7).format(*self.minabsrel_perform.tolist()) + "\\\\")
-
-        print("\nBest A1 Relative Performance:")
-        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
-        print(("&{: 8.3f}  " * 7).format(*self.maxa1_perform.tolist()) + "\\\\")
-
+        print("\nBest Absolute Relative Performance: %f" % self.minabsrel)
         self.set_train()
 
     def log_time(self, batch_idx, duration, loss_tot):
@@ -336,14 +328,19 @@ class Trainer:
         vlserr = F.interpolate(outputs[('disp', 0)], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
 
         figrgb = tensor2rgb(vlscolor, ind=vind)
+        figdisp = tensor2disp(1/outputs['depthpred'], ind=vind)
 
-        fig_angh = tensor2disp(inputs['angh'] - minang, vmax=maxang, ind=vind)
-        fig_angv = tensor2disp(inputs['angv'] - minang, vmax=maxang, ind=vind)
+        ang = self.sfnormOptimizer.depth2ang(depthMap=outputs['depthpred'], intrinsic=inputs['K'])
+        angh = ang[:, 0, :, :].unsqueeze(1)
+        angv = ang[:, 1, :, :].unsqueeze(1)
+
+        fig_angh = tensor2disp(angh - minang, vmax=maxang, ind=vind)
+        fig_angv = tensor2disp(angv - minang, vmax=maxang, ind=vind)
         figerrh = tensor2disp(vlserr[:, 0:1, :, :], vmax=1, ind=vind)
         figerrv = tensor2disp(vlserr[:, 1:2, :, :], vmax=1, ind=vind)
 
         figlview = np.concatenate([np.array(figrgb), np.array(fig_angh), np.array(figerrh)], axis=0)
-        figrview = np.concatenate([np.array(figrgb), np.array(fig_angv), np.array(figerrv)], axis=0)
+        figrview = np.concatenate([np.array(figdisp), np.array(fig_angv), np.array(figerrv)], axis=0)
 
         figcombined = np.concatenate([figlview, figrview], axis=1)
         self.writers[recoder].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
@@ -370,7 +367,6 @@ class Trainer:
         """Save model weights to disk
         """
         save_folder = os.path.join(self.log_path, "models", "{}".format(keyword))
-        # save_folder = os.path.join(self.log_path, "models", "weights_{}".format(self.step))
         if not os.path.exists(save_folder):
             os.makedirs(save_folder)
 
@@ -393,11 +389,11 @@ class Trainer:
             "Cannot find folder {}".format(self.opt.load_weights_folder)
         print("loading model from folder {}".format(self.opt.load_weights_folder))
 
-        models_to_load = ['encoder', 'depth']
+        models_to_load = ['encoder', 'depth', 'confidence']
         for n in models_to_load:
-            print("Loading {} weights...".format(n))
             path = os.path.join(self.opt.load_weights_folder, "{}.pth".format(n))
-            if n in self.models:
+            if os.path.isfile(path) and n in self.models:
+                print("Loading {} weights...".format(n))
                 model_dict = self.models[n].state_dict()
                 pretrained_dict = torch.load(path)
                 pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
@@ -412,6 +408,27 @@ class Trainer:
             self.model_optimizer.load_state_dict(optimizer_dict)
         else:
             print("Cannot find Adam weights so Adam is randomly initialized")
+
+    def load_angmodel(self):
+        """Load model(s) from disk
+        """
+        self.opt.load_angweights_folder = os.path.expanduser(self.opt.load_angweights_folder)
+
+        assert os.path.isdir(self.opt.load_angweights_folder), \
+            "Cannot find folder {}".format(self.opt.load_angweights_folder)
+        print("loading model from folder {}".format(self.opt.load_angweights_folder))
+
+        models_to_load = ['angencoder', 'angdecoder']
+        pthmapping = {'angencoder': 'encoder', 'angdecoder': 'depth'}
+        for n in models_to_load:
+            path = os.path.join(self.opt.load_angweights_folder, "{}.pth".format(pthmapping[n]))
+            if os.path.isfile(path) and n in self.angmodels:
+                print("Loading {} weights...".format(n))
+                model_dict = self.angmodels[n].state_dict()
+                pretrained_dict = torch.load(path)
+                pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+                model_dict.update(pretrained_dict)
+                self.angmodels[n].load_state_dict(model_dict)
 
     def set_requires_grad(self, nets, requires_grad=False):
         """Set requies_grad=Fasle for all the networks to avoid unnecessary computations

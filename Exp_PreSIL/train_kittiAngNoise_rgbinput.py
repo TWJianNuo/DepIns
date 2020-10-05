@@ -251,7 +251,7 @@ class Trainer:
         angpred = torch.cat([inputs['angh'], inputs['angv']], dim=1)
         for scale in range(4):
             errpred = F.interpolate(outputs[('disp', scale)], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-            l1loss = l1loss + self.sfnormOptimizer.ang2err(angpred=angpred, intrinsic=inputs['K'], depthMap=inputs['depthgt'], errpred=errpred)
+            l1loss = l1loss + self.sfnormOptimizer.ang2err_loss(angpred=angpred, intrinsic=inputs['K'], depthMap=inputs['depthgt'], errpred=errpred)
 
         l1loss = l1loss / 4
         losses['noise_l1loss'] = l1loss

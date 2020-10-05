@@ -1595,7 +1595,7 @@ class SurfaceNormalOptimizer(nn.Module):
 
         return torch.stack([logh, logv], dim=1)
 
-    def ang2err(self, angpred, intrinsic, depthMap, errpred):
+    def ang2err_loss(self, angpred, intrinsic, depthMap, errpred):
         protectmin = 1e-6
 
         fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
@@ -1710,6 +1710,55 @@ class SurfaceNormalOptimizer(nn.Module):
         # ax2.plot(actnp[:-1], hist)
         # ax2.set_xlabel('Pred log value mapped Sigmoid Activation')
         # ax2.set_ylabel('Probability Density')
+        return loss
+
+    def depth2err_loss(self, depthpred, intrinsic, depthMap, errpred):
+        protectmin = 1e-6
+
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        errangacth = errpred[:, 0, :, :]
+        errangactv = errpred[:, 1, :, :]
+
+        errangh_min = 0
+        errangh_max = torch.atan2(fx, torch.ones_like(fx)) - protectmin
+
+        errangh = errangacth * (errangh_max - errangh_min) + errangh_min
+        errlogh = -torch.log(1 - torch.tan(errangh) / fx)
+        errlogh = errlogh.unsqueeze(1)
+
+        errangv_min = 0
+        errangv_max = torch.atan2(fy, torch.ones_like(fy)) - protectmin
+
+        errangv = errangactv * (errangv_max - errangv_min) + errangv_min
+        errlogv = -torch.log(1 - torch.tan(errangv) / fy)
+        errlogv = errlogv.unsqueeze(1)
+
+        depthpredl = torch.log(depthpred)
+
+        depthMapl = torch.log(torch.clamp(depthMap, min=protectmin))
+
+        vallidarmask = (depthMap > 0).float()
+
+        indh = (self.idh(vallidarmask) == 2).float()
+        indv = (self.idv(vallidarmask) == 2).float()
+
+        inth = self.gth(depthpredl)
+        gth = self.gth(depthMapl)
+        gtherr = torch.abs(inth - gth)
+        estherr = self.idh(errlogh)
+
+        intv = self.gtv(depthpredl)
+        gtv = self.gtv(depthMapl)
+        gtverr = torch.abs(intv - gtv)
+        estverr = self.idv(errlogv)
+
+        loss = torch.sum(torch.abs(gtherr - estherr) * indh) / torch.sum(indh) + \
+               torch.sum(torch.abs(gtverr - estverr) * indv) / torch.sum(indv)
+
+        loss = loss / 2
+
         return loss
 
     def depth2ang_log(self, depthMap, intrinsic):
