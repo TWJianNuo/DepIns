@@ -100,7 +100,7 @@ class Trainer:
 
         self.device = "cuda"
 
-        self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True, num_input_channels=5)
+        self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
         self.models["depth"] = DepthDecoder(self.models["encoder"].num_ch_enc, num_output_channels=2)
@@ -220,8 +220,8 @@ class Trainer:
             if self.step % 1 == 0:
                 self.log("train", losses)
 
-            if self.step % 2000 == 0 and self.step > 1999:
-                self.val()
+            # if self.step % 2000 == 0 and self.step > 1999:
+            #     self.val()
 
             self.step += 1
 
@@ -235,10 +235,7 @@ class Trainer:
         outputs = dict()
         losses = dict()
 
-        angAct = torch.cat([inputs['angh'], inputs['angv']], dim=1) / 2 / np.pi + 0.5
-        angAct = F.interpolate(angAct, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-        netinput = torch.cat([inputs['color_aug'], angAct], dim=1)
-        outputs.update(self.models['depth'](self.models['encoder'](netinput)))
+        outputs.update(self.models['depth'](self.models['encoder'](inputs['color_aug'])))
 
         # Noise Branch
         losses.update(self.noise_compute_losses(inputs, outputs))
@@ -265,33 +262,60 @@ class Trainer:
         """Validate the model on a single minibatch
         """
         count = 0
-        tot_loss = 0
         self.set_eval()
+        errors = list()
         with torch.no_grad():
             for batch_idx, inputs in enumerate(self.val_loader):
-                for key, ipt in inputs.items():
-                    if not key == 'tag':
-                        inputs[key] = ipt.to(self.device)
+                input_color = inputs['color'].cuda()
+                outputs = self.models['depth'](self.models['encoder'](input_color))
+                _, pred_depth = disp_to_depth(outputs[("disp", 0)], self.opt.min_depth, self.opt.max_depth)
+                pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
+                for i in range(input_color.shape[0]):
+                    gt_depth = inputs['depthgt'][i, 0, :, :].numpy()
+                    gt_height, gt_width = gt_depth.shape
+                    cur_pred_depth = pred_depth[i:i+1,:,:,:]
+                    cur_pred_depth = F.interpolate(cur_pred_depth, [gt_height,gt_width], mode='bilinear', align_corners=True)
+                    cur_pred_depth = cur_pred_depth[0,0,:,:].cpu().numpy()
 
-                losses = dict()
-                angAct = torch.cat([inputs['angh'], inputs['angv']], dim=1) / 2 / np.pi + 0.5
-                angAct = F.interpolate(angAct, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-                netinput = torch.cat([inputs['color'], angAct], dim=1)
-                outputs = self.models['depth'](self.models['encoder'](netinput))
-                losses.update(self.noise_compute_losses(inputs, outputs))
+                    mask = np.logical_and(gt_depth > self.MIN_DEPTH, gt_depth < self.MAX_DEPTH)
+                    crop = np.array([0.40810811 * gt_height, 0.99189189 * gt_height,
+                                     0.03594771 * gt_width, 0.96405229 * gt_width]).astype(np.int32)
+                    crop_mask = np.zeros(mask.shape)
+                    crop_mask[crop[0]:crop[1], crop[2]:crop[3]] = 1
+                    mask = np.logical_and(mask, crop_mask)
 
-                tot_loss = tot_loss + float(losses["noise_l1loss"].detach().cpu().numpy())
-                count = count + 1
+                    cur_pred_depth = cur_pred_depth[mask]
+                    gt_depth = gt_depth[mask]
+
+                    cur_pred_depth[cur_pred_depth < self.MIN_DEPTH] = self.MIN_DEPTH
+                    cur_pred_depth[cur_pred_depth > self.MAX_DEPTH] = self.MAX_DEPTH
+
+                    errors.append(compute_errors(gt_depth, cur_pred_depth))
+                    count = count + 1
             del inputs, outputs
-        mean_error = tot_loss / count
+        mean_errors = np.array(errors).mean(0)
 
-        if mean_error < self.minabsrel:
-            self.minabsrel = mean_error
+        if mean_errors[0] < self.minabsrel:
+            self.minabsrel_perform = mean_errors
+            self.minabsrel = mean_errors[0]
             self.save_model("best_absrel_models")
+        if mean_errors[4] > self.maxa1:
+            self.maxa1_perform = mean_errors
+            self.maxa1 = mean_errors[4]
+            self.save_model("best_a1_models")
 
-        print("\nCurrent Performance: %f" % mean_error)
+        print("\nCurrent Performance:")
+        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+        print(("&{: 8.3f}  " * 7).format(*mean_errors.tolist()) + "\\\\")
 
-        print("\nBest Absolute Relative Performance: %f" % self.minabsrel)
+        print("\nBest Absolute Relative Performance:")
+        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+        print(("&{: 8.3f}  " * 7).format(*self.minabsrel_perform.tolist()) + "\\\\")
+
+        print("\nBest A1 Relative Performance:")
+        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+        print(("&{: 8.3f}  " * 7).format(*self.maxa1_perform.tolist()) + "\\\\")
+
         self.set_train()
 
     def log_time(self, batch_idx, duration, loss_tot):
