@@ -1595,6 +1595,29 @@ class SurfaceNormalOptimizer(nn.Module):
 
         return torch.stack([logh, logv], dim=1)
 
+    def act2err(self, errpred, intrinsic):
+        protectmin = 1e-6
+
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        errangacth = errpred[:, 0, :, :]
+        errangactv = errpred[:, 1, :, :]
+
+        errangh_min = 0
+        errangh_max = torch.atan2(fx, torch.ones_like(fx)) - protectmin
+
+        errangh = errangacth * (errangh_max - errangh_min) + errangh_min
+        errlogh = -torch.log(1 - torch.tan(errangh) / fx)
+
+        errangv_min = 0
+        errangv_max = torch.atan2(fy, torch.ones_like(fy)) - protectmin
+
+        errangv = errangactv * (errangv_max - errangv_min) + errangv_min
+        errlogv = -torch.log(1 - torch.tan(errangv) / fy)
+
+        return torch.stack([errlogh, errlogv], dim=1)
+
     def ang2err_loss(self, angpred, intrinsic, depthMap, errpred):
         protectmin = 1e-6
 
@@ -1760,6 +1783,49 @@ class SurfaceNormalOptimizer(nn.Module):
         loss = loss / 2
 
         return loss
+
+    def depth2edge(self, depthMap, intrinsic):
+        ang = self.depth2ang_log(depthMap=depthMap, intrinsic=intrinsic)
+
+        protectmin = 1e-7
+
+        angh = ang[:, 0, :, :]
+        angv = ang[:, 1, :, :]
+
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+
+        a1 = ((self.yy - by) / fy)**2 + 1
+        b1 = -(self.xx - bx) / fx
+
+        a2 = ((self.yy - by) / fy)**2 + 1
+        b2 = -(self.xx + 1 - bx) / fx
+
+        a3 = torch.sin(angh)
+        b3 = -torch.cos(angh)
+
+        u1 = ((self.xx - bx) / fx)**2 + 1
+        v1 = -(self.yy - by) / fy
+
+        u2 = ((self.xx - bx) / fx)**2 + 1
+        v2 = -(self.yy + 1 - by) / fy
+
+        u3 = torch.sin(angv)
+        v3 = -torch.cos(angv)
+
+
+        logh = torch.log(torch.clamp(torch.abs(a3 * b1 - a1 * b3), min=protectmin)) - torch.log(torch.clamp(torch.abs(a3 * b2 - a2 * b3), min=protectmin))
+        logv = torch.log(torch.clamp(torch.abs(u3 * v1 - u1 * v3), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3 * v2 - u2 * v3), min=protectmin))
+        logh = logh.unsqueeze(1)
+        logv = logv.unsqueeze(1)
+
+        grad_logh = torch.abs(self.diffx_sharp(logh)) + torch.abs(self.diffy_sharp(logh))
+        grad_logv = torch.abs(self.diffx_sharp(logv)) + torch.abs(self.diffy_sharp(logv))
+
+        edge = (grad_logh > 0.01) + (grad_logv > 0.1)
+        tensor2disp(edge, vmax=1, ind=1).show()
 
     def depth2ang_log(self, depthMap, intrinsic):
         depthMaps = depthMap.squeeze(1)

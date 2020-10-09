@@ -224,14 +224,12 @@ class Trainer:
             if not key == 'tag':
                 inputs[key] = ipt.to(self.device)
 
-        inputs['anggt'] = self.sfnormOptimizer.depth2ang(inputs['depthgt'], inputs['K'])
-
-        depthtoopt = torch.clone(inputs['depthgt'])
-        depthtoopt[:, :, ::2] = 0
-        depthtoopt.requires_grad = True
-        optimizer = optim.Adam([depthtoopt], lr=1e-3)
-        for i in range(100):
-            a = 1
+        edges = self.sfnormOptimizer.depth2edge(inputs['depthgt'], inputs['K'])
+        anggradh = torch.abs(self.sfnormOptimizer.diffx_sharp(inputs['anggt'][:, 0, :, :].unsqueeze(1))) + torch.abs(self.sfnormOptimizer.diffy_sharp(inputs['anggt'][:, 0, :, :].unsqueeze(1)))
+        anggradv = torch.abs(self.sfnormOptimizer.diffy_sharp(inputs['anggt'][:, 1, :, :].unsqueeze(1))) + torch.abs(self.sfnormOptimizer.diffy_sharp(inputs['anggt'][:, 1, :, :].unsqueeze(1)))
+        tensor2disp(inputs['depthgt'], vmax=40, ind=0).show()
+        tensor2disp(anggradh, vmax=1, ind=0).show()
+        tensor2disp(anggradv, vmax=1, ind=0).show()
 
         outputs = dict()
         losses = dict()

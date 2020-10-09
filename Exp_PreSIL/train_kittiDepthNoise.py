@@ -389,7 +389,7 @@ class Trainer:
             "Cannot find folder {}".format(self.opt.load_weights_folder)
         print("loading model from folder {}".format(self.opt.load_weights_folder))
 
-        models_to_load = ['encoder', 'depth', 'confidence']
+        models_to_load = ['encoder', 'depth']
         for n in models_to_load:
             path = os.path.join(self.opt.load_weights_folder, "{}.pth".format(n))
             if os.path.isfile(path) and n in self.models:

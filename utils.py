@@ -563,3 +563,10 @@ def init_arb_mask(height, width, optimize_mask_np, fidalMask_np, horConsMask_np,
                         verConsMask_np[m, n] = True
                 if datavalmask[m, n]:
                     fidalMask_np[m, n] = True
+
+
+def acquire_dynamical_receptivefield(height, width, shapeNoiseh, shapeNoisev, depthNoiseh, depthNoisev):
+    for i in range(height):
+        for j in range(width):
+            for lh in range(i, 0):
+                 a = 1

@@ -161,7 +161,7 @@ class Trainer:
         )
 
         self.train_loader = DataLoader(
-            train_dataset, self.opt.batch_size, shuffle=True,
+            train_dataset, self.opt.batch_size, shuffle=False,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_loader = DataLoader(
             val_dataset, self.opt.batch_size, shuffle=False,
