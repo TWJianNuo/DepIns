@@ -38,8 +38,6 @@ default_logpath = os.path.join(project_rootdir, 'tmp')
 parser = argparse.ArgumentParser(description='Train Dense Depth of PreSIL Synthetic Data')
 parser.add_argument("--data_path",              type=str,                               help="path to dataset")
 parser.add_argument("--gt_path",                type=str,                               help="path to kitti gt file")
-parser.add_argument("--predang_path",           type=str,                               help="path to kitti gt file")
-parser.add_argument("--semanticspred_path",     type=str,   default='None',             help="path to kitti semantics prediction file")
 parser.add_argument("--val_gt_path",            type=str,                               help="path to validation gt file")
 parser.add_argument("--model_name",             type=str,                               help="name of the model")
 parser.add_argument("--split",                  type=str,                               help="train/val split to use")
@@ -54,8 +52,6 @@ parser.add_argument("--max_depth",              type=float, default=100.0,      
 parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
 parser.add_argument("--variancefold",           type=float, default=1)
-parser.add_argument("--threeinput",             action='store_true')
-parser.add_argument("--banshuffle",             action='store_true')
 
 
 # OPTIMIZATION options
@@ -104,18 +100,12 @@ class Trainer:
 
         self.device = "cuda"
 
-        if self.opt.threeinput:
-            self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True, num_input_channels=8)
-            self.models["encoder"].to(self.device)
-        else:
-            self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
-            self.models["encoder"].to(self.device)
+        self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
+        self.models["encoder"].to(self.device)
 
         self.parameters_to_train += list(self.models["encoder"].parameters())
         self.models["depth"] = DepthDecoder(self.models["encoder"].num_ch_enc, num_output_channels=1)
         self.models["depth"].to(self.device)
-        self.models["confidence"] = ConfidenceDecoder(self.models["encoder"].num_ch_enc, num_output_channels=1)
-        self.models["confidence"].to(self.device)
         self.parameters_to_train += list(self.models["depth"].parameters())
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1)
@@ -166,18 +156,16 @@ class Trainer:
 
         train_dataset = KittiDataset(
             self.opt.data_path, self.opt.gt_path, train_filenames, self.opt.height, self.opt.width,
-            crph=self.opt.crph, crpw=self.opt.crpw, is_train=True, predang_path=self.opt.predang_path,
-            semanticspred_path=self.opt.semanticspred_path, threeinput=self.opt.threeinput
+            crph=self.opt.crph, crpw=self.opt.crpw, is_train=True
         )
 
         val_dataset = KittiDataset(
             self.opt.data_path, self.opt.val_gt_path, val_filenames, self.opt.height, self.opt.width,
-            crph=self.opt.crph, crpw=self.opt.crpw, is_train=False, predang_path=self.opt.predang_path,
-            semanticspred_path=self.opt.semanticspred_path, threeinput=self.opt.threeinput
+            crph=self.opt.crph, crpw=self.opt.crpw, is_train=False
         )
 
         self.train_loader = DataLoader(
-            train_dataset, self.opt.batch_size, shuffle=not self.opt.banshuffle,
+            train_dataset, self.opt.batch_size, shuffle=True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_loader = DataLoader(
             val_dataset, self.opt.batch_size, shuffle=False,
@@ -251,14 +239,8 @@ class Trainer:
         outputs = dict()
         losses = dict()
 
-        if not self.opt.threeinput:
-            encoder_feature = self.models['encoder'](inputs['color_aug'])
-        else:
-            inputdata = torch.cat([inputs['color_aug'], inputs['semanticspred_cat_vls'], inputs['angh_normed'], inputs['angv_normed']], dim=1)
-            encoder_feature = self.models['encoder'](inputdata)
-
+        encoder_feature = self.models['encoder'](inputs['color_aug'])
         outputs.update(self.models['depth'](encoder_feature))
-        outputs.update(self.models['confidence'](encoder_feature))
 
         # Depth Branch
         losses.update(self.depth_compute_losses(inputs, outputs))
@@ -273,36 +255,17 @@ class Trainer:
         losses = {}
         depthloss = 0
 
-        pred_ang = torch.cat([inputs['angh'], inputs['angv']], dim=1).contiguous()
-        pred_log = self.sfnormOptimizer.ang2log(intrinsic=inputs['K'], ang=pred_ang).contiguous()
-
-        edge = self.sfnormOptimizer.ang2edge(ang=pred_ang, intrinsic=inputs['K']).int()
-        mask = torch.zeros_like(edge, dtype=torch.int)
-        mask[:, :, int(0.40810811 * self.opt.crph):int(0.99189189 * self.opt.crph), int(0.03594771 * self.opt.crpw):int(0.96405229 * self.opt.crpw)] = 1
-        mask = mask * (1 - edge)
-        mask = mask.contiguous()
-
         vallidarmask = (inputs['depthgt'] > 0).float()
         for scale in range(4):
-            pred_confidence = F.interpolate(outputs[('confidence', scale)], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-
             scaled_disp, pred_depth = disp_to_depth(outputs[('disp', scale)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
             pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
             pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
             outputs[('depth', scale)] = pred_depth
 
-            pred_depth_opted = self.integrationFunction(pred_ang, pred_log, pred_confidence, inputs['semanticspred_cat'], mask, pred_depth, self.variancebar, self.opt.crph, self.opt.crpw, self.opt.batch_size)
-            outputs[('depth_opted', scale)] = pred_depth_opted
-            mixed_depth = pred_confidence * pred_depth + (1 - pred_confidence) * pred_depth_opted
-            outputs[('mixed_depth', scale)] = mixed_depth
-
-            depthloss = depthloss + torch.sum(torch.abs(mixed_depth - inputs['depthgt']) * vallidarmask) / (torch.sum(vallidarmask) + 1)
+            depthloss = depthloss + torch.sum(torch.abs(pred_depth - inputs['depthgt']) * vallidarmask) / (torch.sum(vallidarmask) + 1)
 
         depthloss = depthloss / 4
         losses['depthloss'] = depthloss
-
-        outputs['edge'] = edge
-        outputs['mask'] = mask
 
         return losses
 
@@ -319,20 +282,14 @@ class Trainer:
                         inputs[key] = ipt.to(self.device)
 
                 outputs = dict()
-                if not self.opt.threeinput:
-                    encoder_feature = self.models['encoder'](inputs['color'])
-                else:
-                    inputdata = torch.cat([inputs['color'], inputs['semanticspred_cat_vls'], inputs['angh_normed'], inputs['angv_normed']], dim=1)
-                    encoder_feature = self.models['encoder'](inputdata)
-
+                encoder_feature = self.models['encoder'](inputs['color'])
                 outputs.update(self.models['depth'](encoder_feature))
-                outputs.update(self.models['confidence'](encoder_feature))
 
                 self.depth_compute_losses(inputs, outputs)
                 for i in range(inputs['color'].shape[0]):
                     gt_depth = inputs['depthgt'][i, 0, :, :].cpu().numpy()
                     gt_height, gt_width = gt_depth.shape
-                    cur_pred_depth = outputs[('mixed_depth', 0)][i:i+1,:,:,:].detach()
+                    cur_pred_depth = outputs[('depth', 0)][i:i+1,:,:,:].detach()
                     cur_pred_depth = F.interpolate(cur_pred_depth, [gt_height,gt_width], mode='bilinear', align_corners=True)
                     cur_pred_depth = cur_pred_depth[0,0,:,:].cpu().numpy()
 
@@ -390,26 +347,12 @@ class Trainer:
         vind = 0
 
         vlscolor = F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-        vlsconfidence = F.interpolate(outputs[('confidence', 0)], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
 
         figrgb = tensor2rgb(vlscolor, ind=vind)
-        figsemancat = tensor2semantic(inputs['semanticspred_cat'], ind=vind, shapeCat=True)
-        figseman = tensor2semantic(inputs['semanticspred'], ind=vind, shapeCat=False)
-
         figd1 = tensor2disp(1 / outputs[('depth', 0)], vmax=0.25, ind=vind)
-        figd2 = tensor2disp(1 / outputs[('depth_opted', 0)], vmax=0.25, ind=vind)
-        figd3 = tensor2disp(1 / outputs[('mixed_depth', 0)], vmax=0.25, ind=vind)
 
-        figconf = tensor2disp(vlsconfidence, vmax=1, ind=vind)
-        figedge = tensor2disp(outputs['edge'], vmax=1, ind=vind)
-        figmask = tensor2disp(outputs['mask'], vmax=1, ind=vind)
-
-        figoview = np.concatenate([np.array(figd1), np.array(figd2), np.array(figd3)], axis=0)
-        figanghoview = np.concatenate([np.array(figconf), np.array(figedge), np.array(figmask)], axis=0)
-        figangvoview = np.concatenate([np.array(figrgb), np.array(figseman), np.array(figsemancat)], axis=0)
-
-        figcombined = np.concatenate([figoview, figanghoview, figangvoview], axis=1)
-        self.writers[recoder].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
+        figoview = np.concatenate([np.array(figrgb), np.array(figd1)], axis=0)
+        self.writers[recoder].add_image('overview', (torch.from_numpy(figoview).float() / 255).permute([2, 0, 1]), self.step)
 
     def log(self, mode, losses):
         """Write an event to the tensorboard events file

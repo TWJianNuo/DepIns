@@ -27,7 +27,8 @@ class KittiDataset(data.Dataset):
                  is_train=False,
                  gt_norm_path='None',
                  semanticspred_path='None',
-                 predang_path='None'
+                 predang_path='None',
+                 threeinput=False
                  ):
         super(KittiDataset, self).__init__()
 
@@ -81,6 +82,7 @@ class KittiDataset(data.Dataset):
         self.rescaleK[0, 0] = self.width / self.crpw
         self.rescaleK[1, 1] = self.height / self.crph
 
+        self.threeinput = threeinput
 
     def preprocess(self, inputs, color_aug, rndseed):
         """Resize colour images to the required scales and augment if required
@@ -135,7 +137,11 @@ class KittiDataset(data.Dataset):
                 for l in np.unique(np.array(cropped_semanticspred_copy)):
                     cropped_semanticspred_copy[cropped_semanticspred_copy == l] = labels[l].trainId
                 inputs['semanticspred'] = torch.from_numpy(cropped_semanticspred_copy.astype(np.float32)).unsqueeze(0)
-                inputs['semanticspred_cat'] = torch.from_numpy(translateTrainIdSemantics(cropped_semanticspred_copy)).unsqueeze(0).int()
+
+                semanticspred_cat = translateTrainIdSemantics(cropped_semanticspred_copy)
+                inputs['semanticspred_cat'] = torch.from_numpy(semanticspred_cat).unsqueeze(0).int()
+                if self.threeinput:
+                    inputs['semanticspred_cat_vls'] = torch.from_numpy(np.array(visualize_semantic(semanticspred_cat, shapeCat=True).resize([self.width, self.height], pil.NEAREST))).permute([2,0,1]).float() / 255.0
 
                 for l in self.regularsemanticstype:
                     semanticsregularmask[cropped_semanticspred_copy == l] = 1
@@ -146,11 +152,18 @@ class KittiDataset(data.Dataset):
                 cropped_anghnp = np.array(cropped_angh).astype(np.float32)
                 cropped_anghnp = (cropped_anghnp / 255.0 / 255.0 - 0.5) * 2 * np.pi
                 inputs[k] = torch.from_numpy(cropped_anghnp).unsqueeze(0)
+                if self.threeinput:
+                    inputs['angh_normed'] = (F.interpolate(inputs[k].unsqueeze(0), [self.height, self.width], mode='bilinear', align_corners=True) + np.pi) / 2 / np.pi
+                    inputs['angh_normed'] = inputs['angh_normed'].squeeze(0)
+
 
             elif 'angv' in k:
                 cropped_angvnp = np.array(cropped_angv).astype(np.float32)
                 cropped_angvnp = (cropped_angvnp / 255.0 / 255.0 - 0.5) * 2 * np.pi
                 inputs[k] = torch.from_numpy(cropped_angvnp).unsqueeze(0)
+                if self.threeinput:
+                    inputs['angv_normed'] = (F.interpolate(inputs[k].unsqueeze(0), [self.height, self.width], mode='bilinear', align_corners=True) + np.pi) / 2 / np.pi
+                    inputs['angv_normed'] = inputs['angv_normed'].squeeze(0)
 
     def __len__(self):
         return len(self.filenames)
