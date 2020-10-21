@@ -384,24 +384,20 @@ class Trainer:
         vind = 0
 
         vlscolor = F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
-        vlsconfidence = F.interpolate(outputs[('confidence', 0)], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
 
         figrgb = tensor2rgb(vlscolor, ind=vind)
         figsemancat = tensor2semantic(inputs['semanticspred_cat'], ind=vind, shapeCat=True)
-        figseman = tensor2semantic(inputs['semanticspred'], ind=vind, shapeCat=False)
 
         figd1 = tensor2disp(1 / outputs[('depth', 0)], vmax=0.25, ind=vind)
         figd2 = tensor2disp(1 / outputs[('depth_opted', 0)], vmax=0.25, ind=vind)
 
-        figconf = tensor2disp(vlsconfidence, vmax=1, ind=vind)
         figedge = tensor2disp(outputs['edge'], vmax=1, ind=vind)
         figmask = tensor2disp(outputs['mask'], vmax=1, ind=vind)
 
-        figoview = np.concatenate([np.array(figd1), np.array(figd2), np.array(figd2)], axis=0)
-        figanghoview = np.concatenate([np.array(figconf), np.array(figedge), np.array(figmask)], axis=0)
-        figangvoview = np.concatenate([np.array(figrgb), np.array(figseman), np.array(figsemancat)], axis=0)
+        figoview = np.concatenate([np.array(figd1), np.array(figd2), np.array(figsemancat)], axis=0)
+        figanghoview = np.concatenate([np.array(figrgb), np.array(figedge), np.array(figmask)], axis=0)
 
-        figcombined = np.concatenate([figoview, figanghoview, figangvoview], axis=1)
+        figcombined = np.concatenate([figoview, figanghoview], axis=1)
         self.writers[recoder].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
 
     def log(self, mode, losses):
