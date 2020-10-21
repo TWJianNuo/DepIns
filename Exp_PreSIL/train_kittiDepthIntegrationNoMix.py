@@ -320,7 +320,6 @@ class Trainer:
                     encoder_feature = self.models['encoder'](inputdata)
 
                 outputs.update(self.models['depth'](encoder_feature))
-                outputs.update(self.models['confidence'](encoder_feature))
 
                 self.depth_compute_losses(inputs, outputs)
                 for i in range(inputs['color'].shape[0]):
