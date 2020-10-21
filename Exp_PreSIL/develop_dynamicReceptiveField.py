@@ -77,40 +77,108 @@ class Developer:
             loghnp = loggt[0, 0, :, :].detach().cpu().numpy()
             logvnp = loggt[0, 1, :, :].detach().cpu().numpy()
             depthnp = rnddepth[0, 0, :, :].detach().cpu().numpy()
-            dynamicReceptiveField(height=self.opt.height, width=self.opt.width, logh=loghnp, logv=logvnp, depth=depthnp, sr=20)
+            anghnp = anggt[0,0,:,:].detach().cpu().numpy()
+            angvnp = anggt[0,1,:,:].detach().cpu().numpy()
+            evaluateReceptiveFieldVariance(height=self.opt.height, width=self.opt.width, logh=loghnp, logv=logvnp,
+                                           depthpredl=np.log(depthnp), depthgtl=np.log(depthnp), shapeh=anghnp, shapev=angvnp)
         return
 
-def dynamicReceptiveField(height, width, logh, logv, depth, sr):
-    for m in range(height):
-        for n in range(width):
-            # Left Direction
-            intl = 0
-            for lx in range(sr):
-                ckx = n - (lx + 1)
-                if ckx >= 0:
-                    intl = intl + logh[m, ckx]
-            refl = np.log(depth[m, n]) - np.log(depth[m, n - (lx + 1)])
+def evaluateReceptiveFieldVariance(height, width, logh, logv, depthpredl, depthgtl, shapeh, shapev):
+    m = np.random.randint(0, height)
+    n = np.random.randint(0, width)
 
-            intr = 0
-            for rx in range(sr):
-                ckx = n + (rx + 1)
-                if ckx < width:
-                    intr = intr - logh[m, ckx - 1]
-            refr = np.log(depth[m, n]) - np.log(depth[m, n + (rx + 1)])
+    inthr = 0
+    inthl = 0
+    counth = 1
+    squaresumh = shapeh[m, n] ** 2
+    sumh = shapeh[m, n]
+    breakl = False
+    breakr = False
+    le = n
+    re = n
+    for ih in range(width * 2):
+        if ih % 2 == 0:
+            if breakr:
+                continue
+            sn = n + int(ih / 2) + 1
+            if sn >= width:
+                breakr = True
+                continue
+            else:
+                inthr = inthr + logh[m, sn-1]
+                squaresumh = squaresumh + shapeh[m, sn]**2
+                sumh = sumh + shapeh[m, sn]
+                counth = counth + 1
+                varh = (squaresumh / counth - (sumh / counth) ** 2)
+                gth = depthgtl[m, sn] - depthgtl[m, n]
+                re = sn
+                assert np.abs(inthr - gth) < 1e-1
+                assert np.abs(np.var(shapeh[m, le:re+1]) - varh) < 1e-2
+        else:
+            if breakl:
+                continue
+            sn = n - int(ih / 2) - 1
+            if sn < 0:
+                breakl = True
+                continue
+            else:
+                inthl = inthl - logh[m, sn]
+                squaresumh = squaresumh + shapeh[m, sn]**2
+                sumh = sumh + shapeh[m, sn]
+                counth = counth + 1
+                varh = (squaresumh / counth - (sumh / counth) ** 2)
+                gth = depthgtl[m, sn] - depthgtl[m, n]
+                le = sn
+                assert np.abs(inthl - gth) < 1e-1
+                assert np.abs(np.var(shapeh[m, le:re+1]) - varh) < 1e-2
 
-            intu = 0
-            for ru in range(sr):
-                cky = m - (ru + 1)
-                if cky >= 0:
-                    intu = intu + logv[cky, n]
-            refu = np.log(depth[m, n]) - np.log(depth[m - (ru + 1), n])
+        intvu = 0
+        intvd = 0
+        countv = 1
+        squaresumv = shapev[m, n] ** 2
+        sumv = shapev[m, n]
+        breaku = False
+        breakd = False
+        ue = m
+        de = m
+        for iv in range(height * 2):
+            if iv % 2 == 0:
+                if breakd:
+                    continue
+                sm = m + int(iv / 2) + 1
+                if sm >= height:
+                    breakd = True
+                    continue
+                else:
+                    intvd = intvd + logv[sm-1, n]
+                    squaresumv = squaresumv + shapev[sm, n]**2
+                    sumv = sumv + shapev[sm, n]
+                    countv = countv + 1
+                    varv = (squaresumv / countv - (sumv / countv) ** 2)
+                    gtv = depthgtl[sm, n] - depthgtl[m, n]
+                    de = sm
 
-            intd = 0
-            for rd in range(sr):
-                cky = m + (rd + 1)
-                if cky < height:
-                    intd = intd - logv[cky - 1, n]
-            refr = np.log(depth[m, n]) - np.log(depth[m + (rd + 1), n])
+                    assert np.abs(intvd - gtv) < 1e-1
+                    assert np.abs(np.var(shapev[ue:de+1, n]) - varv) < 1e-2
+
+            else:
+                if breaku:
+                    continue
+                sm = m - int(iv / 2) - 1
+                if sm < 0:
+                    breaku = True
+                    continue
+                else:
+                    intvu = intvu - logv[sm, n]
+                    squaresumv = squaresumv + shapev[sm, n]**2
+                    sumv = sumv + shapev[sm, n]
+                    countv = countv + 1
+                    varv = (squaresumv / countv - (sumv / countv) ** 2)
+                    gtv = depthgtl[sm, n] - depthgtl[m, n]
+                    ue = sm
+                    assert np.abs(intvu - gtv) < 1e-1
+                    assert np.abs(np.var(shapev[ue:de+1, n]) - varv) < 1e-2
+    return
 
 if __name__ == "__main__":
     developer = Developer(parser.parse_args())

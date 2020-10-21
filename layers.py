@@ -1815,7 +1815,6 @@ class SurfaceNormalOptimizer(nn.Module):
         u3 = torch.sin(angv)
         v3 = -torch.cos(angv)
 
-
         logh = torch.log(torch.clamp(torch.abs(a3 * b1 - a1 * b3), min=protectmin)) - torch.log(torch.clamp(torch.abs(a3 * b2 - a2 * b3), min=protectmin))
         logv = torch.log(torch.clamp(torch.abs(u3 * v1 - u1 * v3), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3 * v2 - u2 * v3), min=protectmin))
         logh = logh.unsqueeze(1)
@@ -1826,6 +1825,27 @@ class SurfaceNormalOptimizer(nn.Module):
 
         edge = (grad_logh > 0.01) + (grad_logv > 0.1)
         tensor2disp(edge, vmax=1, ind=1).show()
+
+    def ang2edge(self, ang, intrinsic):
+        # anghthreshold = 2e-1
+        # angvthreshold = 3e-1
+        anghthreshold = 2e-1
+        angvthreshold = 1.5e-1
+
+        angh = ang[:, 0, :, :].unsqueeze(1)
+        angv = ang[:, 1, :, :].unsqueeze(1)
+
+        # grad_angh = torch.abs(self.diffx_sharp(angh)) + torch.abs(self.diffy_sharp(angh))
+        # grad_angv = torch.abs(self.diffx_sharp(angv)) + torch.abs(self.diffy_sharp(angv))
+        grad_angh = torch.abs(self.diffx(angh))
+        grad_angv = torch.abs(self.diffy(angv))
+
+        edge = (grad_angh > anghthreshold) + (grad_angv > angvthreshold)
+        # tensor2disp(grad_angh > 2e-1, vmax=1, ind=0).show()
+        # tensor2disp(grad_angv > 3e-1, vmax=1, ind=0).show()
+        # tensor2disp(edge, vmax=1, ind=0).show()
+
+        return edge
 
     def depth2ang_log(self, depthMap, intrinsic):
         depthMaps = depthMap.squeeze(1)

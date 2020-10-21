@@ -15,7 +15,7 @@ from six.moves import urllib
 import matplotlib.patches as patches
 import torch
 import torch.nn.functional as F
-from kitti_utils import name2label, trainId2label
+from kitti_utils import name2label, trainId2label, shapecats
 from collections import Counter
 from numba import njit, prange
 import numba
@@ -148,19 +148,31 @@ def set_axes_equal(ax):
     ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
 
-def visualize_semantic(img_inds):
-    # please input numpy array
+def visualize_semantic(img_inds, shapeCat=False):
     size = [img_inds.shape[1], img_inds.shape[0]]
-    background = name2label['unlabeled'].color
+    if not shapeCat:
+        colordict = name2label
+        background = name2label['unlabeled'].color
+    else:
+        colordict = shapecats
+        background = shapecats[0].color
     labelImg = np.array(pil.new("RGB", size, background))
-    for id in trainId2label.keys():
-        if id >= 0:
-            label = trainId2label[id].name
-        else:
-            label = 'unlabeled'
-        color = name2label[label].color
-        mask = img_inds == id
-        labelImg[mask, :] = color
+
+    if not shapeCat:
+        for id in trainId2label.keys():
+            if id >= 0:
+                label = trainId2label[id].name
+            else:
+                label = 'unlabeled'
+            color = name2label[label].color
+            mask = img_inds == id
+            labelImg[mask, :] = color
+    else:
+        for id in np.unique(img_inds):
+            for entry in shapecats:
+                if entry.categoryId == id:
+                    color = entry.color
+            labelImg[img_inds == id, :] = color
     return pil.fromarray(labelImg)
 
 def tensor2rgb(tensor, ind):
@@ -195,11 +207,10 @@ def tensor2disp_flat(tensor, vmax = None, percentile = None):
     slice = (cm(slice) * 255).astype(np.uint8)
     return pil.fromarray(slice[:,:,0:3])
 
-def tensor2semantic(tensor, ind, isGt = False):
+def tensor2semantic(tensor, ind=0, shapeCat=False):
     slice = tensor[ind, :, :, :]
     slice = slice[0,:,:].detach().cpu().numpy()
-    # visualize_semantic(slice).show()
-    return visualize_semantic(slice)
+    return visualize_semantic(slice, shapeCat)
 
 def tensor2grad(gradtensor, percentile=95, pos_bar=0, neg_bar=0, viewind=0):
     cm = plt.get_cmap('bwr')
@@ -357,216 +368,3 @@ def gkern(kernlen=21, nsig=3):
     kernel_raw = np.sqrt(np.outer(kern1d, kern1d))
     kernel = kernel_raw/kernel_raw.sum()
     return kernel
-
-@numba.jit(nopython=True, parallel=False)
-def recover_depth_from_theta(debias_ratiohl, depthmap, recovered_depth, optimize_mask, height, width):
-    for i in range(height):
-        recovered_depth[i, 0] = depthmap[i, 0]
-    for i in range(height):
-        for j in range(1,width):
-            if optimize_mask[i, j] > 0:
-                recovered_depth[i, j] = recovered_depth[i,j-1] * np.exp(debias_ratiohl[i,j-1])
-            else:
-                recovered_depth[i, j] = depthmap[i,j]
-
-@numba.jit(nopython=True)
-def ptsldist(x1, y1, x2, y2, xck, yck):
-    px = x2-x1
-    py = y2-y1
-
-    norm = px*px + py*py
-
-    u = ((xck - x1) * px + (yck - y1) * py) / float(norm)
-
-    if u > 1:
-        u = 1
-    elif u < 0:
-        u = 0
-
-    x = x1 + u * px
-    y = y1 + u * py
-
-    dx = x - xck
-    dy = y - yck
-
-    dist = np.sqrt(dx*dx + dy*dy)
-
-    return dist
-
-@numba.jit(nopython=True, parallel=True)
-def suppress_triangle(triangles, xloc, yloc, inited_fidalmask, inited_consmask, height, width):
-    for i in range(triangles.shape[0]):
-
-        ptxs = xloc[triangles[i]] + 1e-3
-        ptys = yloc[triangles[i]] + 1e-3
-
-        minx = int(np.floor(np.min(ptxs)))
-        maxx = int(np.ceil(np.max(ptxs)))
-
-        miny = int(np.floor(np.min(ptys)))
-        maxy = int(np.ceil(np.max(ptys)))
-
-        area = 0.5 * (-ptys[1] * ptxs[2] + ptys[0] * (-ptxs[1] + ptxs[2]) + ptxs[0] * (ptys[1] - ptys[2]) + ptxs[1] * ptys[2])
-
-        insidepts = list()
-        edgepts = list()
-
-        for m in range(miny, maxy + 1):
-            for n in range(minx, maxx + 1):
-                my = m
-                nx = n
-                s = 1 / (2 * area) * (ptys[0] * ptxs[2] - ptxs[0] * ptys[2] + (ptys[2] - ptys[0]) * nx + (ptxs[0] - ptxs[2]) * my)
-                t = 1 / (2 * area) * (ptxs[0] * ptys[1] - ptys[0] * ptxs[1] + (ptys[0] - ptys[1]) * nx + (ptxs[1] - ptxs[0]) * my)
-
-                isOnedge = ptsldist(ptxs[0], ptys[0], ptxs[1], ptys[1], nx, my) < 0.5 or \
-                           ptsldist(ptxs[1], ptys[1], ptxs[2], ptys[2], nx, my) < 0.5 or \
-                           ptsldist(ptxs[2], ptys[2], ptxs[0], ptys[0], nx, my) < 0.5
-
-                isInRange = m < height and n < width and m >= 0 and n >= 0
-
-                if isInRange:
-                    if isOnedge:
-                        edgepts.append((n, m))
-
-                    elif s >= 0 and t >= 0 and 1 - (s + t) >= 0:
-                        insidepts.append((n, m))
-
-        for k in range(len(edgepts)):
-            inited_consmask[edgepts[k][1], edgepts[k][0]] = True
-
-        if len(insidepts) > 1:
-            rndpt = insidepts[np.random.randint(len(insidepts))]
-            inited_fidalmask[rndpt[1], rndpt[0]] = True
-
-
-@numba.jit(nopython=True, parallel=False)
-def init_a_meshed_triangle(triangles, xloc, yloc, height, width, initind, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, tmp_rec):
-    # First Forward Pass, find out all pixel inside the triangulation
-    i = initind
-
-    ptxs = xloc[triangles[i]] + 1e-3 # break the tie
-    ptys = yloc[triangles[i]] + 1e-3 # break the tie
-
-    minx = int(np.floor(np.min(ptxs)))
-    maxx = int(np.ceil(np.max(ptxs)))
-
-    miny = int(np.floor(np.min(ptys)))
-    maxy = int(np.ceil(np.max(ptys)))
-
-    area = 0.5 * (-ptys[1] * ptxs[2] + ptys[0] * (-ptxs[1] + ptxs[2]) + ptxs[0] * (ptys[1] - ptys[2]) + ptxs[1] * ptys[2])
-
-    insideptscount = 0
-
-    for m in range(miny, maxy + 1):
-        for n in range(minx, maxx + 1):
-            my = m
-            nx = n
-            s = 1 / (2 * area) * (ptys[0] * ptxs[2] - ptxs[0] * ptys[2] + (ptys[2] - ptys[0]) * nx + (ptxs[0] - ptxs[2]) * my)
-            t = 1 / (2 * area) * (ptxs[0] * ptys[1] - ptys[0] * ptxs[1] + (ptys[0] - ptys[1]) * nx + (ptxs[1] - ptxs[0]) * my)
-            isInRange = m < height and n < width and m >= 0 and n >= 0
-
-            if isInRange:
-                if s >= 0 and t >= 0 and 1 - (s + t) >= 0:
-                    tmp_rec[m, n] = initind
-                    insideptscount = insideptscount + 1
-
-    fidalptcount = 0
-    fidalpttoset = np.random.randint(insideptscount + 1)
-
-    if insideptscount > 1:
-        for m in range(miny, maxy + 1):
-            for n in range(minx, maxx + 1):
-                isInRange = m < height and n < width and m >= 0 and n >= 0
-                if isInRange:
-                    if tmp_rec[m, n] == initind:
-                        optimize_mask_np[m, n] = True
-                        if tmp_rec[m, n+1] == initind:
-                            horConsMask_np[m, n] = True
-                        if tmp_rec[m+1, n] == initind:
-                            verConsMask_np[m, n] = True
-                        if fidalptcount == fidalpttoset:
-                            fidalMask_np[m, n] = True
-                        fidalptcount = fidalptcount + 1
-
-    # plt.figure()
-    # plt.plot([ptxs[0], ptxs[1], ptxs[2], ptxs[0]], [ptys[0], ptys[1], ptys[2], ptys[0]])
-    # plt.scatter(np.array(insidepts)[:,0], np.array(insidepts)[:,1])
-
-
-@numba.jit(nopython=True, parallel=False)
-def init_a_halfilled_meshed_triangle(triangles, xloc, yloc, height, width, initind, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, tmp_rec, randmtx):
-    # First Forward Pass, find out all pixel inside the triangulation
-    i = initind
-
-    ptxs = xloc[triangles[i]] + 1e-3 # break the tie
-    ptys = yloc[triangles[i]] + 1e-3 # break the tie
-
-    minx = int(np.floor(np.min(ptxs)))
-    maxx = int(np.ceil(np.max(ptxs)))
-
-    miny = int(np.floor(np.min(ptys)))
-    maxy = int(np.ceil(np.max(ptys)))
-
-    area = 0.5 * (-ptys[1] * ptxs[2] + ptys[0] * (-ptxs[1] + ptxs[2]) + ptxs[0] * (ptys[1] - ptys[2]) + ptxs[1] * ptys[2])
-
-    insideptscount = 0
-
-    for m in range(miny, maxy + 1):
-        for n in range(minx, maxx + 1):
-            my = m
-            nx = n
-            s = 1 / (2 * area) * (ptys[0] * ptxs[2] - ptxs[0] * ptys[2] + (ptys[2] - ptys[0]) * nx + (ptxs[0] - ptxs[2]) * my)
-            t = 1 / (2 * area) * (ptxs[0] * ptys[1] - ptys[0] * ptxs[1] + (ptys[0] - ptys[1]) * nx + (ptxs[1] - ptxs[0]) * my)
-            isInRange = m < height and n < width and m >= 0 and n >= 0
-
-            if isInRange:
-                if s >= 0 and t >= 0 and 1 - (s + t) >= 0:
-                    tmp_rec[m, n] = initind
-                    insideptscount = insideptscount + 1
-
-    fidalptcount = 0
-    fidalpttoset = np.random.randint(insideptscount + 1)
-
-    if insideptscount > 1:
-        for m in range(miny, maxy + 1):
-            for n in range(minx, maxx + 1):
-                isInRange = m < height and n < width and m >= 0 and n >= 0
-                if isInRange:
-                    if tmp_rec[m, n] == initind:
-                        optimize_mask_np[m, n] = True
-                        if tmp_rec[m, n+1] == initind:
-                            horConsMask_np[m, n] = True
-                        if tmp_rec[m+1, n] == initind:
-                            verConsMask_np[m, n] = True
-                        if fidalptcount == fidalpttoset:
-                            fidalMask_np[m, n] = True
-                        # if tmp_rec[m+1, n] != initind or tmp_rec[m-1, n] != initind or tmp_rec[m, n+1] != initind or tmp_rec[m, n-1] != initind:
-                        #     fidalMask_np[m, n] = True
-                        # fidalMask_np[m, n] = True
-                        fidalptcount = fidalptcount + 1
-
-
-    # plt.figure()
-    # plt.plot([ptxs[0], ptxs[1], ptxs[2], ptxs[0]], [ptys[0], ptys[1], ptys[2], ptys[0]])
-    # plt.scatter(np.array(insidepts)[:,0], np.array(insidepts)[:,1])
-
-@numba.jit(nopython=True, parallel=False)
-def init_arb_mask(height, width, optimize_mask_np, fidalMask_np, horConsMask_np, verConsMask_np, datavalmask):
-    for m in range(0, height):
-        for n in range(0, width):
-            if optimize_mask_np[m, n]:
-                if n + 1 < width:
-                    if optimize_mask_np[m, n+1]:
-                        horConsMask_np[m, n] = True
-                if m + 1 < height:
-                    if optimize_mask_np[m+1, n]:
-                        verConsMask_np[m, n] = True
-                if datavalmask[m, n]:
-                    fidalMask_np[m, n] = True
-
-
-def acquire_dynamical_receptivefield(height, width, shapeNoiseh, shapeNoisev, depthNoiseh, depthNoisev):
-    for i in range(height):
-        for j in range(width):
-            for lh in range(i, 0):
-                 a = 1

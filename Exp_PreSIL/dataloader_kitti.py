@@ -5,7 +5,7 @@ import random
 import numpy as np
 import copy
 from PIL import Image, ImageFile
-from kitti_utils import read_calib_file, labels
+from kitti_utils import read_calib_file, labels, translateTrainIdSemantics
 
 import torch.utils.data as data
 from torchvision import transforms
@@ -134,11 +134,13 @@ class KittiDataset(data.Dataset):
                 semanticsregularmask = np.zeros_like(cropped_semanticspred, dtype=np.float32)
                 for l in np.unique(np.array(cropped_semanticspred_copy)):
                     cropped_semanticspred_copy[cropped_semanticspred_copy == l] = labels[l].trainId
-                inputs[k] = torch.from_numpy(cropped_semanticspred_copy.astype(np.float32)).unsqueeze(0)
+                inputs['semanticspred'] = torch.from_numpy(cropped_semanticspred_copy.astype(np.float32)).unsqueeze(0)
+                inputs['semanticspred_cat'] = torch.from_numpy(translateTrainIdSemantics(cropped_semanticspred_copy)).unsqueeze(0).int()
 
                 for l in self.regularsemanticstype:
                     semanticsregularmask[cropped_semanticspred_copy == l] = 1
                 inputs['semanticsregularmask'] = torch.from_numpy(semanticsregularmask).unsqueeze(0)
+
 
             elif 'angh' in k:
                 cropped_anghnp = np.array(cropped_angh).astype(np.float32)

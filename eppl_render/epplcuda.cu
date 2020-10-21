@@ -9,6 +9,7 @@
 
 #include <math_constants.h>
 
+
 namespace {
 
 template <typename scalar_t>

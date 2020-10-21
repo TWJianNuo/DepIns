@@ -3,9 +3,8 @@ from __future__ import absolute_import, division, print_function
 import os
 import numpy as np
 from collections import Counter
-
 from collections import namedtuple
-
+import torch
 
 #--------------------------------------------------------------------------------
 # Definitions
@@ -204,3 +203,52 @@ def generate_depth_map(calib_dir, velo_filename, cam=2, vel_depth=False):
     depth[depth < 0] = 0
 
     return depth
+
+ShapeCat = namedtuple('ShapeCat' , [
+    'name',         # The identifier of this catogery
+    'trainId',      # Original TrainID this catogery
+    'categoryId',   # New assigned CategoryID specified to a vector
+    'varianceBar',  # Variance Bar to stop receptive field
+    'color',        # Color for visualization
+    ])
+
+shapecats = [
+    ShapeCat(['road', 'sidewalk', 'terrain', 'sky'],        [0, 1, 9, 10],      0,  [-1.00,     -1.00], (0,    0,    0)),
+    ShapeCat(['building'],                                  [2],                1,  [0.010,     0.125], (70,   70,   70)),
+    ShapeCat(['wall'],                                      [3],                2,  [-1.00,     0.200], (102,  102,  156)),
+    ShapeCat(['fence'],                                     [4],                3,  [-1.00,     0.075], (190,  153,  153)),
+    ShapeCat(['pole'],                                      [5],                4,  [0.200,     0.200], (153,  153,  153)),
+    ShapeCat(['traffic light'],                             [6],                5,  [0.200,     0.100], (250,  170,  30)),
+    ShapeCat(['traffic sign'],                              [7],                6,  [0.200,     0.200], (220,  220,  0)),
+    ShapeCat(['vegetation'],                                [8],                7,  [-1.00,     0.030], (107,  142,  35)),
+    ShapeCat(['person', 'rider', 'motorcycle', 'bicycle'],  [11, 12, 17, 18],   8,  [0.200,     0.180], (220,  20,   60)),
+    ShapeCat(['car'],                                       [13],               9,  [0.020,     0.200], (0,    0,    142)),
+    ShapeCat(['truck'],                                     [14],               10, [0.075,     0.070], (0,    0,    70)),
+    ShapeCat(['bus'],                                       [15],               11, [-1.00,     0.075], (0,    60,   100)),
+    ShapeCat(['train'],                                     [16],               12, [0.050,     0.050], (0,    80,   100))
+]
+
+totcat = 19
+catmapp = dict()
+variancebar = np.zeros([len(shapecats), 2])
+for cat in shapecats:
+    for idx, entry in enumerate(cat.name):
+        for l in labels:
+            if l.name == entry:
+                assert l.trainId == cat.trainId[idx]
+                catmapp[l.trainId] = cat.categoryId
+                varh, varv = cat.varianceBar
+                variancebar[int(cat.categoryId), 0] = varh
+                variancebar[int(cat.categoryId), 1] = varv
+
+def translateTrainIdSemantics(semantics):
+    translatedSemantics = np.copy(semantics)
+    for id in np.unique(semantics):
+        translatedSemantics[semantics == id] = catmapp[id]
+    return translatedSemantics
+
+def translateTrainIdSemanticsTorch(semantics):
+    translatedSemantics = torch.clone(semantics)
+    for id in torch.unique(semantics):
+        translatedSemantics[semantics == id] = catmapp[int(id.detach().cpu().numpy())]
+    return translatedSemantics

@@ -20,7 +20,7 @@ with warnings.catch_warnings():
     else:
         from tensorboardX import SummaryWriter
 
-from Exp_PreSIL.dataloader_PreSIL import PreSILDataset
+from Exp_PreSIL.dataloader_kitti import KittiDataset
 
 import networks
 
@@ -32,20 +32,29 @@ from networks import *
 
 import argparse
 
+from kitti_utils import variancebar
+
 default_logpath = os.path.join(project_rootdir, 'tmp')
 parser = argparse.ArgumentParser(description='Train Dense Depth of PreSIL Synthetic Data')
 parser.add_argument("--data_path",              type=str,                               help="path to dataset")
+parser.add_argument("--gt_path",                type=str,                               help="path to kitti gt file")
+parser.add_argument("--predang_path",           type=str,                               help="path to kitti gt file")
+parser.add_argument("--semanticspred_path",     type=str,   default='None',             help="path to kitti semantics prediction file")
+parser.add_argument("--val_gt_path",            type=str,                               help="path to validation gt file")
 parser.add_argument("--model_name",             type=str,                               help="name of the model")
 parser.add_argument("--split",                  type=str,                               help="train/val split to use")
 parser.add_argument("--log_dir",                type=str,   default=default_logpath,    help="path to log file")
 parser.add_argument("--num_layers",             type=int,   default=18,                 help="number of resnet layers", choices=[18, 34, 50, 101, 152])
-parser.add_argument("--height",                 type=int,   default=192,                help="input image height")
-parser.add_argument("--width",                  type=int,   default=640,                help="input image width")
+parser.add_argument("--height",                 type=int,   default=320,                help="input image height")
+parser.add_argument("--width",                  type=int,   default=1024,               help="input image width")
+parser.add_argument("--crph",                   type=int,   default=365,                help="cropped image height")
+parser.add_argument("--crpw",                   type=int,   default=1220,               help="cropped image width")
 parser.add_argument("--min_depth",              type=float, default=0.1,                help="minimum depth")
 parser.add_argument("--max_depth",              type=float, default=100.0,              help="maximum depth")
 parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
-parser.add_argument("--intloss",                action="store_true")
+parser.add_argument("--variancefold",           type=float, default=1)
+
 
 # OPTIMIZATION options
 parser.add_argument("--batch_size",             type=int,   default=12,                 help="batch size")
@@ -96,8 +105,10 @@ class Trainer:
         self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
-        self.models["depth"] = DepthDecoder(self.models["encoder"].num_ch_enc, num_output_channels=2)
+        self.models["depth"] = DepthDecoder(self.models["encoder"].num_ch_enc, num_output_channels=1)
         self.models["depth"].to(self.device)
+        self.models["confidence"] = ConfidenceDecoder(self.models["encoder"].num_ch_enc, num_output_channels=1)
+        self.models["confidence"].to(self.device)
         self.parameters_to_train += list(self.models["depth"].parameters())
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1)
@@ -124,31 +135,41 @@ class Trainer:
         self.MIN_DEPTH = 1e-3
         self.MAX_DEPTH = 80
 
-        self.best_abs = 1e10
+        self.minabsrel = 1e10
+        self.maxa1 = -1e10
 
-        self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.height, width=self.opt.width, batch_size=self.opt.batch_size).cuda()
+        self.STEREO_SCALE_FACTOR = 5.4
 
+        self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size).cuda()
+
+        self.variancebar = torch.from_numpy(variancebar).cuda().float()
+        self.variancebar[self.variancebar > 0] = self.variancebar[self.variancebar > 0] / self.opt.variancefold
+
+        from integrationModule import IntegrationFunction
+        self.integrationFunction = IntegrationFunction.apply
     def set_dataset(self):
         """properly handle multiple dataset situation
         """
 
         fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", self.opt.split, "{}_files.txt")
-        test_fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", self.opt.split, "val_files.txt")
+        test_fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", "eigen", "test_files.txt")
         train_filenames = readlines(fpath.format("train"))
         val_filenames = readlines(test_fpath)
 
-        train_dataset = PreSILDataset(
-            self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
-            is_train=True
+        train_dataset = KittiDataset(
+            self.opt.data_path, self.opt.gt_path, train_filenames, self.opt.height, self.opt.width,
+            crph=self.opt.crph, crpw=self.opt.crpw, is_train=True, predang_path=self.opt.predang_path,
+            semanticspred_path=self.opt.semanticspred_path
         )
 
-        val_dataset = PreSILDataset(
-            self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
-            is_train=False
+        val_dataset = KittiDataset(
+            self.opt.data_path, self.opt.val_gt_path, val_filenames, self.opt.height, self.opt.width,
+            crph=self.opt.crph, crpw=self.opt.crpw, is_train=False, predang_path=self.opt.predang_path,
+            semanticspred_path=self.opt.semanticspred_path
         )
 
         self.train_loader = DataLoader(
-            train_dataset, self.opt.batch_size, shuffle=True,
+            train_dataset, self.opt.batch_size, shuffle=False,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_loader = DataLoader(
             val_dataset, self.opt.batch_size, shuffle=False,
@@ -178,7 +199,7 @@ class Trainer:
         self.start_time = time.time()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
-            self.save_model("weight_{}".format(self.epoch))
+            self.save_model("weights_{}".format(self.epoch))
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -204,8 +225,8 @@ class Trainer:
             if self.step % 100 == 0:
                 self.log_time(batch_idx, duration, losses["totLoss"])
 
-            if self.step % 100 == 0:
-                self.log("train", inputs, outputs, losses, writeImage=False)
+            if self.step % 1 == 0:
+                self.log("train", losses)
 
             if self.step % 2000 == 0 and self.step > 1999:
                 self.val()
@@ -219,128 +240,123 @@ class Trainer:
             if not key == 'tag':
                 inputs[key] = ipt.to(self.device)
 
-        inputs['anggt'] = self.sfnormOptimizer.depth2ang_log(inputs["depthgt"], inputs["K"])
-
-        confidence = torch.ones_like(inputs['depthgt'])
-        seedDepth = torch.rand_like(inputs['depthgt']) * 10 + inputs["depthgt"]
-        seedDepth.requires_grad = True
-        optimizer = torch.optim.Adam([seedDepth], lr=1e-1)
-        from integrationModule import IntegrationFunction
-        integrateFunction = IntegrationFunction.apply
-
-        from kitti_utils import translateTrainIdSemanticsTorch, variancebar
-        variancebar = torch.from_numpy(variancebar).float().cuda()
-        variancebar = torch.ones_like(variancebar) * 0.01
-        gtlog = self.sfnormOptimizer.ang2log(ang=inputs['anggt'], intrinsic=inputs['K'])
-        semantics = torch.ones_like(inputs["depthgt"]).int().contiguous()
-        mask = torch.ones_like(inputs["depthgt"]).int().contiguous()
-        for i in range(200):
-            optedDepth = integrateFunction(inputs['anggt'], gtlog, confidence, semantics, mask, seedDepth, variancebar, self.opt.height, self.opt.width, self.opt.batch_size)
-            loss = torch.mean(torch.abs(optedDepth - inputs['depthgt']))
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            print('Iteration: %d, loss: %f' % (i, float(loss.detach().cpu().numpy())))
-
-        fig1 = tensor2disp(1/seedDepth, vmax=0.3, ind=0)
-        fig2 = tensor2disp(1/optedDepth, vmax=0.3, ind=0)
-        fig = np.concatenate([np.array(fig1), np.array(fig2)], axis=0)
-        pil.fromarray(fig).save('/home/shengjie/Desktop/2020_10/2020_10_21/2.png')
-
-        # from kitti_utils import translateTrainIdSemanticsTorch, variancebar
-        # import shapeintegration_cuda
-        # variancebar = torch.from_numpy(variancebar).float().cuda()
-        # variancebar = torch.ones_like(variancebar) * 1e6
-        # gtlog = self.sfnormOptimizer.ang2log(ang=inputs['anggt'], intrinsic=inputs['K'])
-        # confidence = torch.ones_like(inputs["depthgt"]).contiguous()
-        # semantics = torch.ones_like(inputs["depthgt"]).int().contiguous()
-        # mask = torch.ones_like(inputs["depthgt"]).int().contiguous()
-        # pred_depth = torch.rand_like(inputs["depthgt"]).contiguous() * 30
-        #
-        # errrec = list()
-        # for i in range(100):
-        #     integrated_depth = torch.zeros_like(pred_depth)
-        #     shapeintegration_cuda.shapeIntegration_forward(inputs['anggt'].contiguous(), gtlog, confidence, semantics, mask, pred_depth,
-        #                                                    integrated_depth, variancebar, self.opt.height, self.opt.width,
-        #                                                    self.opt.batch_size)
-        #     errrec.append(float(torch.mean(torch.abs(inputs['anggt'] - self.sfnormOptimizer.depth2ang_log(depthMap=integrated_depth, intrinsic=inputs['K']))).detach().cpu().numpy()))
-        #     pred_depth = integrated_depth.clone()
-        #     print('iteration :%d finished' % i)
-        #
-        # plt.figure()
-        # plt.plot(list(range(100)), errrec)
-        # plt.xlabel('Iteration time')
-        # plt.ylabel('Error in shape')
-        # plt.title('Random depth constrained by shape')
-        # tensor2disp(1/integrated_depth, percentile=90, ind=0).show()
-        #
-        # tensor2rgb(inputs['color'], ind=0).show()
-
         outputs = dict()
         losses = dict()
 
-        outputs.update(self.models['depth'](self.models['encoder'](inputs['color_aug'])))
+        encoder_feature = self.models['encoder'](inputs['color_aug'])
+        outputs.update(self.models['depth'](encoder_feature))
+        outputs.update(self.models['confidence'](encoder_feature))
 
-        # Ang Branch
-        losses.update(self.ang_compute_losses(inputs, outputs, intloss=self.opt.intloss))
+        # Depth Branch
+        losses.update(self.depth_compute_losses(inputs, outputs))
 
-        losses['totLoss'] = losses['ang_l1loss']
+        losses['totLoss'] = losses['depthloss']
+
         return outputs, losses
 
-    def ang_compute_losses(self, inputs, outputs, intloss=False):
+    def depth_compute_losses(self, inputs, outputs):
         """Compute the reprojection and smoothness losses for a minibatch
         """
         losses = {}
-        l1loss = 0
-        for scale in range(4):
-            predang = (outputs[('disp', scale)] - 0.5) * 2 * np.pi
-            predang = F.interpolate(predang, [self.opt.height, self.opt.width], mode='bilinear', align_corners=True)
-            if not intloss:
-                l1loss = l1loss + torch.mean(torch.abs(predang - inputs['anggt']))
-            else:
-                integrationloss = self.sfnormOptimizer.intergrationloss_ang(predang, inputs["K"], inputs["depthgt"])
-                l1loss = l1loss + integrationloss
+        depthloss = 0
 
-        l1loss = l1loss / 4
-        losses['ang_l1loss'] = l1loss
+        pred_ang = torch.cat([inputs['angh'], inputs['angv']], dim=1).contiguous()
+        pred_log = self.sfnormOptimizer.ang2log(intrinsic=inputs['K'], ang=pred_ang).contiguous()
+
+        edge = self.sfnormOptimizer.ang2edge(ang=pred_ang, intrinsic=inputs['K']).int()
+        mask = torch.zeros_like(edge, dtype=torch.int)
+        mask[:, :, int(0.40810811 * self.opt.crph):int(0.99189189 * self.opt.crph), int(0.03594771 * self.opt.crpw):int(0.96405229 * self.opt.crpw)] = 1
+        mask = mask * (1 - edge)
+        mask = mask.contiguous()
+
+        vallidarmask = (inputs['depthgt'] > 0).float()
+        for scale in range(4):
+            pred_confidence = F.interpolate(outputs[('confidence', scale)], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+
+            scaled_disp, pred_depth = disp_to_depth(outputs[('disp', scale)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
+            pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+            pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
+            outputs[('depth', scale)] = pred_depth
+
+            pred_depth_opted = self.integrationFunction(pred_ang, pred_log, pred_confidence, inputs['semanticspred_cat'], mask, pred_depth, self.variancebar, self.opt.crph, self.opt.crpw, self.opt.batch_size)
+            outputs[('depth_opted', scale)] = pred_depth_opted
+            mixed_depth = pred_confidence * pred_depth + (1 - pred_confidence) * pred_depth_opted
+            outputs[('mixed_depth', scale)] = mixed_depth
+
+            depthloss = depthloss + torch.sum(torch.abs(mixed_depth - inputs['depthgt']) * vallidarmask) / (torch.sum(vallidarmask) + 1)
+
+        depthloss = depthloss / 4
+        losses['depthloss'] = depthloss
+
+        outputs['edge'] = edge
+        outputs['mask'] = mask
 
         return losses
 
     def val(self):
         """Validate the model on a single minibatch
         """
+        count = 0
         self.set_eval()
-        toterr = 0
+        errors = list()
         with torch.no_grad():
             for batch_idx, inputs in enumerate(self.val_loader):
                 for key, ipt in inputs.items():
                     if not key == 'tag':
                         inputs[key] = ipt.to(self.device)
 
-                normgt = self.sfnormOptimizer.depth2norm(inputs["depthgt"], inputs["K"])
+                outputs = dict()
+                encoder_feature = self.models['encoder'](inputs['color'])
+                outputs.update(self.models['depth'](encoder_feature))
+                outputs.update(self.models['confidence'](encoder_feature))
 
-                outputs = self.models['depth'](self.models['encoder'](inputs["color"]))
+                self.depth_compute_losses(inputs, outputs)
+                for i in range(inputs['color'].shape[0]):
+                    gt_depth = inputs['depthgt'][i, 0, :, :].cpu().numpy()
+                    gt_height, gt_width = gt_depth.shape
+                    cur_pred_depth = outputs[('mixed_depth', 0)][i:i+1,:,:,:].detach()
+                    cur_pred_depth = F.interpolate(cur_pred_depth, [gt_height,gt_width], mode='bilinear', align_corners=True)
+                    cur_pred_depth = cur_pred_depth[0,0,:,:].cpu().numpy()
 
-                predang = (outputs[('disp', 0)] - 0.5) * 2 * np.pi
-                prednorm = self.sfnormOptimizer.ang2normal(predang, inputs["K"])
+                    mask = np.logical_and(gt_depth > self.MIN_DEPTH, gt_depth < self.MAX_DEPTH)
+                    crop = np.array([0.40810811 * gt_height, 0.99189189 * gt_height,
+                                     0.03594771 * gt_width, 0.96405229 * gt_width]).astype(np.int32)
+                    crop_mask = np.zeros(mask.shape)
+                    crop_mask[crop[0]:crop[1], crop[2]:crop[3]] = 1
+                    mask = np.logical_and(mask, crop_mask)
 
-                cossim = 1 - torch.sum(prednorm * normgt, dim=1, keepdim=True)
+                    cur_pred_depth = cur_pred_depth[mask]
+                    gt_depth = gt_depth[mask]
 
-                toterr = toterr + torch.mean(cossim)
+                    cur_pred_depth[cur_pred_depth < self.MIN_DEPTH] = self.MIN_DEPTH
+                    cur_pred_depth[cur_pred_depth > self.MAX_DEPTH] = self.MAX_DEPTH
 
-                if batch_idx == 10:
-                    inputs['anggt'] = self.sfnormOptimizer.depth2ang(inputs["depthgt"], inputs["K"])
-                    self.record_img(inputs=inputs, outputs=outputs, recoder='val')
+                    errors.append(compute_errors(gt_depth, cur_pred_depth))
+                    count = count + 1
+                del inputs, outputs
+        mean_errors = np.array(errors).mean(0)
 
-            del inputs, outputs
-        mean_err = toterr / self.val_loader.__len__()
+        if mean_errors[0] < self.minabsrel:
+            self.minabsrel_perform = mean_errors
+            self.minabsrel = mean_errors[0]
+            self.save_model("best_absrel_models")
+        if mean_errors[4] > self.maxa1:
+            self.maxa1_perform = mean_errors
+            self.maxa1 = mean_errors[4]
+            self.save_model("best_a1_models")
 
-        if mean_err < self.best_abs:
-            self.best_abs = mean_err
-            self.save_model("best_abs_models")
+        print("\nCurrent Performance:")
+        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+        print(("&{: 8.3f}  " * 7).format(*mean_errors.tolist()) + "\\\\")
 
-        print("\nCurrent Performance: %f" % mean_err)
-        print("\nBest Performance: %f" % self.best_abs)
+        print("\nBest Absolute Relative Performance:")
+        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+        print(("&{: 8.3f}  " * 7).format(*self.minabsrel_perform.tolist()) + "\\\\")
+
+        print("\nBest A1 Relative Performance:")
+        print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
+        print(("&{: 8.3f}  " * 7).format(*self.maxa1_perform.tolist()) + "\\\\")
+
         self.set_train()
 
     def log_time(self, batch_idx, duration, loss_tot):
@@ -353,37 +369,31 @@ class Trainer:
         print(print_string.format(self.epoch, batch_idx, samples_per_sec, loss_tot, sec_to_hm_str(time_sofar), sec_to_hm_str(training_time_left)))
 
     def record_img(self, inputs, outputs, recoder='train'):
-        minang = - np.pi / 3 * 2
-        maxang = 2 * np.pi - np.pi / 3 * 2
         vind = 0
 
-        figrgb = tensor2rgb(inputs['color'], ind=vind)
+        vlscolor = F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+        vlsconfidence = F.interpolate(outputs[('confidence', 0)], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
 
-        fig_anghgt = tensor2disp((inputs['anggt'][:, 0:1, :, :] - minang), vmax=maxang, ind=vind)
-        fig_anghpred = tensor2disp((outputs[('disp', 0)][:, 0:1, :, :] - 0.5) * 2 * np.pi - minang, vmax=maxang, ind=vind)
+        figrgb = tensor2rgb(vlscolor, ind=vind)
+        figsemancat = tensor2semantic(inputs['semanticspred_cat'], ind=vind, shapeCat=True)
+        figseman = tensor2semantic(inputs['semanticspred'], ind=vind, shapeCat=False)
 
-        fig_angvgt = tensor2disp((inputs['anggt'][:, 1:2, :, :] - minang), vmax=maxang, ind=vind)
-        fig_angvpred = tensor2disp((outputs[('disp', 0)][:, 1:2, :, :] - 0.5) * 2 * np.pi - minang, vmax=maxang, ind=vind)
+        figd1 = tensor2disp(1 / outputs[('depth', 0)], vmax=0.25, ind=vind)
+        figd2 = tensor2disp(1 / outputs[('depth_opted', 0)], vmax=0.25, ind=vind)
+        figd3 = tensor2disp(1 / outputs[('mixed_depth', 0)], vmax=0.25, ind=vind)
 
-        normgt = self.sfnormOptimizer.ang2normal(inputs['anggt'], inputs['K'])
-        normpred = self.sfnormOptimizer.ang2normal((outputs[('disp', 0)] - 0.5) * 2 * np.pi, inputs['K'])
-        fig_normgt = tensor2rgb((normgt + 1) / 2, ind=vind)
-        fig_normpred = tensor2rgb((normpred + 1) / 2, ind=vind)
+        figconf = tensor2disp(vlsconfidence, vmax=1, ind=vind)
+        figedge = tensor2disp(outputs['edge'], vmax=1, ind=vind)
+        figmask = tensor2disp(outputs['mask'], vmax=1, ind=vind)
 
-        fig_depthgt = tensor2disp(inputs['depthgt'], vmax=40, ind=vind)
+        figoview = np.concatenate([np.array(figd1), np.array(figd2), np.array(figd3)], axis=0)
+        figanghoview = np.concatenate([np.array(figconf), np.array(figedge), np.array(figmask)], axis=0)
+        figangvoview = np.concatenate([np.array(figrgb), np.array(figseman), np.array(figsemancat)], axis=0)
 
-        figanghview = np.concatenate([np.array(figrgb), np.array(fig_anghgt), np.array(fig_anghpred)], axis=0)
-        figangvview = np.concatenate([np.array(figrgb), np.array(fig_angvgt), np.array(fig_angvpred)], axis=0)
-        fignormview = np.concatenate([np.array(figrgb), np.array(fig_normgt), np.array(fig_normpred)], axis=0)
-        figdepthview = np.concatenate([np.array(figrgb), np.array(fig_depthgt)], axis=0)
+        figcombined = np.concatenate([figoview, figanghoview, figangvoview], axis=1)
+        self.writers[recoder].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
 
-        self.writers[recoder].add_image('anghview', (torch.from_numpy(figanghview).float() / 255).permute([2, 0, 1]), self.step)
-        self.writers[recoder].add_image('angvview', (torch.from_numpy(figangvview).float() / 255).permute([2, 0, 1]), self.step)
-        self.writers[recoder].add_image('normview', (torch.from_numpy(fignormview).float() / 255).permute([2, 0, 1]), self.step)
-        self.writers[recoder].add_image('depthview', (torch.from_numpy(figdepthview).float() / 255).permute([2, 0, 1]), self.step)
-
-
-    def log(self, mode, inputs, outputs, losses, writeImage=False):
+    def log(self, mode, losses):
         """Write an event to the tensorboard events file
         """
         writer = self.writers[mode]
@@ -428,7 +438,8 @@ class Trainer:
             "Cannot find folder {}".format(self.opt.load_weights_folder)
         print("loading model from folder {}".format(self.opt.load_weights_folder))
 
-        for n in self.opt.models_to_load:
+        models_to_load = ['encoder', 'depth']
+        for n in models_to_load:
             print("Loading {} weights...".format(n))
             path = os.path.join(self.opt.load_weights_folder, "{}.pth".format(n))
             if n in self.models:
