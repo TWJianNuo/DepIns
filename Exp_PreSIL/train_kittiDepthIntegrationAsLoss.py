@@ -55,7 +55,6 @@ parser.add_argument("--print_freq",             type=int,   default=50)
 parser.add_argument("--val_frequency",          type=int,   default=10)
 parser.add_argument("--variancefold",           type=float, default=1)
 parser.add_argument("--integrationlossw",       type=float, default=1)
-parser.add_argument("--threeinput",             action='store_true')
 parser.add_argument("--banshuffle",             action='store_true')
 
 
@@ -105,12 +104,8 @@ class Trainer:
 
         self.device = "cuda"
 
-        if self.opt.threeinput:
-            self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True, num_input_channels=8)
-            self.models["encoder"].to(self.device)
-        else:
-            self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
-            self.models["encoder"].to(self.device)
+        self.models["encoder"] = networks.ResnetEncoder(self.opt.num_layers, pretrained=True)
+        self.models["encoder"].to(self.device)
 
         self.parameters_to_train += list(self.models["encoder"].parameters())
         self.models["depth"] = DepthDecoder(self.models["encoder"].num_ch_enc, num_output_channels=1)
@@ -166,13 +161,13 @@ class Trainer:
         train_dataset = KittiDataset(
             self.opt.data_path, self.opt.gt_path, train_filenames, self.opt.height, self.opt.width,
             crph=self.opt.crph, crpw=self.opt.crpw, is_train=True, predang_path=self.opt.predang_path,
-            semanticspred_path=self.opt.semanticspred_path, threeinput=self.opt.threeinput
+            semanticspred_path=self.opt.semanticspred_path
         )
 
         val_dataset = KittiDataset(
             self.opt.data_path, self.opt.val_gt_path, val_filenames, self.opt.height, self.opt.width,
             crph=self.opt.crph, crpw=self.opt.crpw, is_train=False, predang_path=self.opt.predang_path,
-            semanticspred_path=self.opt.semanticspred_path, threeinput=self.opt.threeinput
+            semanticspred_path=self.opt.semanticspred_path
         )
 
         self.train_loader = DataLoader(
@@ -250,11 +245,7 @@ class Trainer:
         outputs = dict()
         losses = dict()
 
-        if not self.opt.threeinput:
-            encoder_feature = self.models['encoder'](inputs['color_aug'])
-        else:
-            inputdata = torch.cat([inputs['color_aug'], inputs['semanticspred_cat_vls'], inputs['angh_normed'], inputs['angv_normed']], dim=1)
-            encoder_feature = self.models['encoder'](inputdata)
+        encoder_feature = self.models['encoder'](inputs['color_aug'])
 
         outputs.update(self.models['depth'](encoder_feature))
 
@@ -318,11 +309,7 @@ class Trainer:
                         inputs[key] = ipt.to(self.device)
 
                 outputs = dict()
-                if not self.opt.threeinput:
-                    encoder_feature = self.models['encoder'](inputs['color'])
-                else:
-                    inputdata = torch.cat([inputs['color'], inputs['semanticspred_cat_vls'], inputs['angh_normed'], inputs['angv_normed']], dim=1)
-                    encoder_feature = self.models['encoder'](inputdata)
+                encoder_feature = self.models['encoder'](inputs['color'])
 
                 outputs.update(self.models['depth'](encoder_feature))
                 outputs.update(self.models['confidence'](encoder_feature))
@@ -331,7 +318,7 @@ class Trainer:
                 for i in range(inputs['color'].shape[0]):
                     gt_depth = inputs['depthgt'][i, 0, :, :].cpu().numpy()
                     gt_height, gt_width = gt_depth.shape
-                    cur_pred_depth = outputs[('depth_opted', 0)][i:i+1,:,:,:].detach()
+                    cur_pred_depth = outputs[('depth', 0)][i:i+1,:,:,:].detach()
                     cur_pred_depth = F.interpolate(cur_pred_depth, [gt_height,gt_width], mode='bilinear', align_corners=True)
                     cur_pred_depth = cur_pred_depth[0,0,:,:].cpu().numpy()
 
