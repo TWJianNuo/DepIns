@@ -286,6 +286,7 @@ class Trainer:
         vallidarmask = (inputs['depthgt'] > 0).float()
         for scale in range(4):
             pred_confidence = F.interpolate(outputs[('confidence', scale)], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+            pred_confidence = torch.clamp(pred_confidence, min=0.05, max=0.95)
 
             scaled_disp, pred_depth = disp_to_depth(outputs[('disp', scale)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
             pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
