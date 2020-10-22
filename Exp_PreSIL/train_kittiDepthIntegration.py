@@ -56,6 +56,7 @@ parser.add_argument("--val_frequency",          type=int,   default=10)
 parser.add_argument("--variancefold",           type=float, default=1)
 parser.add_argument("--threeinput",             action='store_true')
 parser.add_argument("--banshuffle",             action='store_true')
+parser.add_argument("--lateconfidence",         action='store_true')
 
 
 # OPTIMIZATION options
@@ -117,9 +118,12 @@ class Trainer:
         self.parameters_to_train += list(self.models["depth"].parameters())
         self.models["confidence"] = ConfidenceDecoder(self.models["encoder"].num_ch_enc, num_output_channels=1)
         self.models["confidence"].to(self.device)
-        self.parameters_to_train += list(self.models["confidence"].parameters())
+
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1)
+
+        self.confidence_optimizer = optim.Adam(list(self.models["confidence"].parameters()), self.opt.learning_rate)
+        self.confidence_lr_scheduler = optim.lr_scheduler.StepLR(self.confidence_optimizer, self.opt.scheduler_step_size, 0.1)
 
         print("Training model named:\t", self.opt.model_name)
         print("Models and tensorboard events files are saved to:\t", self.opt.log_dir)
@@ -214,6 +218,12 @@ class Trainer:
         """Run a single epoch of training and validation
         """
         self.model_lr_scheduler.step()
+        if self.opt.lateconfidence:
+            if self.epoch >= 1:
+                self.confidence_lr_scheduler.step()
+        else:
+            self.confidence_lr_scheduler.step()
+
         self.set_train()
 
         for batch_idx, inputs in enumerate(self.train_loader):
@@ -223,7 +233,14 @@ class Trainer:
             outputs, losses = self.process_batch(inputs)
 
             self.model_optimizer.zero_grad()
+            self.confidence_optimizer.zero_grad()
             losses['totLoss'].backward()
+
+            if self.opt.lateconfidence:
+                if self.epoch >= 1:
+                    self.confidence_optimizer.step()
+            else:
+                self.confidence_optimizer.step()
             self.model_optimizer.step()
 
             duration = time.time() - before_op_time
