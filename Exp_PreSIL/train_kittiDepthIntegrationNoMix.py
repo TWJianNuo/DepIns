@@ -235,7 +235,7 @@ class Trainer:
             if self.step % 1 == 0:
                 self.log("train", losses)
 
-            if self.step % 2000 == 0 and self.step > 1999:
+            if self.step % 2000 == 0:
                 self.val()
 
             self.step += 1
