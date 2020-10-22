@@ -218,11 +218,7 @@ class Trainer:
         """Run a single epoch of training and validation
         """
         self.model_lr_scheduler.step()
-        if self.opt.lateconfidence:
-            if self.epoch >= 1:
-                self.confidence_lr_scheduler.step()
-        else:
-            self.confidence_lr_scheduler.step()
+        self.confidence_lr_scheduler.step()
 
         self.set_train()
 
