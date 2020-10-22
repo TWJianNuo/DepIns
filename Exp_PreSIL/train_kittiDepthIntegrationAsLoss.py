@@ -336,7 +336,7 @@ class Trainer:
 
                     errors.append(compute_errors(gt_depth, cur_pred_depth))
                     count = count + 1
-                del inputs, outputs
+
         mean_errors = np.array(errors).mean(0)
 
         if mean_errors[0] < self.minabsrel:
