@@ -1847,6 +1847,27 @@ class SurfaceNormalOptimizer(nn.Module):
 
         return edge
 
+    def angdepth2edge(self, ang, depth):
+        anghthreshold = 2e-1
+        angvthreshold = 1.5e-1
+        invdepththreshold = 4e-2
+
+        angh = ang[:, 0, :, :].unsqueeze(1)
+        angv = ang[:, 1, :, :].unsqueeze(1)
+
+        grad_angh = torch.abs(self.diffx(angh))
+        grad_angv = torch.abs(self.diffy(angv))
+
+        grad_depth = (torch.abs(self.diffx_sharp(depth)) + torch.abs(self.diffy_sharp(depth))) / depth
+
+        edge = (grad_angh > anghthreshold) + (grad_angv > angvthreshold) + (grad_depth > invdepththreshold)
+        # tensor2disp(grad_angh > 2e-1, vmax=1, ind=0).show()
+        # tensor2disp(grad_angv > 3e-1, vmax=1, ind=0).show()
+        # tensor2disp(edge, vmax=1, ind=0).show()
+        # tensor2disp(grad_depth > 4e-2, vmax=1, ind=0).show()
+
+        return edge
+
     def depth2ang_log(self, depthMap, intrinsic):
         depthMaps = depthMap.squeeze(1)
         fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])

@@ -46,7 +46,7 @@ def evaluate(opt):
 
     print("-> Loading weights from {}".format(opt.load_weights_folder))
 
-    filenames = readlines('/home/shengjie/Documents/Project_SemanticDepth/splits/kitti_seman_mapped2depth//train_files.txt')
+    filenames = readlines('/home/shengjie/Documents/Project_SemanticDepth/splits/kitti_seman_mapped2depth/train_files.txt')
 
     mapping = readlines(os.path.join('/home/shengjie/Documents/Project_SemanticDepth/splits', 'training_mapping.txt'))
     wins_ind = get_indwith_isntancelabel(mapping)

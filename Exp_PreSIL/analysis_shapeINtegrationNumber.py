@@ -193,31 +193,49 @@ class Trainer:
         """Compute the reprojection and smoothness losses for a minibatch
         """
         losses = {}
-
-        pred_ang = torch.cat([inputs['angh'], inputs['angv']], dim=1).contiguous()
-        pred_log = self.sfnormOptimizer.ang2log(intrinsic=inputs['K'], ang=pred_ang).contiguous()
-
-        edge = self.sfnormOptimizer.ang2edge(ang=pred_ang, intrinsic=inputs['K']).int()
-        mask = torch.zeros_like(edge, dtype=torch.int)
-        mask[:, :, int(0.40810811 * self.opt.crph) : int(0.99189189 * self.opt.crph), :] = 1
-        # mask = mask * (1 - edge)
-        mask = mask.contiguous()
-
         scale = 0
-        pred_confidence = torch.ones_like(inputs['depthgt'])
 
         scaled_disp, pred_depth = disp_to_depth(outputs[('disp', scale)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
         pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
         pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
         outputs[('depth', scale)] = pred_depth
 
-        for i in range(itnum):
-            if i == 0 or i == itnum - 1 or i == 1:
-                outputs[('depth_opted', i)] = pred_depth.clone()
-            pred_depth_opted = self.integrationFunction(pred_ang, pred_log, pred_confidence, inputs['semanticspred_cat'], mask, pred_depth, self.variancebar, self.opt.crph, self.opt.crpw, self.opt.batch_size)
-            pred_depth = pred_depth_opted.clone()
+        pred_ang = torch.cat([inputs['angh'], inputs['angv']], dim=1).contiguous()
+        pred_log = self.sfnormOptimizer.ang2log(intrinsic=inputs['K'], ang=pred_ang).contiguous()
 
-        return losses
+        edge = self.sfnormOptimizer.angdepth2edge(ang=pred_ang, depth=pred_depth).int()
+        outputs['edge'] = edge
+
+        mask = torch.zeros_like(edge, dtype=torch.int)
+        mask[:, :, int(0.40810811 * self.opt.crph) : int(0.99189189 * self.opt.crph), :] = 1
+        mask = mask * (1 - edge)
+        mask = mask.contiguous()
+
+        mask[inputs['semanticspred_cat'] == 0] = 0
+        #
+        # tensor2disp(edge, vmax=1, ind=0).show()
+        #
+        #
+        # pred_confidence = torch.ones_like(inputs['depthgt'])
+        #
+        # for i in range(itnum):
+        #     if i == 0 or i == itnum - 1 or i == 1:
+        #         outputs[('depth_opted', i)] = pred_depth.clone()
+        #     pred_depth_opted = self.integrationFunction(pred_ang, pred_log, pred_confidence, inputs['semanticspred_cat'], mask, pred_depth, self.variancebar, self.opt.crph, self.opt.crpw, self.opt.batch_size)
+        #     pred_depth = pred_depth_opted.clone()
+
+        lamb = 0.05
+        depth_optedin = pred_depth.clone()
+        depth_optedout = torch.zeros_like(depth_optedin)
+        import shapeintegration_cuda
+        for i in range(itnum):
+            if i == 0:
+                outputs[('depth_opted', i)] = depth_optedin.clone()
+            elif i == itnum - 1:
+                outputs[('depth_opted', i)] = depth_optedout.clone()
+            shapeintegration_cuda.shapeIntegration_crf_forward(pred_ang, pred_log, inputs['semanticspred_cat'], mask, pred_depth, depth_optedin, depth_optedout, self.opt.crph, self.opt.crpw, self.opt.batch_size, lamb)
+            depth_optedin = depth_optedout.clone()
+        return outputs
 
     def vls(self, itnum):
         """Validate the model on a single minibatch
@@ -241,10 +259,16 @@ class Trainer:
 
                 self.depth_compute_losses(inputs, outputs, itnum=itnum)
 
+                # figname = inputs['tag'][0].split(' ')[0].split('/')[1] + '_' + inputs['tag'][0].split(' ')[1]
+                # figedge = tensor2disp(outputs['edge'], vmax=1, ind=0)
+                # figrgb = tensor2rgb(F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True), ind=0)
+                # fig = np.concatenate([np.array(figedge), np.array(figrgb)], axis=0)
+                # pil.fromarray(fig).save(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/visualization_edge', '{}.png'.format(figname)))
+
                 sfnorm_opted_figs = list()
                 depth_opted_figs = list()
                 for i in range(itnum):
-                    if i == 0 or i == itnum - 1 or i == 1:
+                    if i == 0 or i == itnum - 1:
                         sfnorm_opted = self.sfnormOptimizer.depth2norm(outputs[('depth_opted', i)], intrinsic=inputs['K'])
                         sfnorm_opted_figs.append(np.array(tensor2rgb((sfnorm_opted + 1) / 2, ind=vind)))
 
@@ -256,7 +280,7 @@ class Trainer:
                 figanghoview = np.concatenate([sfnorm_opted_fig, depth_opted_fig], axis=1)
 
                 figname = inputs['tag'][0].split(' ')[0].split('/')[1] + '_' + inputs['tag'][0].split(' ')[1]
-                pil.fromarray(figanghoview).save(os.path.join('/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Visualizations/Project_SemanDepth/depthintegrationNum', '{}.png'.format(figname)))
+                pil.fromarray(figanghoview).save(os.path.join('/media/shengjie/disk1/visualization/integrationnumber', '{}.png'.format(figname)))
 
     def load_model(self):
         """Load model(s) from disk
@@ -280,4 +304,4 @@ class Trainer:
 
 if __name__ == "__main__":
     trainer = Trainer(parser.parse_args())
-    trainer.vls(itnum=50)
+    trainer.vls(itnum=5)

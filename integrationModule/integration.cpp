@@ -36,6 +36,19 @@ void shapeIntegration_backward_cuda(
     int bs
     );
 
+void shapeIntegration_crf_forward_cuda(
+    torch::Tensor ang,
+    torch::Tensor log,
+    torch::Tensor semantics,
+    torch::Tensor mask,
+    torch::Tensor depthin,
+    torch::Tensor depth_optedin,
+    torch::Tensor depth_optedout,
+    int height,
+    int width,
+    int bs,
+    float lambda
+    );
 // C++ interface
 
 // NOTE: AT_ASSERT has become AT_CHECK on master after 0.4.
@@ -104,7 +117,33 @@ void shapeIntegration_backward(
     return;
 }
 
+
+void shapeIntegration_crf_forward(
+    torch::Tensor ang,
+    torch::Tensor log,
+    torch::Tensor semantics,
+    torch::Tensor mask,
+    torch::Tensor depthin,
+    torch::Tensor depth_optedin,
+    torch::Tensor depth_optedout,
+    int height,
+    int width,
+    int bs,
+    float lambda
+    ) {
+    CHECK_INPUT(ang)
+    CHECK_INPUT(log)
+    CHECK_INPUT(semantics)
+    CHECK_INPUT(mask)
+    CHECK_INPUT(depthin)
+    CHECK_INPUT(depth_optedin)
+    CHECK_INPUT(depth_optedout)
+    shapeIntegration_crf_forward_cuda(ang, log, semantics, mask, depthin, depth_optedin, depth_optedout, height, width, bs, lambda);
+    return;
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("shapeIntegration_forward", &shapeIntegration_forward, "shape integration forward function");
   m.def("shapeIntegration_backward", &shapeIntegration_backward, "shape integration backward function");
+  m.def("shapeIntegration_crf_forward", &shapeIntegration_crf_forward, "crf based shape integration forward function");
 }
