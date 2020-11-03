@@ -1,1 +1,1 @@
-from epipolarminer.dataloader import PandarSet
+from epipolarminer.datasets import PandarSet
