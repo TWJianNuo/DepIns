@@ -27,8 +27,8 @@ class KittiDataset(data.Dataset):
                  is_train=False,
                  gt_norm_path='None',
                  semanticspred_path='None',
-                 predang_path='None',
-                 threeinput=False
+                 instancepred_path='None',
+                 predang_path='None'
                  ):
         super(KittiDataset, self).__init__()
 
@@ -59,6 +59,11 @@ class KittiDataset(data.Dataset):
         else:
             self.predang_path = predang_path
 
+        if instancepred_path is 'None':
+            self.instancepred_path = None
+        else:
+            self.instancepred_path = instancepred_path
+
         try:
             self.brightness = (0.8, 1.2)
             self.contrast = (0.8, 1.2)
@@ -82,8 +87,6 @@ class KittiDataset(data.Dataset):
         self.rescaleK[0, 0] = self.width / self.crpw
         self.rescaleK[1, 1] = self.height / self.crph
 
-        self.threeinput = threeinput
-
     def preprocess(self, inputs, color_aug, rndseed):
         """Resize colour images to the required scales and augment if required
 
@@ -97,8 +100,10 @@ class KittiDataset(data.Dataset):
         if 'normgt' in inputs:
             cropped_norm = self.rndcrop_color(inputs["normgt"], rndseed)
         if 'semanticspred' in inputs:
-            resized_semanticspred = inputs["semanticspred"].resize(inputs["color"].size, pil.NEAREST)
-            cropped_semanticspred = self.rndcrop_color(resized_semanticspred, rndseed)
+            cropped_semanticspred = self.rndcrop_color(inputs["semanticspred"], rndseed)
+        if 'instancepred' in inputs:
+            resized_instancepred = inputs["instancepred"].resize(inputs["color"].size, pil.NEAREST)
+            cropped_instancepred = self.rndcrop_color(resized_instancepred, rndseed)
         if 'angh' in inputs and 'angv' in inputs:
             cropped_angh = self.rndcrop_color(inputs['angh'], rndseed)
             cropped_angv = self.rndcrop_color(inputs['angv'], rndseed)
@@ -140,30 +145,23 @@ class KittiDataset(data.Dataset):
 
                 semanticspred_cat = translateTrainIdSemantics(cropped_semanticspred_copy)
                 inputs['semanticspred_cat'] = torch.from_numpy(semanticspred_cat).unsqueeze(0).int()
-                if self.threeinput:
-                    inputs['semanticspred_cat_vls'] = torch.from_numpy(np.array(visualize_semantic(semanticspred_cat, shapeCat=True).resize([self.width, self.height], pil.NEAREST))).permute([2,0,1]).float() / 255.0
 
                 for l in self.regularsemanticstype:
                     semanticsregularmask[cropped_semanticspred_copy == l] = 1
                 inputs['semanticsregularmask'] = torch.from_numpy(semanticsregularmask).unsqueeze(0)
 
+            elif "instancepred" in k:
+                inputs['instancepred'] = torch.from_numpy(np.array(cropped_instancepred).astype(np.float32)).unsqueeze(0)
 
             elif 'angh' in k:
                 cropped_anghnp = np.array(cropped_angh).astype(np.float32)
                 cropped_anghnp = (cropped_anghnp / 255.0 / 255.0 - 0.5) * 2 * np.pi
                 inputs[k] = torch.from_numpy(cropped_anghnp).unsqueeze(0)
-                if self.threeinput:
-                    inputs['angh_normed'] = (F.interpolate(inputs[k].unsqueeze(0), [self.height, self.width], mode='bilinear', align_corners=True) + np.pi) / 2 / np.pi
-                    inputs['angh_normed'] = inputs['angh_normed'].squeeze(0)
-
 
             elif 'angv' in k:
                 cropped_angvnp = np.array(cropped_angv).astype(np.float32)
                 cropped_angvnp = (cropped_angvnp / 255.0 / 255.0 - 0.5) * 2 * np.pi
                 inputs[k] = torch.from_numpy(cropped_angvnp).unsqueeze(0)
-                if self.threeinput:
-                    inputs['angv_normed'] = (F.interpolate(inputs[k].unsqueeze(0), [self.height, self.width], mode='bilinear', align_corners=True) + np.pi) / 2 / np.pi
-                    inputs['angv_normed'] = inputs['angv_normed'].squeeze(0)
 
     def __len__(self):
         return len(self.filenames)
@@ -250,6 +248,9 @@ class KittiDataset(data.Dataset):
         if self.predang_path is not None:
             inputs.update(self.get_angpred(folder, frame_index, side, do_flip))
 
+        if self.instancepred_path is not None:
+            inputs['instancepred'] = self.get_instancepred(folder, frame_index, side, do_flip)
+
         # intrinsic parameter
         inputs['K'] = self.get_intrinsic(folder, side)
 
@@ -299,6 +300,12 @@ class KittiDataset(data.Dataset):
 
     def get_semanticspred(self, folder, frame_index, side, do_flip):
         semanticspred = pil.open(os.path.join(self.semanticspred_path, folder, 'semantic_prediction', self.dirmapping[side], "{}.png".format(str(frame_index).zfill(10))))
+        if do_flip:
+            semanticspred = semanticspred.transpose(Image.FLIP_LEFT_RIGHT)
+        return semanticspred
+
+    def get_instancepred(self, folder, frame_index, side, do_flip):
+        semanticspred = pil.open(os.path.join(self.instancepred_path, folder, self.dirmapping[side], "{}.png".format(str(frame_index).zfill(10))))
         if do_flip:
             semanticspred = semanticspred.transpose(Image.FLIP_LEFT_RIGHT)
         return semanticspred
