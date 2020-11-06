@@ -1,1 +1,1 @@
-from .integration import IntegrationFunction
+from .integration import IntegrationFunction, IntegrationConstrainFunction

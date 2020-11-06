@@ -8,18 +8,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 # Resolve Tensorbard Confliction across pytorch version
-import torch
-import warnings
-version_num = torch.__version__
-version_num = ''.join(i for i in version_num if i.isdigit())
-version_num = int(version_num.ljust(10, '0'))
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", category=FutureWarning)
-    if version_num > 1100000000:
-        from torch.utils.tensorboard import SummaryWriter
-    else:
-        from tensorboardX import SummaryWriter
-
+from torch.utils.tensorboard import SummaryWriter
 from Exp_PreSIL.dataloader_kitti import KittiDataset
 
 import networks
@@ -32,14 +21,13 @@ from networks import *
 
 import argparse
 
-from kitti_utils import variancebar
 
 default_logpath = os.path.join(project_rootdir, 'tmp')
 parser = argparse.ArgumentParser(description='Train Dense Depth of PreSIL Synthetic Data')
 parser.add_argument("--data_path",              type=str,                               help="path to dataset")
 parser.add_argument("--gt_path",                type=str,                               help="path to kitti gt file")
 parser.add_argument("--predang_path",           type=str,                               help="path to kitti gt file")
-parser.add_argument("--semanticspred_path",     type=str,   default='None',             help="path to kitti semantics prediction file")
+parser.add_argument("--instancepred_path",     type=str,   default='None',             help="path to kitti semantics prediction file")
 parser.add_argument("--val_gt_path",            type=str,                               help="path to validation gt file")
 parser.add_argument("--model_name",             type=str,                               help="name of the model")
 parser.add_argument("--split",                  type=str,                               help="train/val split to use")
@@ -143,31 +131,28 @@ class Trainer:
 
         self.sfnormOptimizer = SurfaceNormalOptimizer(height=self.opt.crph, width=self.opt.crpw, batch_size=self.opt.batch_size).cuda()
 
-        self.variancebar = torch.from_numpy(variancebar).cuda().float()
-        self.variancebar[self.variancebar > 0] = self.variancebar[self.variancebar > 0] / self.opt.variancefold
-
-        from integrationModule import IntegrationFunction
-        self.integrationFunction = IntegrationFunction.apply
+        from integrationModule import IntegrationConstrainFunction
+        self.integrationConstrainFunction = IntegrationConstrainFunction.apply
 
     def set_dataset(self):
         """properly handle multiple dataset situation
         """
 
         fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", self.opt.split, "{}_files.txt")
-        test_fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", "eigen", "test_files.txt")
+        test_fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "splits", self.opt.split, "test_files.txt")
         train_filenames = readlines(fpath.format("train"))
         val_filenames = readlines(test_fpath)
 
         train_dataset = KittiDataset(
             self.opt.data_path, self.opt.gt_path, train_filenames, self.opt.height, self.opt.width,
             crph=self.opt.crph, crpw=self.opt.crpw, is_train=True, predang_path=self.opt.predang_path,
-            semanticspred_path=self.opt.semanticspred_path
+            instancepred_path=self.opt.instancepred_path
         )
 
         val_dataset = KittiDataset(
             self.opt.data_path, self.opt.val_gt_path, val_filenames, self.opt.height, self.opt.width,
             crph=self.opt.crph, crpw=self.opt.crpw, is_train=False, predang_path=self.opt.predang_path,
-            semanticspred_path=self.opt.semanticspred_path
+            instancepred_path=self.opt.instancepred_path
         )
 
         self.train_loader = DataLoader(
@@ -230,7 +215,7 @@ class Trainer:
             if self.step % 1 == 0:
                 self.log("train", losses)
 
-            if self.step % 2000 == 0:
+            if self.step % 2000 == 0 and self.step > 1:
                 self.val()
 
             self.step += 1
@@ -252,7 +237,7 @@ class Trainer:
         # Depth Branch
         losses.update(self.depth_compute_losses(inputs, outputs))
 
-        losses['totLoss'] = losses['depthloss_plain'] * (1 - self.opt.integrationlossw) + losses['depthloss_int'] * self.opt.integrationlossw
+        losses['totLoss'] = losses['depthloss_plain'] + losses['depthloss_int'] * self.opt.integrationlossw
 
         return outputs, losses
 
@@ -266,32 +251,30 @@ class Trainer:
         pred_ang = torch.cat([inputs['angh'], inputs['angv']], dim=1).contiguous()
         pred_log = self.sfnormOptimizer.ang2log(intrinsic=inputs['K'], ang=pred_ang).contiguous()
 
-        edge = self.sfnormOptimizer.ang2edge(ang=pred_ang, intrinsic=inputs['K']).int()
-        mask = torch.zeros_like(edge, dtype=torch.int)
-        mask[:, :, int(0.40810811 * self.opt.crph):int(0.99189189 * self.opt.crph), int(0.03594771 * self.opt.crpw):int(0.96405229 * self.opt.crpw)] = 1
-        mask = mask * (1 - edge)
+        instancepred = inputs['instancepred'].int().contiguous()
+
+        mask = torch.zeros_like(instancepred)
+        mask[:, :, int(0.40810811 * self.opt.crph):, :] = 1
         mask = mask.contiguous()
+        mask = mask * (instancepred > 0)
 
         vallidarmask = (inputs['depthgt'] > 0).float()
-        pred_confidence = torch.ones_like(pred_ang)
         for scale in range(4):
             scaled_disp, pred_depth = disp_to_depth(outputs[('disp', scale)], min_depth=self.opt.min_depth, max_depth=self.opt.max_depth)
             pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
             pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
             outputs[('depth', scale)] = pred_depth
 
-            pred_depth_opted = self.integrationFunction(pred_ang, pred_log, pred_confidence, inputs['semanticspred_cat'], mask, pred_depth, self.variancebar, self.opt.crph, self.opt.crpw, self.opt.batch_size)
-            outputs[('depth_opted', scale)] = pred_depth_opted
+            shape_constrain = self.integrationConstrainFunction(pred_log, instancepred, mask, pred_depth, self.opt.crph, self.opt.crpw, self.opt.batch_size)
+            outputs[('shapeconstrain', scale)] = shape_constrain
 
-            depthloss_int = depthloss_int + torch.sum(torch.abs(pred_depth_opted - inputs['depthgt']) * vallidarmask) / (torch.sum(vallidarmask) + 1)
+            depthloss_int = depthloss_int + shape_constrain.mean()
             depthloss_plain = depthloss_plain + torch.sum(torch.abs(pred_depth - inputs['depthgt']) * vallidarmask) / (torch.sum(vallidarmask) + 1)
 
         depthloss_int = depthloss_int / 4
         losses['depthloss_int'] = depthloss_int
         depthloss_plain = depthloss_plain / 4
         losses['depthloss_plain'] = depthloss_plain
-
-        outputs['edge'] = edge
         outputs['mask'] = mask
 
         return losses
@@ -375,18 +358,25 @@ class Trainer:
         vind = 0
 
         vlscolor = F.interpolate(inputs['color'], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True)
+        figrgb = np.array(tensor2rgb(vlscolor, ind=vind))
 
-        figrgb = tensor2rgb(vlscolor, ind=vind)
-        figsemancat = tensor2semantic(inputs['semanticspred_cat'], ind=vind, shapeCat=True)
+        instanceprednp = inputs['instancepred'].detach().cpu().numpy()[vind,0,:,:]
+
+        coloredimg = np.zeros_like(np.array(figrgb))
+        ratio = 0.3
+        for k in np.unique(instanceprednp):
+            if k > 0:
+                selector = instanceprednp == k
+                coloredimg[selector, :] = np.repeat((np.random.random([1, 3]) * 255).astype(np.uint8), np.sum(selector), axis=0)
+        combined = np.array(figrgb).astype(np.float) * (1 - ratio) + coloredimg.astype(np.float) * ratio
+        combined = combined.astype(np.uint8)
 
         figd1 = tensor2disp(1 / outputs[('depth', 0)], vmax=0.25, ind=vind)
-        figd2 = tensor2disp(1 / outputs[('depth_opted', 0)], vmax=0.25, ind=vind)
-
-        figedge = tensor2disp(outputs['edge'], vmax=1, ind=vind)
+        figd2 = tensor2disp(outputs[('shapeconstrain', 0)], vmax=0.1, ind=vind)
         figmask = tensor2disp(outputs['mask'], vmax=1, ind=vind)
 
-        figoview = np.concatenate([np.array(figd1), np.array(figd2), np.array(figsemancat)], axis=0)
-        figanghoview = np.concatenate([np.array(figrgb), np.array(figedge), np.array(figmask)], axis=0)
+        figoview = np.concatenate([np.array(figd1), np.array(figmask)], axis=0)
+        figanghoview = np.concatenate([np.array(combined), np.array(figd2)], axis=0)
 
         figcombined = np.concatenate([figoview, figanghoview], axis=1)
         self.writers[recoder].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)

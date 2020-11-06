@@ -22,10 +22,25 @@ void shapeIntegration_crf_constrain_forward_cuda(
     torch::Tensor mask,
     torch::Tensor depthin,
     torch::Tensor constrainout,
+    torch::Tensor counts,
     int height,
     int width,
     int bs
     );
+
+void shapeIntegration_crf_constrain_backward_cuda(
+    torch::Tensor log,
+    torch::Tensor semantics,
+    torch::Tensor mask,
+    torch::Tensor depthin,
+    torch::Tensor counts,
+    torch::Tensor constraingradin,
+    torch::Tensor constraingradout,
+    int height,
+    int width,
+    int bs
+    );
+
 // C++ interface
 
 // NOTE: AT_ASSERT has become AT_CHECK on master after 0.4.
@@ -62,6 +77,7 @@ void shapeIntegration_crf_constrain_forward(
     torch::Tensor mask,
     torch::Tensor depthin,
     torch::Tensor constrainout,
+    torch::Tensor counts,
     int height,
     int width,
     int bs
@@ -71,11 +87,34 @@ void shapeIntegration_crf_constrain_forward(
     CHECK_INPUT(mask);
     CHECK_INPUT(depthin);
     CHECK_INPUT(constrainout);
-    shapeIntegration_crf_constrain_forward_cuda(log, semantics, mask, depthin, constrainout, height, width, bs);
+    shapeIntegration_crf_constrain_forward_cuda(log, semantics, mask, depthin, constrainout, counts, height, width, bs);
     return;
 }
 
+void shapeIntegration_crf_constrain_backward(
+    torch::Tensor log,
+    torch::Tensor semantics,
+    torch::Tensor mask,
+    torch::Tensor depthin,
+    torch::Tensor counts,
+    torch::Tensor constraingradin,
+    torch::Tensor constraingradout,
+    int height,
+    int width,
+    int bs
+    ) {
+    CHECK_INPUT(log);
+    CHECK_INPUT(semantics);
+    CHECK_INPUT(mask);
+    CHECK_INPUT(depthin);
+    CHECK_INPUT(counts);
+    CHECK_INPUT(constraingradin);
+    CHECK_INPUT(constraingradout);
+    shapeIntegration_crf_constrain_backward_cuda(log, semantics, mask, depthin, counts, constraingradin, constraingradout, height, width, bs);
+    return;
+}
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("shapeIntegration_crf_forward", &shapeIntegration_crf_forward, "crf based shape integration forward function");
   m.def("shapeIntegration_crf_constrain_forward", &shapeIntegration_crf_constrain_forward, "crf based shape integration constrain forward function");
+  m.def("shapeIntegration_crf_constrain_backward", &shapeIntegration_crf_constrain_backward, "crf based shape integration constrain backward function");
 }
