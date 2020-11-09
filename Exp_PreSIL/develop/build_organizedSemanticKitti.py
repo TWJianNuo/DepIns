@@ -182,6 +182,10 @@ while(True):
             mapentry, cam, idx, labelcounts = filetogenerate[count]
             semanseqind, kittiorg, startind, endind = mapentry.split(' ')
 
+            kittiorg = '2011_09_26_drive_0014_sync'
+            cam = 'image_02'
+            P_velo2im, im_shape = retrieveProjectionM(os.path.join(kittiroot, kittiorg[0:10]), cammapping[cam])
+
             if not os.path.exists(os.path.join(kittiroot, kittiorg[0:10], "{}_sync".format(kittiorg), cam, 'data', "{}.png".format(str(idx).zfill(10)))):
                 newcounts = newcounts + 1
                 continue

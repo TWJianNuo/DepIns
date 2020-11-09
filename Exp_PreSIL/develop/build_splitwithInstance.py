@@ -9,7 +9,7 @@ from PIL import Image, ImageFile
 import time
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-instanceroot = '/home/shengjie/Documents/Data/organized_kins/from_all'
+instanceroot = '/home/shengjie/Documents/Data/organized_kins/from_semankitti'
 splitroot = '/home/shengjie/Documents/Project_SemanticDepth/splits/semidense_eigen_full'
 dstsplitroot = '/home/shengjie/Documents/Project_SemanticDepth/splits/eigen_full_withins'
 splitentry = ['test', 'train', 'val']

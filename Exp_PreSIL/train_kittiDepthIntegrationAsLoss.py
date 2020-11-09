@@ -372,11 +372,16 @@ class Trainer:
         combined = combined.astype(np.uint8)
 
         figd1 = tensor2disp(1 / outputs[('depth', 0)], vmax=0.25, ind=vind)
-        figd2 = tensor2disp(outputs[('shapeconstrain', 0)], vmax=0.1, ind=vind)
+        figd2 = tensor2disp(outputs[('shapeconstrain', 0)], vmax=2, ind=vind)
         figmask = tensor2disp(outputs['mask'], vmax=1, ind=vind)
 
-        figoview = np.concatenate([np.array(figd1), np.array(figmask)], axis=0)
-        figanghoview = np.concatenate([np.array(combined), np.array(figd2)], axis=0)
+        surfnorm = self.sfnormOptimizer.depth2norm(outputs[('depth', 0)], intrinsic=inputs['K'])
+        surfnormref = self.sfnormOptimizer.ang2normal(torch.cat([inputs['angh'], inputs['angv']], dim=1), intrinsic=inputs['K'])
+        fignorm = tensor2rgb((surfnorm + 1) / 2, ind=vind)
+        fignormref = tensor2rgb((surfnormref + 1) / 2, ind=vind)
+
+        figoview = np.concatenate([np.array(figd1), np.array(figmask), np.array(fignorm)], axis=0)
+        figanghoview = np.concatenate([np.array(combined), np.array(figd2), np.array(fignormref)], axis=0)
 
         figcombined = np.concatenate([figoview, figanghoview], axis=1)
         self.writers[recoder].add_image('overview', (torch.from_numpy(figcombined).float() / 255).permute([2, 0, 1]), self.step)
