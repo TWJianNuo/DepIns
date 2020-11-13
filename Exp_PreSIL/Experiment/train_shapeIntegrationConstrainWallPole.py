@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function
 
 import os, sys, inspect
-project_rootdir = os.path.dirname(os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe()))))
+project_rootdir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))))
 sys.path.insert(0, project_rootdir)
 
 import torch.optim as optim
