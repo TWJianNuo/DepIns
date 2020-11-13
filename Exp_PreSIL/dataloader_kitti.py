@@ -95,11 +95,13 @@ class KittiDataset(data.Dataset):
         same augmentation.
         """
         # Do random Crop
+        orgsize = inputs['color'].size
         cropped_color = self.rndcrop_color(inputs["color"], rndseed)
         cropped_depth, intrinsic = self.rndcrop_depth(inputs["depthgt"], rndseed, inputs['K'])
         if 'normgt' in inputs:
             cropped_norm = self.rndcrop_color(inputs["normgt"], rndseed)
         if 'semanticspred' in inputs:
+            inputs["semanticspred"] = inputs["semanticspred"].resize(orgsize, pil.NEAREST)
             cropped_semanticspred = self.rndcrop_color(inputs["semanticspred"], rndseed)
         if 'instancepred' in inputs:
             resized_instancepred = inputs["instancepred"].resize(inputs["color"].size, pil.NEAREST)
@@ -138,17 +140,17 @@ class KittiDataset(data.Dataset):
 
             elif "semanticspred" in k:
                 cropped_semanticspred_copy = np.array(cropped_semanticspred.copy())
-                semanticsregularmask = np.zeros_like(cropped_semanticspred, dtype=np.float32)
                 for l in np.unique(np.array(cropped_semanticspred_copy)):
                     cropped_semanticspred_copy[cropped_semanticspred_copy == l] = labels[l].trainId
                 inputs['semanticspred'] = torch.from_numpy(cropped_semanticspred_copy.astype(np.float32)).unsqueeze(0)
 
-                semanticspred_cat = translateTrainIdSemantics(cropped_semanticspred_copy)
-                inputs['semanticspred_cat'] = torch.from_numpy(semanticspred_cat).unsqueeze(0).int()
-
-                for l in self.regularsemanticstype:
-                    semanticsregularmask[cropped_semanticspred_copy == l] = 1
-                inputs['semanticsregularmask'] = torch.from_numpy(semanticsregularmask).unsqueeze(0)
+                # semanticsregularmask = np.zeros_like(cropped_semanticspred, dtype=np.float32)
+                # semanticspred_cat = translateTrainIdSemantics(cropped_semanticspred_copy)
+                # inputs['semanticspred_cat'] = torch.from_numpy(semanticspred_cat).unsqueeze(0).int()
+                #
+                # for l in self.regularsemanticstype:
+                #     semanticsregularmask[cropped_semanticspred_copy == l] = 1
+                # inputs['semanticsregularmask'] = torch.from_numpy(semanticsregularmask).unsqueeze(0)
 
             elif "instancepred" in k:
                 inputs['instancepred'] = torch.from_numpy(np.array(cropped_instancepred).astype(np.float32)).unsqueeze(0)

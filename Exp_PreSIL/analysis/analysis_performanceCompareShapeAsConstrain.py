@@ -136,7 +136,6 @@ class Trainer:
 
         xx, yy = np.meshgrid(range(self.opt.crpw), range(self.opt.crph), indexing='xy')
         cm = plt.cm.get_cmap('seismic')
-        semidenseroot = '/media/shengjie/c9c81c9f-511c-41c6-bfe0-2fc19666fb32/Data/kitti/semidense_gt'
 
         deptherrbs = list()
         deptherrpred = list()
@@ -161,6 +160,7 @@ class Trainer:
                 pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
 
                 mask = (inputs['depthgt'] > self.MIN_DEPTH).int() * (inputs['depthgt'] < self.MAX_DEPTH).int() * (inputs['instancepred'] > 0).int()
+                # mask = (inputs['depthgt'] > self.MIN_DEPTH).int() * (inputs['depthgt'] < self.MAX_DEPTH).int()
                 cropmask = torch.zeros_like(mask)
                 cropmask[0, 0, int(0.40810811 * self.opt.crph): int(0.99189189 * self.opt.crph), int(0.03594771 * self.opt.crpw): int(0.96405229 * self.opt.crpw)] = 1
                 mask[cropmask == 0] = 0
@@ -176,73 +176,79 @@ class Trainer:
                 bsnp = pred_depthbs[mask].cpu().numpy()
                 prednp = pred_depth[mask].cpu().numpy()
 
+                normpred = self.sfnormOptimizer.depth2norm(pred_depth, intrinsic=inputs['K'])
+                normpredbs = self.sfnormOptimizer.depth2norm(pred_depthbs, intrinsic=inputs['K'])
+
                 deptherrbs.append(compute_errors(gtnp, bsnp))
                 deptherrpred.append(compute_errors(gtnp, prednp))
 
-                # figname = inputs['tag'][0].split(' ')[0].split('/')[1] + '_' + inputs['tag'][0].split(' ')[1]
-                #
-                # fig1 = tensor2rgb(F.interpolate(inputs['color'], (self.opt.crph, self.opt.crpw), mode='bilinear', align_corners=False), ind=0)
-                # fig2 = tensor2disp(1 / pred_depthbs, vmax=0.15, ind=0)
-                # fig3 = tensor2disp(1 / pred_depth, vmax=0.15, ind=0)
-                #
-                # figcombined = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig3)], axis=0)
-                # pil.fromarray(figcombined).save(os.path.join(self.opt.vlsfold, "{}.png".format(figname)))
-
-                a1bs = np.maximum((gtnp / bsnp), (bsnp / gtnp))
-                a1pred = np.maximum((gtnp / prednp), (prednp / gtnp))
-                contrast = (a1pred - 1) - (a1bs - 1)
-                contrast = contrast / 0.15 + 0.5
-
-                masknp = mask[0,0,:,:].cpu().numpy()
-                xxvls = xx[masknp]
-                yyvls = yy[masknp]
-                colors = cm(contrast)
-
-                fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(16, 9))
-                ax1.imshow(tensor2rgb(F.interpolate(inputs['color'], (self.opt.crph, self.opt.crpw), mode='bilinear', align_corners=False), ind=0))
-                ax1.scatter(xxvls, yyvls, s=1, c=colors[:, 0:3])
-                ax1.title.set_text("Bs: %f, Pred: %f" % (np.mean(a1bs), np.mean(a1pred)))
-
-                semidensegt = pil.open(os.path.join(semidenseroot, inputs['tag'][0].split(' ')[0], 'image_02', "{}.png".format(inputs['tag'][0].split(' ')[1].zfill(10))))
-                w, h = semidensegt.size
-                left = int((w - self.opt.crpw) / 2)
-                top = int((h - self.opt.crph) / 2)
-                semidensegt = semidensegt.crop((left, top, left + self.opt.crpw, top + self.opt.crph))
-                semidensegt = np.array(semidensegt).astype(np.float) / 256.0
-                semidensegt = torch.from_numpy(semidensegt).unsqueeze(0).unsqueeze(0).cuda()
-
-                mask_semi = (semidensegt > self.MIN_DEPTH).int() * (semidensegt < self.MAX_DEPTH).int() * (inputs['instancepred'] > 0).int()
-                cropmask_semi = torch.zeros_like(mask_semi)
-                cropmask_semi[0, 0, int(0.40810811 * self.opt.crph): int(0.99189189 * self.opt.crph), int(0.03594771 * self.opt.crpw): int(0.96405229 * self.opt.crpw)] = 1
-                mask_semi[cropmask_semi == 0] = 0
-                mask_semi = mask_semi == 1
-
-                gtnp_semi = semidensegt[mask_semi].cpu().numpy()
-                bsnp_semi = pred_depthbs[mask_semi].cpu().numpy()
-                prednp_semi = pred_depth[mask_semi].cpu().numpy()
-
-                a1bs_semi = np.maximum((gtnp_semi / bsnp_semi), (bsnp_semi / gtnp_semi))
-                a1pred_semi = np.maximum((gtnp_semi / prednp_semi), (prednp_semi / gtnp_semi))
-                contrast_semi = (a1pred_semi - 1) - (a1bs_semi - 1)
-                contrast_semi = contrast_semi / 0.15 + 0.5
-
-                a1bssemi.append((a1bs_semi).mean())
-                a1predsemi.append((a1pred_semi).mean())
-
-                masknp_semi = mask_semi[0,0,:,:].cpu().numpy()
-                xxvls_semi = xx[masknp_semi]
-                yyvls_semi = yy[masknp_semi]
-                colors_semi = cm(contrast_semi)
-                ax2.imshow(tensor2rgb(F.interpolate(inputs['color'], (self.opt.crph, self.opt.crpw), mode='bilinear', align_corners=False), ind=0))
-                ax2.scatter(xxvls_semi, yyvls_semi, s=1, c=colors_semi[:, 0:3])
-                ax2.title.set_text("Bs: %f, Pred: %f" % (np.mean(a1bs_semi), np.mean(a1pred_semi)))
-
-                ax3.imshow(tensor2disp(1 / pred_depthbs, vmax=0.15, ind=0))
-                ax4.imshow(tensor2disp(1 / pred_depth, vmax=0.15, ind=0))
-
                 figname = inputs['tag'][0].split(' ')[0].split('/')[1] + '_' + inputs['tag'][0].split(' ')[1]
-                plt.savefig(os.path.join(self.opt.vlsfold, "{}.png".format(figname)), bbox_inches='tight')
-                plt.close()
+
+                fig1 = tensor2rgb(F.interpolate(inputs['color'], (self.opt.crph, self.opt.crpw), mode='bilinear', align_corners=False), ind=0)
+                fig2 = tensor2disp(1 / pred_depthbs, vmax=0.2, ind=0)
+                fig3 = tensor2disp(1 / pred_depth, vmax=0.2, ind=0)
+
+                fig4 = tensor2rgb((normpredbs + 1) / 2, ind=0)
+                fig5 = tensor2rgb((normpred + 1) / 2, ind=0)
+
+                figcombined = np.concatenate([np.array(fig1), np.array(fig2), np.array(fig4), np.array(fig3), np.array(fig5)], axis=0)
+                pil.fromarray(figcombined).save(os.path.join(self.opt.vlsfold, "{}.png".format(figname)))
+                #
+                # a1bs = np.maximum((gtnp / bsnp), (bsnp / gtnp))
+                # a1pred = np.maximum((gtnp / prednp), (prednp / gtnp))
+                # contrast = (a1pred - 1) - (a1bs - 1)
+                # contrast = contrast / 0.15 + 0.5
+                #
+                # masknp = mask[0,0,:,:].cpu().numpy()
+                # xxvls = xx[masknp]
+                # yyvls = yy[masknp]
+                # colors = cm(contrast)
+                #
+                # fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(16, 9))
+                # ax1.imshow(tensor2rgb(F.interpolate(inputs['color'], (self.opt.crph, self.opt.crpw), mode='bilinear', align_corners=False), ind=0))
+                # ax1.scatter(xxvls, yyvls, s=1, c=colors[:, 0:3])
+                # ax1.title.set_text("Bs: %f, Pred: %f" % (np.mean(a1bs), np.mean(a1pred)))
+                #
+                # semidensegt = pil.open(os.path.join(semidenseroot, inputs['tag'][0].split(' ')[0], 'image_02', "{}.png".format(inputs['tag'][0].split(' ')[1].zfill(10))))
+                # w, h = semidensegt.size
+                # left = int((w - self.opt.crpw) / 2)
+                # top = int((h - self.opt.crph) / 2)
+                # semidensegt = semidensegt.crop((left, top, left + self.opt.crpw, top + self.opt.crph))
+                # semidensegt = np.array(semidensegt).astype(np.float) / 256.0
+                # semidensegt = torch.from_numpy(semidensegt).unsqueeze(0).unsqueeze(0).cuda()
+                #
+                # mask_semi = (semidensegt > self.MIN_DEPTH).int() * (semidensegt < self.MAX_DEPTH).int() * (inputs['instancepred'] > 0).int()
+                # cropmask_semi = torch.zeros_like(mask_semi)
+                # cropmask_semi[0, 0, int(0.40810811 * self.opt.crph): int(0.99189189 * self.opt.crph), int(0.03594771 * self.opt.crpw): int(0.96405229 * self.opt.crpw)] = 1
+                # mask_semi[cropmask_semi == 0] = 0
+                # mask_semi = mask_semi == 1
+                #
+                # gtnp_semi = semidensegt[mask_semi].cpu().numpy()
+                # bsnp_semi = pred_depthbs[mask_semi].cpu().numpy()
+                # prednp_semi = pred_depth[mask_semi].cpu().numpy()
+                #
+                # a1bs_semi = np.maximum((gtnp_semi / bsnp_semi), (bsnp_semi / gtnp_semi))
+                # a1pred_semi = np.maximum((gtnp_semi / prednp_semi), (prednp_semi / gtnp_semi))
+                # contrast_semi = (a1pred_semi - 1) - (a1bs_semi - 1)
+                # contrast_semi = contrast_semi / 0.15 + 0.5
+                #
+                # a1bssemi.append((a1bs_semi).mean())
+                # a1predsemi.append((a1pred_semi).mean())
+                #
+                # masknp_semi = mask_semi[0,0,:,:].cpu().numpy()
+                # xxvls_semi = xx[masknp_semi]
+                # yyvls_semi = yy[masknp_semi]
+                # colors_semi = cm(contrast_semi)
+                # ax2.imshow(tensor2rgb(F.interpolate(inputs['color'], (self.opt.crph, self.opt.crpw), mode='bilinear', align_corners=False), ind=0))
+                # ax2.scatter(xxvls_semi, yyvls_semi, s=1, c=colors_semi[:, 0:3])
+                # ax2.title.set_text("Bs: %f, Pred: %f" % (np.mean(a1bs_semi), np.mean(a1pred_semi)))
+                #
+                # ax3.imshow(tensor2disp(1 / pred_depthbs, vmax=0.15, ind=0))
+                # ax4.imshow(tensor2disp(1 / pred_depth, vmax=0.15, ind=0))
+                #
+                # figname = inputs['tag'][0].split(' ')[0].split('/')[1] + '_' + inputs['tag'][0].split(' ')[1]
+                # plt.savefig(os.path.join(self.opt.vlsfold, "{}.png".format(figname)), bbox_inches='tight')
+                # plt.close()
 
                 print("batch %d finished" % batch_idx)
 
@@ -258,10 +264,10 @@ class Trainer:
         print(("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
         print(("&{: 8.3f}  " * 7).format(*err2.tolist()) + "\\\\")
 
-        a1bssemi = np.array(a1bssemi).mean()
-        a1predsemi = np.array(a1predsemi).mean()
-        print("\nBaseline A1 Performance: %f" % a1bssemi)
-        print("\nPrediction A1 Performance: %f" % a1predsemi)
+        # a1bssemi = np.array(a1bssemi).mean()
+        # a1predsemi = np.array(a1predsemi).mean()
+        # print("\nBaseline A1 Performance: %f" % a1bssemi)
+        # print("\nPrediction A1 Performance: %f" % a1predsemi)
 
     def load_model(self):
         """Load model(s) from disk
