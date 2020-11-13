@@ -2328,10 +2328,12 @@ class SurfaceNormalOptimizer(nn.Module):
         return predang
 
     def intergrationloss_surfacenormal(self, surfnorm, intrinsic, depthMap):
+        vlossw = self.vlossw
+        angw = self.angw
+        sclw = self.sclw
+
         anglebound = 0
         protectmin = 1e-6
-        angw = 1e0
-        sclw = 1e-1
 
         fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
         bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
@@ -2365,18 +2367,46 @@ class SurfaceNormalOptimizer(nn.Module):
         logv = torch.log(torch.abs(u2)) - torch.log(torch.abs(u1)) + torch.log(torch.clamp(torch.abs(u3 * v1 - u1 * v3), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3 * v2 - u2 * v3), min=protectmin))
         logv = torch.clamp(logv, min=-10, max=10)
 
-        depthMapl = torch.log(depthMap)
+        angh = torch.atan2(a3, -b3)
+        angv = torch.atan2(u3, -v3)
+
+        depthMapl = torch.log(torch.clamp(depthMap, min=protectmin))
 
         low_angh = torch.atan2(-a1, b1)
         high_angh = torch.atan2(a2, -b2)
-        pred_angh = torch.atan2(a3, -b3)
+        pred_angh = angh
         inboundh = ((pred_angh < (high_angh - anglebound)) * (pred_angh > (low_angh + anglebound))).float()
 
         low_angv = torch.atan2(-u1, v1)
         high_angv = torch.atan2(u2, -v2)
-        pred_angv = torch.atan2(u3, -v3)
+        pred_angv = angv
         inboundv = ((pred_angv < (high_angv - anglebound)) * (pred_angv > (low_angv + anglebound))).float()
 
+        logh = logh.unsqueeze(1)
+        logv = logv.unsqueeze(1)
+        inboundh = inboundh.unsqueeze(1)
+        inboundv = inboundv.unsqueeze(1)
+        pred_angh = pred_angh.unsqueeze(1)
+        pred_angv = pred_angv.unsqueeze(1)
+
+        vallidarmask = (depthMap > 0).float()
+
+        inth = self.inth(logh)
+        gth = self.gth(depthMapl)
+        indh = ((self.idh(vallidarmask) == 2) * (self.inth(1-inboundh) == 0)).float()
+        hloss1 = torch.sum(torch.abs(gth - inth) * indh) / (torch.sum(indh) + 1)
+        hloss2 = torch.sum(torch.abs(pred_angh) * (1 - inboundh)) * angw / (torch.sum(1 - inboundh) + 1)
+
+        intv = self.intv(logv)
+        gtv = self.gtv(depthMapl)
+        indv = ((self.idv(vallidarmask) == 2) * (self.intv(1-inboundv) == 0)).float()
+        vloss1 = torch.sum(torch.abs(gtv - intv) * indv) * vlossw / (torch.sum(indv) + 1)
+        vloss2 = torch.sum(torch.abs(pred_angv) * (1 - inboundv)) * angw / (torch.sum(1 - inboundh) + 1)
+
+        scl_pixelwise = self.selfconh(logh) + self.selfconv(logv)
+        scl = torch.mean(torch.abs(scl_pixelwise))
+
+        loss = hloss1 + hloss2 + vloss1 + vloss2 + scl * sclw
         # # ====Temporarily Suppressed Loss Related Code==== #
         # gth = self.diffx_sharp(depthMapl)
         # gtv = self.diffy_sharp(depthMapl)
@@ -2787,4 +2817,4 @@ class SurfaceNormalOptimizer(nn.Module):
         # pltrange = 1e1
         # plt.figure()
         # plt.hist(np.clip(logh.detach().cpu().numpy().flatten(), a_min=-pltrange, a_max=pltrange), bins=100, range=[-0.01, 0.01])
-        return
+        return loss
