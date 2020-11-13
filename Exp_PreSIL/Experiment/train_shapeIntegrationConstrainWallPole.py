@@ -287,6 +287,7 @@ class Trainer:
         intensity = self.intensityconv(resizedcolor)
         maskedge = ((gradx + grady) / (intensity + 1e-3) > 0.15).float()
         semanmask = torch.zeros_like(semanticspred)
+        semanedgemask = torch.zeros_like(semanticspred)
 
         if self.opt.addbuilding:
             semancat = [2, 3, 4]
