@@ -124,66 +124,6 @@ class Trainer:
         for m in self.models.values():
             m.eval()
 
-    def val(self):
-        """Validate the model on a single minibatch
-        """
-        self.set_eval()
-        with torch.no_grad():
-            for batch_idx, inputs in enumerate(self.val_loader):
-                for key, ipt in inputs.items():
-                    if not key == 'tag':
-                        inputs[key] = ipt.to(self.device)
-
-                _, _, gt_height, gt_width = inputs['depthgt'].shape
-
-                outputs_depth = self.models['depth'](self.models['encoder_depth'](inputs['color']))
-                _, pred_depth = disp_to_depth(outputs_depth[("disp", 0)], self.opt.min_depth, self.opt.max_depth)
-                pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
-                pred_depth = F.interpolate(pred_depth, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=False)
-
-                outputs_ang = self.models['angdecoder'](self.models['angencoder'](inputs['color']))
-                angfromang = (outputs_ang[("disp", 0)] - 0.5) * 2 * np.pi
-                angfromang = F.interpolate(angfromang, [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=False)
-                angfromdepth = self.sfnormOptimizer.depth2ang_log(depthMap=pred_depth, intrinsic=inputs['K'])
-
-                logfromang = self.sfnormOptimizer.ang2log(intrinsic=inputs["K"], ang=angfromang)
-                logfromdepth = self.sfnormOptimizer.ang2log(intrinsic=inputs["K"], ang=angfromdepth)
-
-                mask = torch.zeros_like(pred_depth, dtype=torch.int)
-                mask[:, :, int(0.40810811 * self.opt.crph): -1, :] = 1
-                mask = mask.contiguous()
-                instancepred = inputs['instancepred'].int().contiguous()
-                mask = (mask * instancepred > 0).int()
-
-                import shapeintegration_cuda
-                constrainout = torch.zeros_like(pred_depth)
-                constraingradin = torch.ones_like(pred_depth)
-                constraingradout = torch.zeros_like(pred_depth)
-                counts = torch.zeros_like(pred_depth)
-                shapeintegration_cuda.shapeIntegration_crf_constrain_forward(logfromang, instancepred, mask, pred_depth, constrainout, counts, self.opt.crph, self.opt.crpw, 1)
-                shapeintegration_cuda.shapeIntegration_crf_constrain_backward(logfromang, instancepred, mask, pred_depth, constraingradin, counts, constraingradout, self.opt.crph, self.opt.crpw, 1)
-
-                plt.figure()
-                plt.imshow(constrainout.detach().cpu().numpy()[0,0,:,:])
-
-                plt.figure()
-                plt.imshow(counts.detach().cpu().numpy()[0,0,:,:])
-
-                plt.figure()
-                plt.imshow(torch.abs(constraingradout).detach().cpu().numpy()[0,0,:,:])
-
-                minang = - np.pi / 3 * 2
-                maxang = 2 * np.pi - np.pi / 3 * 2
-                vind = 0
-                tensor2disp(angfromang[:, 0:1, :, :] - minang, vmax=maxang, ind=vind).show()
-                tensor2disp(angfromdepth[:, 0:1, :, :] - minang, vmax=maxang, ind=vind).show()
-                tensor2disp(angfromang[:, 1:2, :, :] - minang, vmax=maxang, ind=vind).show()
-                tensor2disp(angfromdepth[:, 1:2, :, :] - minang, vmax=maxang, ind=vind).show()
-                tensor2disp(mask, vmax=1, ind=vind).show()
-                figname = inputs['tag'][0].split(' ')[0].split('/')[1] + '_' + inputs['tag'][0].split(' ')[1]
-                tensor2disp(inputs['instancepred'] > 0, vmax=1, ind=0).show()
-                tensor2rgb(inputs['color'], ind=0).show()
-
     def val_forward_backward_torch(self):
         self.set_eval()
 
@@ -215,7 +155,7 @@ class Trainer:
 
         for batch_idx in range(self.val_dataset.__len__()):
             # batch_idx = self.val_dataset.filenames.index('2011_09_26/2011_09_26_drive_0052_sync 0000000026 l')
-            batch_idx = 1954
+            # batch_idx = 1954
             inputs = self.val_dataset.__getitem__(batch_idx)
 
             for key, ipt in inputs.items():
@@ -269,6 +209,11 @@ class Trainer:
             # exclude up normal
             normfromang = self.sfnormOptimizer.ang2normal(ang=pred_ang, intrinsic=inputs['K'])
             semanedgemask = semanedgemask * (normfromang[:, 1, :, :].unsqueeze(1) < 0.8).int()
+
+            # exclup singular value of the normal
+            singularnorm = self.sfnormOptimizer.ang2edge(ang=pred_ang, intrinsic=inputs['K'])
+            semanedgemask = semanedgemask * (1 - singularnorm).int()
+
             # tensor2disp((normfromang[:, 1, :, :].unsqueeze(1) + 1) / 2, vmax=1, ind=0).show()
             # tensor2disp(normfromang[:, 1, :, :].unsqueeze(1) > 0.8, vmax=1, ind=0).show()
             # tensor2rgb((self.sfnormOptimizer.ang2normal(ang=pred_ang, intrinsic=inputs['K']) + 1) / 2, ind=0).show()
@@ -283,16 +228,28 @@ class Trainer:
                 shapeintegration_cuda.shapeIntegration_crf_forward(pred_log, semanticspred, semanedgemask, pred_depth, depth_optedin, depth_optedout, self.opt.crph, self.opt.crpw, self.opt.batch_size, lam)
                 depth_optedin = depth_optedout.clone()
 
+            # m = 190
+            # n = 650
+            # c = 0
+            # self.validate_forward(pred_log, semanticspred, semanedgemask, pred_depth, self.opt.crph, self.opt.crpw, c, m, n, lam, depth_optedout[c, 0, m, n])
+            #
+            # plt.figure()
+            # plt.imshow(tensor2disp(1 / depth_optedout, vmax=0.2, ind=0))
+
             norm1 = self.sfnormOptimizer.depth2norm(depthMap=depth_optedout, intrinsic=inputs['K'])
+            norm2 = self.sfnormOptimizer.ang2normal(ang=pred_ang, intrinsic=inputs['K'])
             disp1 = tensor2disp(1 / pred_depth, vmax=0.2, ind=0)
             disp2 = tensor2disp(1 / depth_optedout, vmax=0.2, ind=0)
             fignorm = tensor2rgb((norm1 + 1) / 2, ind=0)
+            fignorm2 = tensor2rgb((norm2 + 1) / 2, ind=0)
             figrgb = tensor2rgb(resizedcolor, ind=0)
             figmask = tensor2disp(semanedgemask, vmax=1, ind=0)
             figseman = tensor2semantic(semanticspred, ind=0)
+            combined = np.array(figrgb).astype(np.float) * 0.3 + np.array(figseman).astype(np.float) * 0.7
+            combined = np.array(combined).astype(np.uint8)
 
-            figl = np.concatenate([np.array(figrgb), np.array(disp1), np.array(disp2)], axis=0)
-            figr = np.concatenate([np.array(fignorm), np.array(figmask), np.array(figseman)], axis=0)
+            figl = np.concatenate([np.array(combined), np.array(disp1), np.array(disp2)], axis=0)
+            figr = np.concatenate([np.array(fignorm), np.array(fignorm2), np.array(figmask)], axis=0)
             figcombined = np.concatenate([figl, figr], axis=1)
             pil.fromarray(figcombined).save(os.path.join('/media/shengjie/disk1/visualization/offlineopt', "{}.png".format(str(batch_idx).zfill(2))))
 
@@ -306,73 +263,7 @@ class Trainer:
 
         endptsrec = list()
 
-        # Left up direction
         if mask[c][0][m][n] == 1:
-            sn = n
-            sm = m
-            intlog = 0
-            while(True):
-                sn -= 1
-                sm -= 1
-                if(sn >=0 and sm >= 0 and sn < width and sm < height):
-                    if (semantics[c][0][sm][sn] != semancat) or (semantics[c][0][sm+1][sn] != semancat) or (semantics[c][0][sm][sn+1] != semancat): break
-                    if (mask[c][0][sm][sn] != 1) or (mask[c][0][sm+1][sn] != 1) or (mask[c][0][sm][sn+1] != 1): break
-                    intlog += (-log[c][0][sm+1][sn] -log[c][1][sm][sn] -log[c][1][sm][sn+1] -log[c][0][sm][sn]) / 2
-                    totcounts += 1
-                    lateralre += torch.exp(-intlog) * depthin[c][0][sm][sn]
-                else:
-                    break
-            endptsrec.append(np.array([sn, sm]))
-
-            # right up direction
-            sn = n
-            sm = m
-            intlog = 0
-            while(True):
-                sn += 1
-                sm -= 1
-                if (sn >= 0 and sm >= 0 and sn < width and sm < height):
-                    if (semantics[c][0][sm][sn] != semancat) or (semantics[c][0][sm+1][sn] != semancat) or (semantics[c][0][sm][sn-1] != semancat): break
-                    if (mask[c][0][sm][sn] != 1) or (mask[c][0][sm + 1][sn] != 1) or (mask[c][0][sm][sn - 1] != 1): break
-                    intlog += (log[c][0][sm+1][sn-1] -log[c][1][sm][sn] -log[c][1][sm][sn-1] +log[c][0][sm][sn-1]) / 2
-                    totcounts += 1
-                    lateralre += torch.exp(-intlog) * depthin[c][0][sm][sn]
-                else:
-                    break
-            endptsrec.append(np.array([sn, sm]))
-
-            # Left down direction
-            sn = n
-            sm = m
-            intlog = 0
-            while(True):
-                sn -= 1
-                sm += 1
-                if(sn >=0 and sm >= 0 and sn < width and sm < height):
-                    if (semantics[c][0][sm][sn] != semancat) or (semantics[c][0][sm-1][sn] != semancat) or (semantics[c][0][sm][sn+1] != semancat): break
-                    if (mask[c][0][sm][sn] != 1) or (mask[c][0][sm-1][sn] != 1) or (mask[c][0][sm][sn+1] != 1): break
-                    intlog += (-log[c][0][sm-1][sn] +log[c][1][sm-1][sn] +log[c][1][sm-1][sn+1] -log[c][0][sm][sn]) / 2
-                    totcounts += 1
-                    lateralre += torch.exp(-intlog) * depthin[c][0][sm][sn]
-                else: break
-            endptsrec.append(np.array([sn, sm]))
-
-            # Right down direction
-            sn = n
-            sm = m
-            intlog = 0
-            while(True):
-                sn += 1
-                sm += 1
-                if(sn >=0 and sm >= 0 and sn < width and sm < height):
-                    if (semantics[c][0][sm][sn] != semancat) or (semantics[c][0][sm][sn-1] != semancat) or (semantics[c][0][sm-1][sn] != semancat): break
-                    if (mask[c][0][sm][sn] != 1) or (mask[c][0][sm][sn-1] != 1) or (mask[c][0][sm-1][sn] != 1): break
-                    intlog += (log[c][0][sm-1][sn-1] +log[c][1][sm-1][sn] +log[c][1][sm-1][sn-1] +log[c][0][sm][sn-1]) / 2
-                    totcounts += 1
-                    lateralre += torch.exp(-intlog) * depthin[c][0][sm][sn]
-                else: break
-            endptsrec.append(np.array([sn, sm]))
-
             # Left
             sm = m
             intlog = 0
@@ -383,6 +274,7 @@ class Trainer:
                 totcounts += 1
                 lateralre += torch.exp(-intlog) * depthin[c][0][sm][sn]
             endptsrec.append(np.array([sn, sm]))
+            print("Left: %f" % (lateralre / totcounts))
 
             # Right
             sm = m
@@ -394,6 +286,7 @@ class Trainer:
                 totcounts += 1
                 lateralre += torch.exp(-intlog) * depthin[c][0][sm][sn]
             endptsrec.append(np.array([sn, sm]))
+            print("Right: %f" % (lateralre / totcounts))
 
             # Up
             sn = n
@@ -405,6 +298,7 @@ class Trainer:
                 totcounts += 1;
                 lateralre += torch.exp(-intlog) * depthin[c][0][sm][sn]
             endptsrec.append(np.array([sn, sm]))
+            print("Up: %f" % (lateralre / totcounts))
 
             # Down
             sn = n
@@ -416,6 +310,7 @@ class Trainer:
                 totcounts += 1
                 lateralre += torch.exp(-intlog) * depthin[c][0][sm][sn]
             endptsrec.append(np.array([sn, sm]))
+            print("Down: %f" % (lateralre / totcounts))
 
             if totcounts > 0:
                 opteddepth = lam * depthin[c][0][m][n] + (1 - lam) * lateralre / totcounts

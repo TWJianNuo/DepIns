@@ -1827,45 +1827,44 @@ class SurfaceNormalOptimizer(nn.Module):
         tensor2disp(edge, vmax=1, ind=1).show()
 
     def ang2edge(self, ang, intrinsic):
-        # anghthreshold = 2e-1
-        # angvthreshold = 3e-1
-        anghthreshold = 2e-1
-        angvthreshold = 1.5e-1
+        protectmin = 1e-7
 
-        angh = ang[:, 0, :, :].unsqueeze(1)
-        angv = ang[:, 1, :, :].unsqueeze(1)
+        angh = ang[:, 0, :, :]
+        angv = ang[:, 1, :, :]
 
-        # grad_angh = torch.abs(self.diffx_sharp(angh)) + torch.abs(self.diffy_sharp(angh))
-        # grad_angv = torch.abs(self.diffx_sharp(angv)) + torch.abs(self.diffy_sharp(angv))
-        grad_angh = torch.abs(self.diffx(angh))
-        grad_angv = torch.abs(self.diffy(angv))
+        fx = intrinsic[:, 0, 0].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        bx = intrinsic[:, 0, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        fy = intrinsic[:, 1, 1].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
+        by = intrinsic[:, 1, 2].unsqueeze(1).unsqueeze(2).expand([-1, self.height, self.width])
 
-        edge = (grad_angh > anghthreshold) + (grad_angv > angvthreshold)
-        # tensor2disp(grad_angh > 2e-1, vmax=1, ind=0).show()
-        # tensor2disp(grad_angv > 3e-1, vmax=1, ind=0).show()
-        # tensor2disp(edge, vmax=1, ind=0).show()
+        a1 = ((self.yy - by) / fy)**2 + 1
+        b1 = -(self.xx - bx) / fx
 
-        return edge
+        a2 = ((self.yy - by) / fy)**2 + 1
+        b2 = -(self.xx + 1 - bx) / fx
 
-    def angdepth2edge(self, ang, depth):
-        anghthreshold = 2e-1
-        angvthreshold = 1.5e-1
-        invdepththreshold = 4e-2
+        a3 = torch.sin(angh)
+        b3 = -torch.cos(angh)
 
-        angh = ang[:, 0, :, :].unsqueeze(1)
-        angv = ang[:, 1, :, :].unsqueeze(1)
+        u1 = ((self.xx - bx) / fx)**2 + 1
+        v1 = -(self.yy - by) / fy
 
-        grad_angh = torch.abs(self.diffx(angh))
-        grad_angv = torch.abs(self.diffy(angv))
+        u2 = ((self.xx - bx) / fx)**2 + 1
+        v2 = -(self.yy + 1 - by) / fy
 
-        grad_depth = (torch.abs(self.diffx_sharp(depth)) + torch.abs(self.diffy_sharp(depth))) / depth
+        u3 = torch.sin(angv)
+        v3 = -torch.cos(angv)
 
-        edge = (grad_angh > anghthreshold) + (grad_angv > angvthreshold) + (grad_depth > invdepththreshold)
-        # tensor2disp(grad_angh > 2e-1, vmax=1, ind=0).show()
-        # tensor2disp(grad_angv > 3e-1, vmax=1, ind=0).show()
-        # tensor2disp(edge, vmax=1, ind=0).show()
-        # tensor2disp(grad_depth > 4e-2, vmax=1, ind=0).show()
+        logh = torch.log(torch.clamp(torch.abs(a3 * b1 - a1 * b3), min=protectmin)) - torch.log(torch.clamp(torch.abs(a3 * b2 - a2 * b3), min=protectmin))
+        logv = torch.log(torch.clamp(torch.abs(u3 * v1 - u1 * v3), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3 * v2 - u2 * v3), min=protectmin))
+        logh = logh.unsqueeze(1)
+        logv = logv.unsqueeze(1)
 
+        edge = (torch.abs(logh) > 0.1) + (torch.abs(logv) > 0.1)
+        edge = edge.int()
+        # tensor2disp(torch.abs(logh) > 0.1, vmax=0.1, ind=0).show()
+        # tensor2disp(torch.abs(logv) > 0.1, vmax=0.1, ind=0).show()
+        # tensor2disp(edge, vmax=0.1, ind=0).show()
         return edge
 
     def depth2ang_log(self, depthMap, intrinsic):

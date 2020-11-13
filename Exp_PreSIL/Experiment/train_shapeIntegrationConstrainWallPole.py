@@ -314,6 +314,10 @@ class Trainer:
         # exclude up normal
         normfromang = self.sfnormOptimizer.ang2normal(ang=pred_ang, intrinsic=inputs['K'])
         semanedgemask = semanedgemask * (normfromang[:, 1, :, :].unsqueeze(1) < 0.8).int()
+
+        # exclude singular normal point
+        singularnorm = self.sfnormOptimizer.ang2edge(ang=pred_ang, intrinsic=inputs['K'])
+        semanedgemask = semanedgemask * (1 - singularnorm).int()
         semanedgemask = semanedgemask.int().contiguous()
 
         vallidarmask = (inputs['depthgt'] > 0).float()
