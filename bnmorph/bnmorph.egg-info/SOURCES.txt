@@ -1,7 +1,0 @@
-bnmorph_getcorpts.cpp
-bnmorph_getcorpts_kernel.cu
-setup.py
-bnmorph.egg-info/PKG-INFO
-bnmorph.egg-info/SOURCES.txt
-bnmorph.egg-info/dependency_links.txt
-bnmorph.egg-info/top_level.txt

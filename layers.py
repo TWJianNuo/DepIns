@@ -17,7 +17,6 @@ from scipy.spatial.transform import Rotation as R
 import math
 
 import copy
-from Oview_Gan import eppl_render, eppl_render_l2, eppl_render_l1, eppl_render_l1_sfgrad
 from torch import autograd
 import cv2
 

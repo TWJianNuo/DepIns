@@ -100,6 +100,166 @@ __global__ void shapeIntegration_crf_forward_cuda_kernel(
 
     }
 
+__global__ void shapeIntegration_crf_variance_forward_cuda_kernel(
+    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> log,
+    const torch::PackedTensorAccessor<int,4,torch::RestrictPtrTraits,size_t> semantics,
+    const torch::PackedTensorAccessor<int,4,torch::RestrictPtrTraits,size_t> mask,
+    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> variance,
+    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> depthin,
+    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> depth_optedin,
+    torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> depth_optedout,
+    torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> summedconfidence,
+    const int height,
+    const int width,
+    const int bs,
+    const float lambda,
+    const float clipvariance,
+    const float maxrange
+    ) {
+
+    int m;
+    int n;
+
+    int sm;
+    int sn;
+
+    float lateralre;
+
+    float intlog;
+    float intvariance;
+    float intexpvariance;
+
+    int semancat;
+
+    for(int i = threadIdx.x; i < height * width; i = i + blockDim.x){
+        m = i / width;
+        n = i - m * width;
+
+        semancat = semantics[blockIdx.x][0][m][n];
+        lateralre = 0;
+
+        if(mask[blockIdx.x][0][m][n] == 1){
+            intexpvariance = 0;
+
+            // Left
+            sm = m;
+            intvariance = 0;
+            for(sn = n-1; sn >= 0; sn--){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(n - sn > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                intexpvariance += exp(-intvariance);
+            }
+
+            // Right
+            sm = m;
+            intvariance = 0;
+            for(sn = n+1; sn < width; sn++){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(sn - n > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                intexpvariance += exp(-intvariance);
+            }
+
+            // Up
+            sn = n;
+            intvariance = 0;
+            for(sm = m-1; sm >= 0; sm--){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(m - sm > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                intexpvariance += exp(-intvariance);
+            }
+
+            // Down
+            sn = n;
+            intvariance = 0;
+            for(sm = m+1; sm < height; sm++){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(sm - m > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                intexpvariance += exp(-intvariance);
+            }
+
+            summedconfidence[blockIdx.x][0][m][n] = intexpvariance;
+
+            // Left
+            sm = m;
+            intlog = 0;
+            intvariance = 0;
+            for(sn = n-1; sn >= 0; sn--){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(n - sn > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += -log[blockIdx.x][0][sm][sn];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
+            }
+
+            // Right
+            sm = m;
+            intlog = 0;
+            intvariance = 0;
+            for(sn = n+1; sn < width; sn++){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(sn - n > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += log[blockIdx.x][0][sm][sn-1];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
+            }
+
+            // Up
+            sn = n;
+            intlog = 0;
+            intvariance = 0;
+            for(sm = m-1; sm >= 0; sm--){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(m - sm > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += -log[blockIdx.x][1][sm][sn];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
+            }
+
+            // Down
+            sn = n;
+            intlog = 0;
+            intvariance = 0;
+            for(sm = m+1; sm < height; sm++){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(sm - m > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += log[blockIdx.x][1][sm-1][sn];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
+            }
+        }
+
+        if(lateralre > 0){
+            depth_optedout[blockIdx.x][0][m][n] = lambda * depthin[blockIdx.x][0][m][n] + (1 - lambda) * lateralre;
+        }
+        else{
+            depth_optedout[blockIdx.x][0][m][n] = depthin[blockIdx.x][0][m][n];
+        }
+
+    }
+    return;
+
+    }
+
 __global__ void shapeIntegration_crf_star_forward_cuda_kernel(
     const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> log,
     const torch::PackedTensorAccessor<int,4,torch::RestrictPtrTraits,size_t> semantics,
@@ -258,189 +418,6 @@ __global__ void shapeIntegration_crf_star_forward_cuda_kernel(
     }
     return;
 
-    }
-
-__global__ void shapeIntegration_crf_star_mask_forward_cuda_kernel(
-    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> log,
-    const torch::PackedTensorAccessor<int,4,torch::RestrictPtrTraits,size_t> semantics,
-    const torch::PackedTensorAccessor<int,4,torch::RestrictPtrTraits,size_t> mask,
-    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> depthin,
-    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> depth_optedin,
-    const torch::PackedTensorAccessor<int,4,torch::RestrictPtrTraits,size_t> depth_maskin,
-    torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> depth_optedout,
-    const int height,
-    const int width,
-    const int bs,
-    const float lambda
-    ) {
-
-    int m;
-    int n;
-
-    int sm;
-    int sn;
-
-    float totcounts;
-    float lateralre;
-
-    float intlog;
-
-    int semancat;
-
-    for(int i = threadIdx.x; i < height * width; i = i + blockDim.x){
-        m = i / width;
-        n = i - m * width;
-
-        semancat = semantics[blockIdx.x][0][m][n];
-        totcounts = 0;
-        lateralre = 0;
-
-        if(mask[blockIdx.x][0][m][n] == 1){
-
-            // Left up direction
-            sn = n;
-            sm = m;
-            intlog = 0;
-            while(true){
-                sn -= 1;
-                sm -= 1;
-                if(sn >=0 && sm >= 0 && sn < width && sm < height){
-                    if((semantics[blockIdx.x][0][sm][sn] != semancat) || (semantics[blockIdx.x][0][sm+1][sn] != semancat) || (semantics[blockIdx.x][0][sm][sn+1] != semancat)){break;}
-                    if((mask[blockIdx.x][0][sm][sn] != 1) || (mask[blockIdx.x][0][sm+1][sn] != 1) || (mask[blockIdx.x][0][sm][sn+1] != 1)){break;}
-                    intlog += (-log[blockIdx.x][0][sm+1][sn] -log[blockIdx.x][1][sm][sn] -log[blockIdx.x][1][sm][sn+1] -log[blockIdx.x][0][sm][sn]) / 2;
-
-                    if(depth_maskin[blockIdx.x][0][sm][sn] != 1){continue;}
-                    totcounts += 1;
-                    lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn];
-                }
-                else{break;}
-            }
-
-            // right up direction
-            sn = n;
-            sm = m;
-            intlog = 0;
-            while(true){
-                sn += 1;
-                sm -= 1;
-                if(sn >=0 && sm >= 0 && sn < width && sm < height){
-                    if((semantics[blockIdx.x][0][sm][sn] != semancat) || (semantics[blockIdx.x][0][sm+1][sn] != semancat) || (semantics[blockIdx.x][0][sm][sn-1] != semancat)){break;}
-                    if((mask[blockIdx.x][0][sm][sn] != 1) || (mask[blockIdx.x][0][sm+1][sn] != 1) || (mask[blockIdx.x][0][sm][sn-1] != 1)){break;}
-                    intlog += (log[blockIdx.x][0][sm+1][sn-1] -log[blockIdx.x][1][sm][sn] -log[blockIdx.x][1][sm][sn-1] +log[blockIdx.x][0][sm][sn-1]) / 2;
-
-                    if(depth_maskin[blockIdx.x][0][sm][sn] != 1){break;}
-                    totcounts += 1;
-                    lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn];
-                }
-                else{break;}
-            }
-
-            // Left down direction
-            sn = n;
-            sm = m;
-            intlog = 0;
-            while(true){
-                sn -= 1;
-                sm += 1;
-                if(sn >=0 && sm >= 0 && sn < width && sm < height){
-                    if((semantics[blockIdx.x][0][sm][sn] != semancat) || (semantics[blockIdx.x][0][sm-1][sn] != semancat) || (semantics[blockIdx.x][0][sm][sn+1] != semancat)){break;}
-                    if((mask[blockIdx.x][0][sm][sn] != 1) || (mask[blockIdx.x][0][sm-1][sn] != 1) || (mask[blockIdx.x][0][sm][sn+1] != 1)){break;}
-                    intlog += (-log[blockIdx.x][0][sm-1][sn] +log[blockIdx.x][1][sm-1][sn] +log[blockIdx.x][1][sm-1][sn+1] -log[blockIdx.x][0][sm][sn]) / 2;
-
-                    if(depth_maskin[blockIdx.x][0][sm][sn] != 1){continue;}
-                    totcounts += 1;
-                    lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn];
-                }
-                else{break;}
-            }
-
-            // Right down direction
-            sn = n;
-            sm = m;
-            intlog = 0;
-            while(true){
-                sn += 1;
-                sm += 1;
-                if(sn >=0 && sm >= 0 && sn < width && sm < height){
-                    if((semantics[blockIdx.x][0][sm][sn] != semancat) || (semantics[blockIdx.x][0][sm][sn-1] != semancat) || (semantics[blockIdx.x][0][sm-1][sn] != semancat)){break;}
-                    if((mask[blockIdx.x][0][sm][sn] != 1) || (mask[blockIdx.x][0][sm][sn-1] != 1) || (mask[blockIdx.x][0][sm-1][sn] != 1)){break;}
-                    intlog += (log[blockIdx.x][0][sm-1][sn-1] +log[blockIdx.x][1][sm-1][sn] +log[blockIdx.x][1][sm-1][sn-1] +log[blockIdx.x][0][sm][sn-1]) / 2;
-
-                    if(depth_maskin[blockIdx.x][0][sm][sn] != 1){continue;}
-                    totcounts += 1;
-                    lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn];
-                }
-                else{break;}
-            }
-
-            // Left
-            sm = m;
-            intlog = 0;
-            for(sn = n-1; sn >= 0; sn--){
-                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
-                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
-                intlog += -log[blockIdx.x][0][sm][sn];
-
-                if(depth_maskin[blockIdx.x][0][sm][sn] != 1){continue;}
-                totcounts += 1;
-                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn];
-            }
-
-            // Right
-            sm = m;
-            intlog = 0;
-            for(sn = n+1; sn < width; sn++){
-                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
-                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
-                intlog += log[blockIdx.x][0][sm][sn-1];
-
-                if(depth_maskin[blockIdx.x][0][sm][sn] != 1){continue;}
-                totcounts += 1;
-                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn];
-            }
-
-            // Up
-            sn = n;
-            intlog = 0;
-            for(sm = m-1; sm >= 0; sm--){
-                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
-                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
-                intlog += -log[blockIdx.x][1][sm][sn];
-
-                if(depth_maskin[blockIdx.x][0][sm][sn] != 1){continue;}
-                totcounts += 1;
-                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn];
-            }
-
-            // Down
-            sn = n;
-            intlog = 0;
-            for(sm = m+1; sm < height; sm++){
-                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
-                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
-                intlog += log[blockIdx.x][1][sm-1][sn];
-
-                if(depth_maskin[blockIdx.x][0][sm][sn] != 1){continue;}
-                totcounts += 1;
-                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn];
-            }
-        }
-
-        if(totcounts > 0){
-            if (depth_maskin[blockIdx.x][0][m][n] == 1){
-                depth_optedout[blockIdx.x][0][m][n] = lambda * depthin[blockIdx.x][0][m][n] + (1 - lambda) * lateralre / totcounts;
-            }
-            else{
-                depth_optedout[blockIdx.x][0][m][n] = lateralre / totcounts;
-            }
-        }
-        else{
-            if (depth_maskin[blockIdx.x][0][m][n] == 1){
-                depth_optedout[blockIdx.x][0][m][n] = depthin[blockIdx.x][0][m][n];
-            }
-        }
-    }
-    return;
     }
 
 __global__ void shapeIntegration_crf_constrain_forward_cuda_kernel(
@@ -797,6 +774,44 @@ void shapeIntegration_crf_forward_cuda(
     return;
     }
 
+void shapeIntegration_crf_variance_forward_cuda(
+    torch::Tensor log,
+    torch::Tensor semantics,
+    torch::Tensor mask,
+    torch::Tensor variance,
+    torch::Tensor depthin,
+    torch::Tensor depth_optedin,
+    torch::Tensor depth_optedout,
+    torch::Tensor summedconfidence,
+    int height,
+    int width,
+    int bs,
+    float lambda,
+    float clipvariance,
+    float maxrange
+    ){
+      const int threads = 512;
+
+      shapeIntegration_crf_variance_forward_cuda_kernel<<<bs, threads>>>(
+            log.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            semantics.packed_accessor<int,4,torch::RestrictPtrTraits,size_t>(),
+            mask.packed_accessor<int,4,torch::RestrictPtrTraits,size_t>(),
+            variance.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            depthin.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            depth_optedin.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            depth_optedout.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            summedconfidence.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            height,
+            width,
+            bs,
+            lambda,
+            clipvariance,
+            maxrange
+            );
+
+    return;
+    }
+
 void shapeIntegration_crf_star_forward_cuda(
     torch::Tensor log,
     torch::Tensor semantics,
@@ -817,37 +832,6 @@ void shapeIntegration_crf_star_forward_cuda(
             mask.packed_accessor<int,4,torch::RestrictPtrTraits,size_t>(),
             depthin.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
             depth_optedin.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
-            depth_optedout.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
-            height,
-            width,
-            bs,
-            lambda
-            );
-    return;
-    }
-
-void shapeIntegration_crf_star_mask_forward_cuda(
-    torch::Tensor log,
-    torch::Tensor semantics,
-    torch::Tensor mask,
-    torch::Tensor depthin,
-    torch::Tensor depth_optedin,
-    torch::Tensor depth_maskin,
-    torch::Tensor depth_optedout,
-    int height,
-    int width,
-    int bs,
-    float lambda
-    ){
-      const int threads = 512;
-
-      shapeIntegration_crf_star_mask_forward_cuda_kernel<<<bs, threads>>>(
-            log.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
-            semantics.packed_accessor<int,4,torch::RestrictPtrTraits,size_t>(),
-            mask.packed_accessor<int,4,torch::RestrictPtrTraits,size_t>(),
-            depthin.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
-            depth_optedin.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
-            depth_maskin.packed_accessor<int,4,torch::RestrictPtrTraits,size_t>(),
             depth_optedout.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
             height,
             width,

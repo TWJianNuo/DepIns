@@ -75,6 +75,11 @@ class Trainer:
         fpath = os.path.join(os.getcwd(), "splits", self.opt.split, "{}_files.txt")
         val_filenames = readlines(fpath.format("test"))
 
+        nummax = 300
+        random.seed(0)
+        random.shuffle(val_filenames)
+        val_filenames = val_filenames[0:nummax]
+
         val_dataset = KittiDataset(
             self.opt.data_path, self.opt.gt_path, val_filenames, self.opt.height, self.opt.width,
             crph=self.opt.crph, crpw=self.opt.crpw, is_train=False
@@ -97,7 +102,7 @@ class Trainer:
         """
         self.set_eval()
 
-        modelnames = ['integration_semidense', 'integrationbs_semidense', 'intconstrain', 'intconstrainbs', 'intconstrain2', 'intconstrainbs2', 'intconstrain3', 'intconstrainbs3']
+        modelnames = ['intconstrainWallPoleBs', 'intconstrainWallPole', 'intconstrainWall', 'intconstrainPole', 'intconstrainPole2', 'intconstrainPole3', 'intconstrainPole4', 'intconstrainPole5']
 
         for k in range(len(modelnames)):
             vlsroot = os.path.join(self.opt.vlsfold, modelnames[k])

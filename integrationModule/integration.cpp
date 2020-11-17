@@ -16,26 +16,30 @@ void shapeIntegration_crf_forward_cuda(
     float lambda
     );
 
+void shapeIntegration_crf_variance_forward_cuda(
+    torch::Tensor log,
+    torch::Tensor semantics,
+    torch::Tensor mask,
+    torch::Tensor variance,
+    torch::Tensor depthin,
+    torch::Tensor depth_optedin,
+    torch::Tensor depth_optedout,
+    torch::Tensor summedconfidence,
+    int height,
+    int width,
+    int bs,
+    float lambda,
+    float clipvariance,
+    float maxrange
+    );
+
+
 void shapeIntegration_crf_star_forward_cuda(
     torch::Tensor log,
     torch::Tensor semantics,
     torch::Tensor mask,
     torch::Tensor depthin,
     torch::Tensor depth_optedin,
-    torch::Tensor depth_optedout,
-    int height,
-    int width,
-    int bs,
-    float lambda
-    );
-
-void shapeIntegration_crf_star_mask_forward_cuda(
-    torch::Tensor log,
-    torch::Tensor semantics,
-    torch::Tensor mask,
-    torch::Tensor depthin,
-    torch::Tensor depth_optedin,
-    torch::Tensor depth_maskin,
     torch::Tensor depth_optedout,
     int height,
     int width,
@@ -98,6 +102,34 @@ void shapeIntegration_crf_forward(
     return;
 }
 
+void shapeIntegration_crf_variance_forward(
+    torch::Tensor log,
+    torch::Tensor semantics,
+    torch::Tensor mask,
+    torch::Tensor variance,
+    torch::Tensor depthin,
+    torch::Tensor depth_optedin,
+    torch::Tensor depth_optedout,
+    torch::Tensor summedconfidence,
+    int height,
+    int width,
+    int bs,
+    float lambda,
+    float clipvariance,
+    float maxrange
+    ) {
+    CHECK_INPUT(log);
+    CHECK_INPUT(semantics);
+    CHECK_INPUT(mask);
+    CHECK_INPUT(variance);
+    CHECK_INPUT(depthin);
+    CHECK_INPUT(depth_optedin);
+    CHECK_INPUT(depth_optedout);
+    CHECK_INPUT(summedconfidence);
+    shapeIntegration_crf_variance_forward_cuda(log, semantics, mask, variance, depthin, depth_optedin, depth_optedout, summedconfidence, height, width, bs, lambda, clipvariance, maxrange);
+    return;
+}
+
 void shapeIntegration_crf_star_forward(
     torch::Tensor log,
     torch::Tensor semantics,
@@ -117,30 +149,6 @@ void shapeIntegration_crf_star_forward(
     CHECK_INPUT(depth_optedin);
     CHECK_INPUT(depth_optedout);
     shapeIntegration_crf_star_forward_cuda(log, semantics, mask, depthin, depth_optedin, depth_optedout, height, width, bs, lambda);
-    return;
-}
-
-void shapeIntegration_crf_star_mask_forward(
-    torch::Tensor log,
-    torch::Tensor semantics,
-    torch::Tensor mask,
-    torch::Tensor depthin,
-    torch::Tensor depth_optedin,
-    torch::Tensor depth_maskin,
-    torch::Tensor depth_optedout,
-    int height,
-    int width,
-    int bs,
-    float lambda
-    ) {
-    CHECK_INPUT(log);
-    CHECK_INPUT(semantics);
-    CHECK_INPUT(mask);
-    CHECK_INPUT(depthin);
-    CHECK_INPUT(depth_optedin);
-    CHECK_INPUT(depth_maskin);
-    CHECK_INPUT(depth_optedout);
-    shapeIntegration_crf_star_mask_forward_cuda(log, semantics, mask, depthin, depth_optedin, depth_maskin, depth_optedout, height, width, bs, lambda);
     return;
 }
 
@@ -186,10 +194,11 @@ void shapeIntegration_crf_constrain_backward(
     shapeIntegration_crf_constrain_backward_cuda(log, semantics, mask, depthin, counts, constraingradin, constraingradout, height, width, bs);
     return;
 }
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("shapeIntegration_crf_forward", &shapeIntegration_crf_forward, "crf based shape integration forward function");
+  m.def("shapeIntegration_crf_variance_forward", &shapeIntegration_crf_variance_forward, "crf based shape integration with confidence forward function");
   m.def("shapeIntegration_crf_star_forward", &shapeIntegration_crf_star_forward, "crf based shape star integration forward function");
-  m.def("shapeIntegration_crf_star_mask_forward", &shapeIntegration_crf_star_mask_forward, "crf based shape star integration with mask forward function");
   m.def("shapeIntegration_crf_constrain_forward", &shapeIntegration_crf_constrain_forward, "crf based shape integration constrain forward function");
   m.def("shapeIntegration_crf_constrain_backward", &shapeIntegration_crf_constrain_backward, "crf based shape integration constrain backward function");
 }

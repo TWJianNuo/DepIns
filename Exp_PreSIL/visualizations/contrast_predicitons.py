@@ -69,6 +69,10 @@ class Trainer:
         fpath = os.path.join(os.getcwd(), "splits", self.opt.split, "{}_files.txt")
         val_filenames = readlines(fpath.format("test"))
 
+        nummax = 300
+        random.seed(0)
+        random.shuffle(val_filenames)
+        val_filenames = val_filenames[0:nummax]
         val_dataset = KittiDataset(
             self.opt.data_path, self.opt.gt_path, val_filenames, self.opt.height, self.opt.width,
             crph=self.opt.crph, crpw=self.opt.crpw, is_train=False
@@ -91,7 +95,7 @@ class Trainer:
         """
         self.set_eval()
 
-        modelnames = ['integration_semidense', 'integrationbs_semidense', 'intconstrain', 'intconstrainbs', 'intconstrain2', 'intconstrainbs2', 'intconstrain3', 'intconstrainbs3']
+        modelnames = ['intconstrainWallPoleBs', 'intconstrainPole', 'intconstrainWall', 'intconstrainWallPole', 'intconstrainPole2', 'intconstrainPole4', 'intconstrainPole3', 'intconstrainPole5']
 
         vlsroot = os.path.join(self.opt.vlsfold, 'vls')
         os.makedirs(vlsroot, exist_ok=True)
@@ -110,6 +114,7 @@ class Trainer:
             imgl = np.concatenate(imgs[0::2], axis=0)
             imgr = np.concatenate(imgs[1::2], axis=0)
             imgvls = np.concatenate([imgl, imgr], axis=1)
+            # imgvls = np.concatenate(imgs, axis=0)
             pil.fromarray(imgvls).save(os.path.join(vlsroot, figname))
 
 
