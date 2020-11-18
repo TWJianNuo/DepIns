@@ -47,6 +47,7 @@ parser.add_argument("--lam",                    type=float,   default=0.05)
 parser.add_argument("--inttimes",               type=int,     default=1)
 parser.add_argument("--clipvariance",           type=float,   default=5)
 parser.add_argument("--maxrange",               type=float,   default=100)
+parser.add_argument("--startepochs",            type=int,     default=1)
 
 # OPTIMIZATION options
 parser.add_argument("--batch_size",             type=int,   default=12,                 help="batch size")
@@ -279,7 +280,10 @@ class Trainer:
 
         vallidarmask = (inputs['depthgt'] > 0).float()
         for scale in range(4):
-            pred_depth_integrated = self.crfintmodule(pred_log, semanticspred, semanedgemask, outputs[('pred_variance', scale)], outputs[('pred_depth', scale)], times=self.opt.inttimes)
+            if self.epoch >= self.opt.startepochs:
+                pred_depth_integrated = self.crfintmodule(pred_log, semanticspred, semanedgemask, outputs[('pred_variance', scale)], outputs[('pred_depth', scale)], times=self.opt.inttimes)
+            else:
+                pred_depth_integrated = outputs[('pred_depth', scale)]
             outputs[('pred_depth_integrated', scale)] = pred_depth_integrated
 
             depthloss += torch.sum(torch.abs(outputs[('pred_depth_integrated', scale)] - inputs['depthgt']) * vallidarmask) / (torch.sum(vallidarmask) + 1)
