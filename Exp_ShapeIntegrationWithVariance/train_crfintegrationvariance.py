@@ -377,7 +377,7 @@ class Trainer:
 
         figd1 = tensor2disp(1 / outputs[('pred_depth', 0)], vmax=0.25, ind=vind)
         figd2 = tensor2disp(1 / outputs[('pred_depth_integrated', 0)], vmax=0.25, ind=vind)
-        figd3 = tensor2disp(1 / outputs[('pred_variance', 0)], vmax=1, ind=vind)
+        figd3 = tensor2disp(1 / outputs[('variance', 0)], vmax=1, ind=vind)
         figmask = tensor2disp(outputs['semanedgemask'], vmax=1, ind=vind)
 
         surfnorm = self.sfnormOptimizer.depth2norm(outputs[('pred_depth_integrated', 0)], intrinsic=inputs['K'])
