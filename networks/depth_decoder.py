@@ -47,7 +47,6 @@ class DepthDecoder(nn.Module):
         self.decoder = nn.ModuleList(list(self.convs.values()))
         self.sigmoid = nn.Sigmoid()
 
-
     def forward(self, input_features, trainOrder = False):
         self.outputs = {}
 
@@ -69,17 +68,21 @@ class DepthDecoder(nn.Module):
 
         return self.outputs
 
-class ConfidenceDecoder(nn.Module):
-    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_skips=True):
-        super(ConfidenceDecoder, self).__init__()
+class MultiModalityDecoder(nn.Module):
+    def __init__(self, num_ch_enc, modalities=['depth', 'variance'], nchannelout=[1, 1], additionalblocks=1):
+        super(MultiModalityDecoder, self).__init__()
 
-        self.num_output_channels = num_output_channels
-        self.use_skips = use_skips
+        assert len(modalities) == len(nchannelout)
+        assert additionalblocks >= 0
+        self.modalities = modalities
+        self.nchannelout = nchannelout
         self.upsample_mode = 'nearest'
-        self.scales = scales
+        self.scales = range(4)
+        self.additionalblocks = additionalblocks
 
         self.num_ch_enc = num_ch_enc
-        self.num_ch_dec = np.array([16, 32, 64, 128, 256])
+        # self.num_ch_dec = np.array([16, 32, 64, 128, 256])
+        self.num_ch_dec = np.array([24, 48, 96, 192, 384])
 
         # decoder
         self.convs = OrderedDict()
@@ -91,20 +94,21 @@ class ConfidenceDecoder(nn.Module):
 
             # upconv_1
             num_ch_in = self.num_ch_dec[i]
-            if self.use_skips and i > 0:
+            if i > 0:
                 num_ch_in += self.num_ch_enc[i - 1]
             num_ch_out = self.num_ch_dec[i]
             self.convs[("upconv", i, 1)] = ConvBlock(num_ch_in, num_ch_out)
 
-        for s in self.scales:
-            self.convs[("dispconv", s)] = Conv3x3(self.num_ch_dec[s], self.num_output_channels)
-
+        for idx, modality in enumerate(self.modalities):
+            for s in self.scales:
+                for k in range(self.additionalblocks):
+                    self.convs[(modality, s, k)] = ConvBlock(self.num_ch_dec[s], self.num_ch_dec[s])
+                self.convs[(modality, s)] = Conv3x3(self.num_ch_dec[s], self.nchannelout[idx])
 
         self.decoder = nn.ModuleList(list(self.convs.values()))
         self.sigmoid = nn.Sigmoid()
 
-
-    def forward(self, input_features, trainOrder = False):
+    def forward(self, input_features):
         self.outputs = {}
 
         # decoder
@@ -112,11 +116,15 @@ class ConfidenceDecoder(nn.Module):
         for i in range(4, -1, -1):
             x = self.convs[("upconv", i, 0)](x)
             x = [upsample(x)]
-            if self.use_skips and i > 0:
+            if i > 0:
                 x += [input_features[i - 1]]
             x = torch.cat(x, 1)
             x = self.convs[("upconv", i, 1)](x)
             if i in self.scales:
-                self.outputs[('confidence', i)] = self.sigmoid(self.convs[("dispconv", i)](x))
+                for idx, modality in enumerate(self.modalities):
+                    xmodality = x.clone()
+                    for k in range(self.additionalblocks):
+                        xmodality = self.convs[(modality, i, k)](xmodality)
+                    self.outputs[(modality, i)] = self.sigmoid(self.convs[(modality, i)](xmodality))
 
         return self.outputs

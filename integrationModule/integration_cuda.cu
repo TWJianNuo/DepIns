@@ -105,14 +105,12 @@ __global__ void shapeIntegration_crf_variance_forward_cuda_kernel(
     const torch::PackedTensorAccessor<int,4,torch::RestrictPtrTraits,size_t> semantics,
     const torch::PackedTensorAccessor<int,4,torch::RestrictPtrTraits,size_t> mask,
     const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> variance,
-    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> depthin,
     const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> depth_optedin,
     torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> depth_optedout,
     torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> summedconfidence,
     const int height,
     const int width,
     const int bs,
-    const float lambda,
     const float clipvariance,
     const float maxrange
     ) {
@@ -122,8 +120,6 @@ __global__ void shapeIntegration_crf_variance_forward_cuda_kernel(
 
     int sm;
     int sn;
-
-    float lateralre;
 
     float intlog;
     float intvariance;
@@ -136,7 +132,6 @@ __global__ void shapeIntegration_crf_variance_forward_cuda_kernel(
         n = i - m * width;
 
         semancat = semantics[blockIdx.x][0][m][n];
-        lateralre = 0;
 
         if(mask[blockIdx.x][0][m][n] == 1){
             intexpvariance = 0;
@@ -202,7 +197,7 @@ __global__ void shapeIntegration_crf_variance_forward_cuda_kernel(
                 if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
                 intlog += -log[blockIdx.x][0][sm][sn];
                 intvariance += variance[blockIdx.x][0][sm][sn];
-                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
+                depth_optedout[blockIdx.x][0][m][n] += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
             }
 
             // Right
@@ -216,7 +211,7 @@ __global__ void shapeIntegration_crf_variance_forward_cuda_kernel(
                 if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
                 intlog += log[blockIdx.x][0][sm][sn-1];
                 intvariance += variance[blockIdx.x][0][sm][sn];
-                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
+                depth_optedout[blockIdx.x][0][m][n] += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
             }
 
             // Up
@@ -230,7 +225,7 @@ __global__ void shapeIntegration_crf_variance_forward_cuda_kernel(
                 if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
                 intlog += -log[blockIdx.x][1][sm][sn];
                 intvariance += variance[blockIdx.x][0][sm][sn];
-                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
+                depth_optedout[blockIdx.x][0][m][n] += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
             }
 
             // Down
@@ -244,15 +239,200 @@ __global__ void shapeIntegration_crf_variance_forward_cuda_kernel(
                 if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
                 intlog += log[blockIdx.x][1][sm-1][sn];
                 intvariance += variance[blockIdx.x][0][sm][sn];
-                lateralre += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
+                depth_optedout[blockIdx.x][0][m][n] += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance) / intexpvariance;
             }
         }
 
-        if(lateralre > 0){
-            depth_optedout[blockIdx.x][0][m][n] = lambda * depthin[blockIdx.x][0][m][n] + (1 - lambda) * lateralre;
-        }
-        else{
-            depth_optedout[blockIdx.x][0][m][n] = depthin[blockIdx.x][0][m][n];
+    }
+    return;
+
+    }
+
+__global__ void shapeIntegration_crf_variance_backward_cuda_kernel(
+    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> log,
+    const torch::PackedTensorAccessor<int,4,torch::RestrictPtrTraits,size_t> semantics,
+    const torch::PackedTensorAccessor<int,4,torch::RestrictPtrTraits,size_t> mask,
+    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> variance,
+    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> depth_optedin,
+    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> depth_optedout,
+    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> summedconfidence,
+    const torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> grad_depthin,
+    torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> grad_varianceout,
+    torch::PackedTensorAccessor<float,4,torch::RestrictPtrTraits,size_t> grad_depthout,
+    const int height,
+    const int width,
+    const int bs,
+    const float clipvariance,
+    const float maxrange
+    ) {
+
+    int m;
+    int n;
+
+    int sm;
+    int sn;
+
+    float intlog;
+    float intvariance;
+    float intexpvariance;
+    float lateralre;
+
+    float sdirintexpvariance;
+    float sdirintweighteddepth;
+    float cursdirintexpvariance;
+    float cursdirweighteddepth;
+
+    int semancat;
+
+    for(int i = threadIdx.x; i < height * width; i = i + blockDim.x){
+        m = i / width;
+        n = i - m * width;
+
+        semancat = semantics[blockIdx.x][0][m][n];
+
+        if(mask[blockIdx.x][0][m][n] == 1){
+            intexpvariance = summedconfidence[blockIdx.x][0][m][n];
+            lateralre = depth_optedout[blockIdx.x][0][m][n];
+
+            // Left
+            sm = m;
+            intlog = 0;
+            intvariance = 0;
+            sdirintexpvariance = 0;
+            sdirintweighteddepth = 0;
+            for(sn = n-1; sn >= 0; sn--){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(n - sn > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += -log[blockIdx.x][0][sm][sn];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                sdirintexpvariance += exp(-intvariance);
+                sdirintweighteddepth += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance);
+            }
+            intlog = 0;
+            intvariance = 0;
+            cursdirintexpvariance = 0;
+            cursdirweighteddepth = 0;
+            for(sn = n-1; sn >= 0; sn--){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(n - sn > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += -log[blockIdx.x][0][sm][sn];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+
+                atomicAdd((float*)&grad_varianceout[blockIdx.x][0][sm][sn], grad_depthin[blockIdx.x][0][m][n] * ((sdirintexpvariance - cursdirintexpvariance) / intexpvariance * lateralre - (sdirintweighteddepth - cursdirweighteddepth) / intexpvariance));
+                cursdirintexpvariance += exp(-intvariance);
+                cursdirweighteddepth += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance);
+
+                atomicAdd((float*)&grad_depthout[blockIdx.x][0][sm][sn], grad_depthin[blockIdx.x][0][m][n] * exp(-intlog) * exp(-intvariance) / intexpvariance);
+            }
+
+            // Right
+            sm = m;
+            intlog = 0;
+            intvariance = 0;
+            sdirintexpvariance = 0;
+            sdirintweighteddepth = 0;
+            for(sn = n+1; sn < width; sn++){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(sn - n > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += log[blockIdx.x][0][sm][sn-1];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                sdirintexpvariance += exp(-intvariance);
+                sdirintweighteddepth += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance);
+            }
+            intlog = 0;
+            intvariance = 0;
+            cursdirintexpvariance = 0;
+            cursdirweighteddepth = 0;
+            for(sn = n+1; sn < width; sn++){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(sn - n > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += log[blockIdx.x][0][sm][sn-1];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+
+                atomicAdd((float*)&grad_varianceout[blockIdx.x][0][sm][sn], grad_depthin[blockIdx.x][0][m][n] * ((sdirintexpvariance - cursdirintexpvariance) / intexpvariance * lateralre - (sdirintweighteddepth - cursdirweighteddepth) / intexpvariance));
+                cursdirintexpvariance += exp(-intvariance);
+                cursdirweighteddepth += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance);
+
+                atomicAdd((float*)&grad_depthout[blockIdx.x][0][sm][sn], grad_depthin[blockIdx.x][0][m][n] * exp(-intlog) * exp(-intvariance) / intexpvariance);
+            }
+
+            // Up
+            sn = n;
+            intlog = 0;
+            intvariance = 0;
+            sdirintexpvariance = 0;
+            sdirintweighteddepth = 0;
+            for(sm = m-1; sm >= 0; sm--){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(m - sm > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += -log[blockIdx.x][1][sm][sn];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                sdirintexpvariance += exp(-intvariance);
+                sdirintweighteddepth += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance);
+            }
+            intlog = 0;
+            intvariance = 0;
+            cursdirintexpvariance = 0;
+            cursdirweighteddepth = 0;
+            for(sm = m-1; sm >= 0; sm--){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(m - sm > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += -log[blockIdx.x][1][sm][sn];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+
+                atomicAdd((float*)&grad_varianceout[blockIdx.x][0][sm][sn], grad_depthin[blockIdx.x][0][m][n] * ((sdirintexpvariance - cursdirintexpvariance) / intexpvariance * lateralre - (sdirintweighteddepth - cursdirweighteddepth) / intexpvariance));
+                cursdirintexpvariance += exp(-intvariance);
+                cursdirweighteddepth += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance);
+
+                atomicAdd((float*)&grad_depthout[blockIdx.x][0][sm][sn], grad_depthin[blockIdx.x][0][m][n] * exp(-intlog) * exp(-intvariance) / intexpvariance);
+            }
+
+            // Down
+            sn = n;
+            intlog = 0;
+            intvariance = 0;
+            sdirintexpvariance = 0;
+            sdirintweighteddepth = 0;
+            for(sm = m+1; sm < height; sm++){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(sm - m > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += log[blockIdx.x][1][sm-1][sn];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+                sdirintexpvariance += exp(-intvariance);
+                sdirintweighteddepth += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance);
+            }
+            intlog = 0;
+            intvariance = 0;
+            cursdirintexpvariance = 0;
+            cursdirweighteddepth = 0;
+            for(sm = m+1; sm < height; sm++){
+                if(semantics[blockIdx.x][0][sm][sn] != semancat){break;}
+                if(mask[blockIdx.x][0][sm][sn] != 1){break;}
+                if(sm - m > maxrange){break;}
+                if(intvariance + variance[blockIdx.x][0][sm][sn] > clipvariance){break;}
+                intlog += log[blockIdx.x][1][sm-1][sn];
+                intvariance += variance[blockIdx.x][0][sm][sn];
+
+                atomicAdd((float*)&grad_varianceout[blockIdx.x][0][sm][sn], grad_depthin[blockIdx.x][0][m][n] * ((sdirintexpvariance - cursdirintexpvariance) / intexpvariance * lateralre - (sdirintweighteddepth - cursdirweighteddepth) / intexpvariance));
+                cursdirintexpvariance += exp(-intvariance);
+                cursdirweighteddepth += exp(-intlog) * depth_optedin[blockIdx.x][0][sm][sn] * exp(-intvariance);
+
+                atomicAdd((float*)&grad_depthout[blockIdx.x][0][sm][sn], grad_depthin[blockIdx.x][0][m][n] * exp(-intlog) * exp(-intvariance) / intexpvariance);
+            }
         }
 
     }
@@ -779,14 +959,12 @@ void shapeIntegration_crf_variance_forward_cuda(
     torch::Tensor semantics,
     torch::Tensor mask,
     torch::Tensor variance,
-    torch::Tensor depthin,
     torch::Tensor depth_optedin,
     torch::Tensor depth_optedout,
     torch::Tensor summedconfidence,
     int height,
     int width,
     int bs,
-    float lambda,
     float clipvariance,
     float maxrange
     ){
@@ -797,14 +975,52 @@ void shapeIntegration_crf_variance_forward_cuda(
             semantics.packed_accessor<int,4,torch::RestrictPtrTraits,size_t>(),
             mask.packed_accessor<int,4,torch::RestrictPtrTraits,size_t>(),
             variance.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
-            depthin.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
             depth_optedin.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
             depth_optedout.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
             summedconfidence.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
             height,
             width,
             bs,
-            lambda,
+            clipvariance,
+            maxrange
+            );
+
+    return;
+    }
+
+void shapeIntegration_crf_variance_backward_cuda(
+    torch::Tensor log,
+    torch::Tensor semantics,
+    torch::Tensor mask,
+    torch::Tensor variance,
+    torch::Tensor depth_optedin,
+    torch::Tensor depth_optedout,
+    torch::Tensor summedconfidence,
+    torch::Tensor grad_depthin,
+    torch::Tensor grad_varianceout,
+    torch::Tensor grad_depthout,
+    int height,
+    int width,
+    int bs,
+    float clipvariance,
+    float maxrange
+    ){
+      const int threads = 512;
+
+      shapeIntegration_crf_variance_backward_cuda_kernel<<<bs, threads>>>(
+            log.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            semantics.packed_accessor<int,4,torch::RestrictPtrTraits,size_t>(),
+            mask.packed_accessor<int,4,torch::RestrictPtrTraits,size_t>(),
+            variance.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            depth_optedin.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            depth_optedout.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            summedconfidence.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            grad_depthin.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            grad_varianceout.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            grad_depthout.packed_accessor<float,4,torch::RestrictPtrTraits,size_t>(),
+            height,
+            width,
+            bs,
             clipvariance,
             maxrange
             );

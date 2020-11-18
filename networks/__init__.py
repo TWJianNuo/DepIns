@@ -1,2 +1,2 @@
 from .resnet_encoder import ResnetEncoder
-from .depth_decoder import DepthDecoder, ConfidenceDecoder
+from .depth_decoder import DepthDecoder, MultiModalityDecoder

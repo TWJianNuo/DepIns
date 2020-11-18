@@ -1,1 +1,1 @@
-from .integration import IntegrationFunction, IntegrationConstrainFunction
+from .integration import IntegrationCRFFunction, IntegrationConstrainFunction, CRFIntegrationModule
