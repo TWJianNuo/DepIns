@@ -252,7 +252,7 @@ class Trainer:
             pred_depth = pred_depth * self.STEREO_SCALE_FACTOR
             outputs[('pred_depth', scale)] = pred_depth
 
-            pred_variance = F.interpolate(outputs[('variance', scale)], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True) * (self.opt.maxrange + 1)
+            pred_variance = F.interpolate(outputs[('variance', scale)], [self.opt.crph, self.opt.crpw], mode='bilinear', align_corners=True) * (self.opt.clipvariance + 1)
             outputs[('pred_variance', scale)] = pred_variance
 
         pred_ang = torch.cat([inputs['angh'], inputs['angv']], dim=1).contiguous()
