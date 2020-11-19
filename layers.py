@@ -1854,12 +1854,20 @@ class SurfaceNormalOptimizer(nn.Module):
         u3 = torch.sin(angv)
         v3 = -torch.cos(angv)
 
+        low_angh = torch.atan2(-a1, b1)
+        high_angh = torch.atan2(a2, -b2)
+        low_angv = torch.atan2(-u1, v1)
+        high_angv = torch.atan2(u2, -v2)
+
+        outboundh = ((angh > high_angh) * (angh < low_angh)).unsqueeze(1)
+        outboundv = ((angv > high_angv) * (angv < low_angv)).unsqueeze(1)
+
         logh = torch.log(torch.clamp(torch.abs(a3 * b1 - a1 * b3), min=protectmin)) - torch.log(torch.clamp(torch.abs(a3 * b2 - a2 * b3), min=protectmin))
         logv = torch.log(torch.clamp(torch.abs(u3 * v1 - u1 * v3), min=protectmin)) - torch.log(torch.clamp(torch.abs(u3 * v2 - u2 * v3), min=protectmin))
         logh = logh.unsqueeze(1)
         logv = logv.unsqueeze(1)
 
-        edge = (torch.abs(logh) > 0.1) + (torch.abs(logv) > 0.1)
+        edge = (torch.abs(logh) > 0.05) + (torch.abs(logv) > 0.05) + outboundh + outboundv
         edge = edge.int()
         # tensor2disp(torch.abs(logh) > 0.1, vmax=0.1, ind=0).show()
         # tensor2disp(torch.abs(logv) > 0.1, vmax=0.1, ind=0).show()

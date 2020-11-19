@@ -48,6 +48,8 @@ parser.add_argument("--inttimes",               type=int,     default=1)
 parser.add_argument("--clipvariance",           type=float,   default=5)
 parser.add_argument("--maxrange",               type=float,   default=100)
 parser.add_argument("--startepochs",            type=int,     default=1)
+parser.add_argument("--bansemantics",           action="store_true")
+parser.add_argument("--banground",              action="store_true")
 
 # OPTIMIZATION options
 parser.add_argument("--batch_size",             type=int,   default=12,                 help="batch size")
@@ -261,7 +263,11 @@ class Trainer:
         normfromang = self.sfnormOptimizer.ang2normal(ang=pred_ang, intrinsic=inputs['K'])
         singularnorm = self.sfnormOptimizer.ang2edge(ang=pred_ang, intrinsic=inputs['K'])
 
-        semanticspred = inputs['semanticspred'].int().contiguous()
+        if not self.opt.bansemantics:
+            semanticspred = inputs['semanticspred'].int().contiguous()
+        else:
+            semanticspred = torch.ones_like(inputs['depthgt']).int().contiguous()
+
         semanedgemask = torch.ones_like(semanticspred)
 
         # exclude the top area
@@ -270,8 +276,9 @@ class Trainer:
         # exclude distant places
         semanedgemask = semanedgemask * (outputs[('pred_depth', 0)] < 30).int()
 
-        # exclude up normal
-        semanedgemask = semanedgemask * (normfromang[:, 1, :, :].unsqueeze(1) < 0.8).int()
+        if not self.opt.banground:
+            # exclude up normal
+            semanedgemask = semanedgemask * (normfromang[:, 1, :, :].unsqueeze(1) < 0.8).int()
 
         # exclup singular value of the normal
         semanedgemask = semanedgemask * (1 - singularnorm).int()
