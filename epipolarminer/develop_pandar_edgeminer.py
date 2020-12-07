@@ -97,7 +97,7 @@ def edgeminer(depthmap, intrinsic, bsmvrec, h, w, sr):
                                     bsmvrec[m, n] = bsmv
 
 datasetname = 'pandarset'
-datasetroot = '/media/shengjie/disk1/data/padaset'
+datasetroot = '/media/shengjie/disk1/data/pandarset'
 vlsroot = '/media/shengjie/disk1/visualization/pandaset_lidarcalibrated'
 
 datasets = {'pandarset': PandarSet}

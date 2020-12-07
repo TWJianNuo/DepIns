@@ -1071,7 +1071,6 @@ class ImageWeightComputer(nn.Module):
         # tensor2disp(angvw, vmax=1, ind=0).show()
         return anghw, angvw
 
-
 class SurfaceNormalOptimizer(nn.Module):
     def __init__(self, height, width, batch_size, angw=1e-6, vlossw=0.2, sclw=0):
         super(SurfaceNormalOptimizer, self).__init__()

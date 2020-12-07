@@ -13,12 +13,14 @@ import matlab.engine
 from utils import *
 import numba
 from numba import jit, prange
+from epipolarminer.icp import icp
 
 
 positions = np.array([0.006250, -0.246875, -0.825000])
+# positions = np.array([0.006250, -0.246875, -0.325000])
 directions = np.zeros([3])
 epspos = 0.1
-
+stopflag = False
 def press(event):
     # print('press', event.key)
     # sys.stdout.flush()
@@ -39,6 +41,8 @@ def press(event):
         epspos = epspos * 2
     elif event.key == '-':
         epspos = epspos / 2
+    elif event.key == 'q':
+        stopflag = True
     print('x: %f, y: %f, z: %f' % (positions[0], positions[1], positions[2]))
     return
 
@@ -71,29 +75,26 @@ def getrotM(dirs, pos):
 
 datasetname = 'pandarset'
 datasetroot = '/media/shengjie/disk1/data/pandarset'
-vlsroot = '/media/shengjie/disk1/visualization/pandaset_lidarcalibrated'
+vlsroot = '/media/shengjie/disk1/visualization/pandarset_vls'
 rawlidarroot = '/media/shengjie/disk1/data/pandarset/rawlidarscan'
 
 datasets = {'pandarset': PandarSet}
 lidarname = 'solidlidar'
 camname = 'front_camera'
-loaded_dataset = datasets[datasetname](datasetroot, rawlidarroot)
+loaded_dataset = datasets[datasetname](datasetroot, None)
 loader = data.DataLoader(loaded_dataset, 1, shuffle=False, num_workers=0, pin_memory=False, drop_last=False)
 
 do_calibration = True
-do_visualization = False
+do_visualization = True
 
-for batch_idx, inputs in enumerate(loader):
-    lidardata = inputs[lidarname].numpy()[0]
-    intrinsic = inputs[camname]['intrinsic'].numpy()[0]
-    extrinsic = inputs[camname]['extrinsic'].numpy()[0]
-    rgbarr = inputs[camname]['rgbarr'].numpy()[0]
+for batch_idx in range(loader.dataset.__len__()):
+    # batch_idx = 20
+    inputs = loader.dataset.__getitem__(batch_idx)
 
-    # rawsweeplidar = inputs['rawlidar'].numpy()[0]
-    # rawsweeplidar = np.concatenate([rawsweeplidar, np.ones([rawsweeplidar.shape[0], 1])], axis=1).T
-    # rawsweeplidar_wolrd = inputs['sweeplidar'].numpy()[0]
-    # rawsweeplidar_wolrd = np.concatenate([rawsweeplidar_wolrd, np.ones([rawsweeplidar_wolrd.shape[0], 1])], axis=1).T
-    # t_world_sweeplidar = rawsweeplidar @ rawsweeplidar_wolrd.T @ np.linalg.inv(rawsweeplidar_wolrd @ rawsweeplidar_wolrd.T)
+    lidardata = inputs[lidarname]
+    intrinsic = inputs[camname]['intrinsic']
+    extrinsic = inputs[camname]['extrinsic']
+    rgbarr = inputs[camname]['rgbarr']
 
     lidardata_catones = np.concatenate([lidardata, np.ones([lidardata.shape[0], 1])], axis=1)
 
@@ -117,23 +118,36 @@ for batch_idx, inputs in enumerate(loader):
     distances = lidar_camcoord_projected[:, 2]
     colors = cm.jet(1 / distances * 10)
 
-    import matlab
-    import matlab.engine
+    # rawsweeplidar = inputs['rawlidar']
+    # rawsweeplidar = np.concatenate([rawsweeplidar, np.ones([rawsweeplidar.shape[0], 1])], axis=1).T
+    # rawsweeplidar_wolrd = inputs['sweeplidar']
+    # rawsweeplidar_wolrd = np.concatenate([rawsweeplidar_wolrd, np.ones([rawsweeplidar_wolrd.shape[0], 1])], axis=1).T
+    # t_world_sweeplidar, distances, _ = icp(rawsweeplidar_wolrd[0:3, :].T, rawsweeplidar[0:3, :].T, max_iterations=200)
+    # cvt_rawsweeplidar_wolrd = t_world_sweeplidar @ rawsweeplidar_wolrd
+    # err = np.sqrt(np.sum((t_world_sweeplidar @ rawsweeplidar_wolrd - rawsweeplidar)[0:3, :] ** 2, axis=0)).mean()
 
-    eng = matlab.engine.start_matlab()
+    # import matlab
+    # import matlab.engine
+    #
+    # eng = matlab.engine.start_matlab()
+    # vlszero = matlab.double(np.zeros([1]).tolist())
+    #
+    # vlsx = matlab.double(lidardata[:, 0].tolist())
+    # vlsy = matlab.double(lidardata[:, 1].tolist())
+    # vlsz = matlab.double((-lidardata[:, 2]).tolist())
+    #
+    # eng.eval('figure()', nargout=0)
+    # eng.scatter3(vlsx, vlsy, vlsz, 1, 'filled', nargout=0)
+    # eng.eval('hold on', nargout=0)
+    # eng.scatter3(vlszero, vlszero, vlszero, 10, 'filled', 'r', nargout=0)
+    # eng.eval('axis equal', nargout=0)
+    #
+    # sampledIndex = int(np.random.randint(0, rawsweeplidar.shape[1] - 2, 1))
+    # vlsxr = matlab.double(rawsweeplidar[0, :].tolist())
+    # vlsyr = matlab.double(rawsweeplidar[1, :].tolist())
+    # vlszr = matlab.double(rawsweeplidar[2, :].tolist())
 
-    vlsx = matlab.double(lidardata[:, 0].tolist())
-    vlsy = matlab.double(lidardata[:, 1].tolist())
-    vlsz = matlab.double((-lidardata[:, 2]).tolist())
-
-    vlszero = matlab.double(np.zeros([1]).tolist())
-
-    eng.eval('figure()', nargout=0)
-    eng.scatter3(vlsx, vlsy, vlsz, 1, 'filled', nargout=0)
-    eng.eval('hold on', nargout=0)
-    eng.scatter3(vlszero, vlszero, vlszero, 10, 'filled', 'r', nargout=0)
-    eng.eval('axis equal', nargout=0)
-
+    stopflag = False
     if do_calibration:
         plt.ion()
         fig, ax = plt.subplots()
@@ -153,7 +167,10 @@ for batch_idx, inputs in enumerate(loader):
             sc.set_offsets(lidar_camcoord_projected[:, 0:2])
             fig.canvas.draw_idle()
             plt.pause(0.1)
-        plt.waitforbuttonpress()
+            if stopflag is False:
+                break
+        # plt.waitforbuttonpress()
+        plt.close()
 
     if do_visualization:
         fig, ax = plt.subplots(figsize=(20, 12))
@@ -162,15 +179,20 @@ for batch_idx, inputs in enumerate(loader):
         plt.ylim([h, 0])
 
         seqstr, framestr = loaded_dataset.filenames[batch_idx].split(' ')
-        figname = "{}_{}.png".format(seqstr, framestr)
-        plt.savefig(os.path.join(vlsroot, figname))
+        os.makedirs(os.path.join(vlsroot, 'lidarview', seqstr), exist_ok=True)
+        figname = "{}.jpg".format(os.path.join(vlsroot, 'lidarview', seqstr, framestr))
+        plt.savefig(figname)
         plt.close()
 
-    # # Validate solid lidar
-    plt.figure()
+    # Validate solid lidar
+    os.makedirs(os.path.join(vlsroot, 'cameraview', seqstr), exist_ok=True)
+    figname = "{}.jpg".format(os.path.join(vlsroot, 'cameraview', seqstr, framestr))
+    plt.figure(figsize=(20, 12))
     plt.imshow(pil.fromarray(rgbarr))
     distances = projectedptsval[:, 2]
     colors = cm.jet(1 / distances * 10)
     plt.gca().scatter(projectedptsval[:, 0], projectedptsval[:, 1], color=colors, s=0.5)
     plt.xlim([0, w])
     plt.ylim([h, 0])
+    plt.savefig(figname)
+    plt.close()
